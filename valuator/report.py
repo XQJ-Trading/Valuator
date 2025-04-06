@@ -6,6 +6,7 @@ from functools import wraps
 from dotenv import load_dotenv
 
 from langchain_community.chat_models import ChatPerplexity
+from langchain_openai import ChatOpenAI
 
 from config import *
 
@@ -104,7 +105,11 @@ def log_full_report():
 
 ##############################################################################################################################
 
-llm = None
+class LLMZoo:
+    pplx =  None
+    gpt4o = None
+
+llm = LLMZoo()
 
 def template(parameter1, parameter2):
     instruction = r"""asdf"""
@@ -112,7 +117,7 @@ def template(parameter1, parameter2):
     parameter2: {parameter2}
     instruction: {instruction}
     """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 
 @log_step_to_html()
@@ -125,7 +130,7 @@ Business 3 : [Segment Name]
 ...
 
 Ensure that each segment name is concise (1–2 words) and that your response follows this numbered format exactly"""
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 @log_step_to_html()
 def segment_revenue_calculator(segment_format):
@@ -141,7 +146,7 @@ Segment Name n: [Calculated Revenue Amount]
 
 Ensure that each revenue amount is accurately calculated based on the provided percentages and that the results are formatted exactly as shown above."
 """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 
 @log_step_to_html()
@@ -159,7 +164,7 @@ Segment Name 3: [Estimated Growth Rate]%
 
 Note: If specific growth rates are not directly provided in the documents, make logical assumptions based on industry trends and historical data to estimate the growth rates for each segment.
     """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 
 @log_step_to_html()
@@ -186,7 +191,7 @@ def revenue_forecaster(growth_rate, revenue_breakdown, arxiv_result):
     arxiv_result: {arxiv_result}
     instruction: {instruction}
     """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 
 @log_step_to_html()
@@ -215,7 +220,7 @@ Note: If specific operating profit margins for each segment are not provided, ma
     prompt = f"""revenue_breakdown: {revenue_breakdown}
     instruction: {instruction}
     """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 
 @log_step_to_html()
@@ -265,7 +270,7 @@ Note: This methodology assumes a constant tax rate of 25% and a valuation multip
     margin_analysis: {margin_analysis}
     instruction: {instruction}
     """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.gpt4o.invoke(prompt)
 
 
 @log_step_to_html()
@@ -278,15 +283,19 @@ def arxiv_analyzer(title, ticker, link):
     link: {link}
     instruction: {instruction}
     """
-    return prompt, llm.invoke(prompt)
+    return prompt, llm.pplx.invoke(prompt)
 
 
 ##############################################################################################################################
 
 def generate_report(title, ticker, link):
     # Perplexity LLM 초기화
-    global llm
-    llm = ChatPerplexity(temperature=0, pplx_api_key=os.getenv("API_KEY"),)
+    try:
+        global llm
+        llm.pplx = ChatPerplexity(temperature=0, pplx_api_key=os.getenv("API_KEY"),)
+        llm.gpt4o = ChatOpenAI(temperature=0, api_key=os.getenv("OPENAI_API_KEY"), model='gpt-4o')
+    except Exception():
+        exit(-1)
 
     """선택한 논문의 제목과 링크를 기반으로 리포트를 생성. 여기가 메인임."""
     copy_assets_to_log_dir()

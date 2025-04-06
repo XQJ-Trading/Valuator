@@ -1,7 +1,10 @@
 import click
 import os
+from dotenv import load_dotenv
 
 from report import generate_report
+
+load_dotenv()
 
 # 논문 목록 정의
 PAPERS = [
@@ -47,6 +50,8 @@ def check_api_key():
     api_key = os.getenv("API_KEY")
     if not api_key:
         api_key = click.prompt("API_KEY가 설정되어 있지 않습니다. 입력해주세요", hide_input=True)
+        with open(".env", "a") as env_file:
+            env_file.write(f"\nAPI_KEY={api_key}")
         os.environ["API_KEY"] = api_key
     return api_key
 

@@ -396,13 +396,14 @@ def summarize(company, segments, arxiv):
 - Conclusion & Strategic Recommendations: Synthesis of insights and clear, data-supported strategic guidance.
 """
 
-    return prompt, llm.gpt4o.invoke(prompt)
+    return prompt, llm.gpt4o_mini.invoke(prompt)
 
 
 ##############################################################################################################################
 class LLMZoo:
     pplx = None
     gpt4o = None
+    gpt4o_mini = None
 
 
 llm = LLMZoo()
@@ -419,6 +420,9 @@ def generate_report(title, ticker, link):
         )
         llm.gpt4o = ChatOpenAI(
             temperature=0, api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o"
+        )
+        llm.gpt4o_mini = ChatOpenAI(
+            temperature=0, api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini"
         )
     except Exception():
         exit(-1)

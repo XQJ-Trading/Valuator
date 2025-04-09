@@ -335,7 +335,7 @@ def arxiv_analyzer(title, ticker, link):
     link: {link}
     instruction: {instruction}
     """
-    return prompt, llm.pplx.invoke(prompt)
+    return prompt, llm.gpt4o_mini.invoke(prompt)
 
 
 def remove_metadata(ai_message):

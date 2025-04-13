@@ -24,9 +24,8 @@ def copy_assets_to_log_dir():
     """
     현재 디렉터리의 style.css와 script.js를 CURRENT_LOG_DIR 폴더로 복사합니다.
     """
-    assets = ["style.css", "script.js"]
+    assets = [TEMPLATE_JS_PATH, TEMPLATE_CSS_PATH]
     for asset in assets:
-        asset = os.path.join("logs", asset)
         if os.path.exists(asset):
             shutil.copy(asset, CURRENT_LOG_DIR)
             print(f"[INFO] {asset} 파일이 {CURRENT_LOG_DIR}로 복사되었습니다.")

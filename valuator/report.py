@@ -292,7 +292,7 @@ def generate_report(title, ticker, link):
     # Perplexity LLM 초기화
     try:
         global llm
-        llm.pplx = ChatPerplexity(temperature=0, pplx_api_key=os.getenv("API_KEY"),)
+        llm.pplx = ChatPerplexity(temperature=0, pplx_api_key=os.getenv("PPLX_API_KEY"),)
         llm.gpt4o = ChatOpenAI(temperature=0, api_key=os.getenv("OPENAI_API_KEY"), model='gpt-4o')
     except Exception():
         exit(-1)

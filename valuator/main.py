@@ -46,15 +46,13 @@ PAPERS = [
 ]
 
 
-def check_api_key():
-    api_key = os.getenv("API_KEY")
+def check_api_key(key_name="API_KEY"):
+    api_key = os.getenv(key_name)
     if not api_key:
-        api_key = click.prompt(
-            "API_KEY가 설정되어 있지 않습니다. 입력해주세요", hide_input=True
-        )
+        api_key = click.prompt(f"{key_name}가 설정되어 있지 않습니다. 입력해주세요", hide_input=True)
         with open(".env", "a") as env_file:
-            env_file.write(f"\nAPI_KEY={api_key}")
-        os.environ["API_KEY"] = api_key
+            env_file.write(f"\n{key_name}={api_key}")
+        os.environ[key_name] = api_key
     return api_key
 
 
@@ -63,7 +61,6 @@ def select_paper():
     """논문 목록에서 선택하여 리포트를 생성"""
 
     # api key 확인
-    check_api_key()
 
     click.echo("=== 논문 목록 ===")
     for i, (title, author, _) in enumerate(PAPERS, 1):
@@ -85,4 +82,8 @@ def select_paper():
 
 
 if __name__ == "__main__":
+    check_api_key('PPLX_API_KEY')
+    check_api_key('OPENAI_API_KEY')
+
     select_paper()
+    

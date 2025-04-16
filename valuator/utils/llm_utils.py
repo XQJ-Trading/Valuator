@@ -15,7 +15,7 @@ def init_llms():
     global gpt_41, pplx
 
     if openai_api_key:
-        gpt_41 = ChatOpenAI(api_key=openai_api_key)
+        gpt_41 = ChatOpenAI(api_key=openai_api_key, model='gpt-4.1')
     else:
         gpt_41 = None
 

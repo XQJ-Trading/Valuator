@@ -2,11 +2,6 @@ from utils.basic_utils import *
 from utils.llm_utils import *
 
 def main():
-    check_api_key('PPLX_API_KEY')
-    check_api_key('OPENAI_API_KEY')
-
-    init_llms()
-
     d = parse_text(
 '''
 ​2025년 4월 16일(현지 시각 기준) 미국 증시는 주요 지수들이 하락 마감했습니다.​

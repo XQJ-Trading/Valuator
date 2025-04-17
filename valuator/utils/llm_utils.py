@@ -1,28 +1,7 @@
 import json
 import os
 
-from langchain_perplexity import ChatPerplexity
-from langchain_openai import ChatOpenAI
-
-
-gpt_41 = None
-pplx = None
-
-def init_llms():
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    pplx_api_key = os.getenv("PPLX_API_KEY")
-    
-    global gpt_41, pplx
-
-    if openai_api_key:
-        gpt_41 = ChatOpenAI(api_key=openai_api_key, model='gpt-4.1')
-    else:
-        gpt_41 = None
-
-    if pplx_api_key:
-        pplx = ChatPerplexity(api_key=pplx_api_key)
-    else:
-        pplx = None
+from utils.llm_zoo import *
 
 
 def parse_text(text: str, key_and_description: dict[str, str]) -> dict[str, str]:
@@ -48,4 +27,5 @@ keys & description:
 
 
 def quote_text(text: str, where: str) -> str:
+    # TODO
     return 'lorem ipsum'

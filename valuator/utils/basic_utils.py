@@ -1,0 +1,15 @@
+import os
+import click
+import dotenv
+
+
+dotenv.load_dotenv()
+
+def check_api_key(key_name='API_KEY'):
+    api_key = os.getenv(key_name)
+    if not api_key:
+        api_key = click.prompt(f'{key_name}가 설정되어 있지 않습니다. 입력해주세요', hide_input=True)
+        with open('.env', 'a') as env_file:
+            env_file.write(f'\n{key_name}={api_key}')
+        os.environ[key_name] = api_key
+    return api_key

@@ -28,8 +28,13 @@ def submodule_example_summary(text_a, text_b):
     return result.content
 
 
-def run(corp_name):
+def run(corp_name: str) -> str:
     result_one, _ = submodule_example(corp_name)
     result_two, _ = submodule_example_stakeholder(corp_name)
     result_main = submodule_example_summary(result_one, result_two)
     return result_main
+
+
+from utils import test_runner
+if __name__ == '__main__':
+    test_runner.run(run)

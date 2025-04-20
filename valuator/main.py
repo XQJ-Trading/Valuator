@@ -1,8 +1,8 @@
-from systems import basic_systems
+from valuator.systems import example_system
 
 
 def main():
-    result = basic_systems.run()
+    result = example_system.run()
     print(result)
 
 

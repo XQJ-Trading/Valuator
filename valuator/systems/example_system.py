@@ -1,4 +1,4 @@
-from valuator.modules import example_module
+from modules import example_module
 
 def subsystem_example_dating_corps():
     match_group_analysis = example_module.run('match group')

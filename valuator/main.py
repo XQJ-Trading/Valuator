@@ -1,4 +1,4 @@
-from valuator.systems import example_system
+from systems import example_system
 
 
 def main():

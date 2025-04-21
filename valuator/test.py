@@ -1,9 +1,10 @@
 from utils.basic_utils import *
 from utils.llm_utils import *
 
+
 def main():
     d = parse_text(
-'''
+        """
 ​2025년 4월 16일(현지 시각 기준) 미국 증시는 주요 지수들이 하락 마감했습니다.​
 
 S&P 500 지수: 5,396.63포인트로 전일 대비 9.34포인트(약 -0.2%) 하락 마감했습니다 .​
@@ -20,13 +21,14 @@ Russell 2000 지수: 현재 실시간 지수 수치는 확인되지 않지만, �
 가디언
 
 추가로 궁금하신 사항이 있으시면 언제든지 문의해 주세요.
-''',
+""",
         {
-            'S&P index': 'index value. float 형태로 parse가 가능한 clean한 형태로',
-            'Russell 2000 index': 'no dollar sign, pure float format'
-        }
+            "S&P index": "index value. float 형태로 parse가 가능한 clean한 형태로",
+            "Russell 2000 index": "no dollar sign, pure float format",
+        },
     )
     print(d)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

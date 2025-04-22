@@ -28,8 +28,6 @@ class BlockWidget(QFrame):
         # Text area (Markdown-rendered)
         text_browser = QTextBrowser()
         text_browser.setReadOnly(True)
-        # Remove size adjust policy
-        # text_browser.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         try:
@@ -49,7 +47,7 @@ class ChatWindow(QWidget):
     def __init__(self, generator: Callable[[list[str]], str]):
         super().__init__()
         self.generator = generator
-        self.setWindowTitle("PyQt6 Chat Example")
+        self.setWindowTitle(f'test {generator.__name__}')
         self.resize(800, 600)
 
         # Main vertical layout: input area (1/3) on top, chat area (2/3) at bottom
@@ -101,13 +99,6 @@ class ChatWindow(QWidget):
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, answer_block)
         self.input_edit.clear()
 
-# def run(generator: Callable[[list[str]], str]) -> None:
-#     app = QApplication(sys.argv)
-#     loop = QEventLoop(app)
-#     window = ChatWindow(generator)
-#     window.show()
-#     with loop:
-#         loop.run_forever()
 
 list_of_methods = []
 
@@ -137,8 +128,3 @@ def run_runners():
 
 if __name__ == '__main__':
     pass
-    # # Example generator: sleeps then returns lorem ipsum.
-    # def dummy_generator(_: str) -> str:
-    #     return '\n\n'.join([random.choice(DUMMY_TEXTS) for _ in range(100)])
-    
-    # run(dummy_generator)

@@ -46,10 +46,10 @@ Focus on R&D, extensive Intellectual Property portfolio.
 Subject to macroeconomic conditions, geopolitical tensions, supply chain disruptions, etc.
 """
 
-
-def main():
-    pass
+import modules.example
+from utils.test_runner import run_runners
 
 
 if __name__ == "__main__":
-    main()
+    run_runners()
+

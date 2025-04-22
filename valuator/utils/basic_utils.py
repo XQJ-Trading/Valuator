@@ -13,3 +13,5 @@ def check_api_key(key_name='API_KEY'):
             env_file.write(f'\n{key_name}={api_key}')
         os.environ[key_name] = api_key
     return api_key
+
+

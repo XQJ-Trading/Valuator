@@ -2,8 +2,17 @@ import sys
 import json
 
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QTextEdit, QTextBrowser, QAbstractScrollArea, QPushButton,
-    QScrollArea, QFrame, QLabel, QHBoxLayout,
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QTextEdit,
+    QTextBrowser,
+    QAbstractScrollArea,
+    QPushButton,
+    QScrollArea,
+    QFrame,
+    QLabel,
+    QHBoxLayout,
 )
 from PyQt5.QtCore import Qt, QTimer
 from qasync import QEventLoop
@@ -36,18 +45,21 @@ class BlockWidget(QFrame):
             text_browser.setPlainText(text)
         # Auto-adjust height to content (run after setting text)
         layout.addWidget(text_browser)
+
         # Delay size adjustment until widget is laid out
         def _update_size():
             text_browser.document().setTextWidth(text_browser.viewport().width())
             doc_height = text_browser.document().size().height()
             text_browser.setFixedHeight(int(doc_height + text_browser.frameWidth() * 2))
+
         QTimer.singleShot(0, _update_size)
+
 
 class ChatWindow(QWidget):
     def __init__(self, generator: Callable[[list[str]], str]):
         super().__init__()
         self.generator = generator
-        self.setWindowTitle(f'test {generator.__name__}')
+        self.setWindowTitle(f"test {generator.__name__}")
         self.resize(800, 600)
 
         # Main vertical layout: input area (1/3) on top, chat area (2/3) at bottom
@@ -57,7 +69,8 @@ class ChatWindow(QWidget):
         input_area = QWidget()
         input_layout = QVBoxLayout(input_area)
         self.input_edit = QTextEdit()
-        self.input_edit.setPlaceholderText("Type your message here...")
+        # self.input_edit.setPlaceholderText('example: {"corp": "Black Lab"}')
+        self.input_edit.setText('{"corp": "Black Lab"}')
         submit_btn = QPushButton("Submit")
         submit_btn.setFixedWidth(80)
         submit_btn.clicked.connect(self.add_message)
@@ -102,9 +115,11 @@ class ChatWindow(QWidget):
 
 list_of_methods = []
 
+
 def append_to_methods(func):
     list_of_methods.append(func)
     return func
+
 
 def run_runners():
     app = QApplication(sys.argv)
@@ -115,16 +130,19 @@ def run_runners():
     layout = QVBoxLayout(sel_window)
     for func in list_of_methods:
         btn = QPushButton(func.__name__)
+
         def handler(checked, f=func, windows=windows):
             print(f)
             cw = ChatWindow(f)
             windows.append(cw)
             cw.show()
+
         btn.clicked.connect(handler)
         layout.addWidget(btn)
     sel_window.show()
     with loop:
         loop.run_forever()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     pass

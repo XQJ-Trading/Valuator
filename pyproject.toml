@@ -11,6 +11,9 @@ python-dotenv = "^1.1.0"
 click = "^8.1.8"
 langchain-community = "^0.3.21"
 langchain-openai = "^0.3.12"
+pyqt5 = "5.15.10"
+langchain-perplexity = "^0.1.1"
+pyqt5-qt5 = "5.15.11"
 
 
 [build-system]

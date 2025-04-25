@@ -1,26 +1,29 @@
 import sys
-import random
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QTextEdit, QTextBrowser, QAbstractScrollArea, QPushButton,
-    QScrollArea, QFrame, QLabel, QHBoxLayout, 
+import json
+
+from PyQt5.QtWidgets import (
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QTextEdit,
+    QTextBrowser,
+    QAbstractScrollArea,
+    QPushButton,
+    QScrollArea,
+    QFrame,
+    QLabel,
+    QHBoxLayout,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer
 from qasync import QEventLoop
 from typing import Callable
-import time
 
-# Dummy lorem ipsum texts for placeholder
-DUMMY_TEXTS = [
-    "# Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus lacinia odio vitae vestibulum vestibulum.",
-    "## Cras placerat ultricies sapien, et malesuada turpis hendrerit nec. Nullam vehicula.",
-    "Phasellus venenatis elit eu augue luctus, ut varius massa fermentum."
-]
 
 class BlockWidget(QFrame):
     def __init__(self, title: str, text: str):
         super().__init__()
         # Style: simple rounded rectangle
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet(
             "QFrame { border: 1px solid #ccc; border-radius: 8px; padding: 8px; margin: 4px; }"
         )
@@ -34,28 +37,29 @@ class BlockWidget(QFrame):
         # Text area (Markdown-rendered)
         text_browser = QTextBrowser()
         text_browser.setReadOnly(True)
-        # Remove size adjust policy
-        # text_browser.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
-        text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         try:
             text_browser.setMarkdown(text)
         except AttributeError:
             text_browser.setPlainText(text)
         # Auto-adjust height to content (run after setting text)
         layout.addWidget(text_browser)
+
         # Delay size adjustment until widget is laid out
         def _update_size():
             text_browser.document().setTextWidth(text_browser.viewport().width())
             doc_height = text_browser.document().size().height()
             text_browser.setFixedHeight(int(doc_height + text_browser.frameWidth() * 2))
+
         QTimer.singleShot(0, _update_size)
+
 
 class ChatWindow(QWidget):
     def __init__(self, generator: Callable[[list[str]], str]):
         super().__init__()
         self.generator = generator
-        self.setWindowTitle("PyQt6 Chat Example")
+        self.setWindowTitle(f"test {generator.__name__}")
         self.resize(800, 600)
 
         # Main vertical layout: input area (1/3) on top, chat area (2/3) at bottom
@@ -65,7 +69,8 @@ class ChatWindow(QWidget):
         input_area = QWidget()
         input_layout = QVBoxLayout(input_area)
         self.input_edit = QTextEdit()
-        self.input_edit.setPlaceholderText("Type your message here...")
+        # self.input_edit.setPlaceholderText('example: {"corp": "Black Lab"}')
+        self.input_edit.setText('{"corp": "Black Lab"}')
         submit_btn = QPushButton("Submit")
         submit_btn.setFixedWidth(80)
         submit_btn.clicked.connect(self.add_message)
@@ -98,7 +103,8 @@ class ChatWindow(QWidget):
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, user_block)
 
         # Call generator (may sleep)
-        response_text = self.generator(text)
+        data = json.loads(text)
+        response_text = json.dumps(self.generator(data))
 
         # Add the response block
         title = self.generator.__name__
@@ -106,18 +112,37 @@ class ChatWindow(QWidget):
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, answer_block)
         self.input_edit.clear()
 
-def run(generator: Callable[[list[str]], str]) -> None:
+
+list_of_methods = []
+
+
+def append_to_methods(func):
+    list_of_methods.append(func)
+    return func
+
+
+def run_runners():
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
-    window = ChatWindow(generator)
-    window.show()
+    windows = []
+    sel_window = QWidget()
+    sel_window.setWindowTitle("Select Runner")
+    layout = QVBoxLayout(sel_window)
+    for func in list_of_methods:
+        btn = QPushButton(func.__name__)
+
+        def handler(checked, f=func, windows=windows):
+            print(f)
+            cw = ChatWindow(f)
+            windows.append(cw)
+            cw.show()
+
+        btn.clicked.connect(handler)
+        layout.addWidget(btn)
+    sel_window.show()
     with loop:
         loop.run_forever()
 
-if __name__ == '__main__':
 
-    # Example generator: sleeps then returns lorem ipsum.
-    def dummy_generator(_: str) -> str:
-        return '\n\n'.join([random.choice(DUMMY_TEXTS) for _ in range(100)])
-    
-    run(dummy_generator)
+if __name__ == "__main__":
+    pass

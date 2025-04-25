@@ -6,16 +6,13 @@ from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QTextEdit,
-    QTextBrowser,
-    QAbstractScrollArea,
     QPushButton,
     QScrollArea,
     QFrame,
     QLabel,
     QHBoxLayout,
 )
-from PyQt5.QtCore import Qt, QTimer
-from qasync import QEventLoop
+from PyQt5.QtCore import Qt
 from typing import Callable
 
 
@@ -35,24 +32,16 @@ class BlockWidget(QFrame):
         layout.addWidget(title_label)
 
         # Text area (Markdown-rendered)
-        text_browser = QTextBrowser()
-        text_browser.setReadOnly(True)
-        text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        text_edit = QTextEdit()
+        text_edit.setFocusPolicy(Qt.StrongFocus)
+        text_edit.setTextInteractionFlags(Qt.TextEditorInteraction)
+        # Load content
         try:
-            text_browser.setMarkdown(text)
+            text_edit.setMarkdown(text)
         except AttributeError:
-            text_browser.setPlainText(text)
-        # Auto-adjust height to content (run after setting text)
-        layout.addWidget(text_browser)
-
-        # Delay size adjustment until widget is laid out
-        def _update_size():
-            text_browser.document().setTextWidth(text_browser.viewport().width())
-            doc_height = text_browser.document().size().height()
-            text_browser.setFixedHeight(int(doc_height + text_browser.frameWidth() * 2))
-
-        QTimer.singleShot(0, _update_size)
+            text_edit.setPlainText(text)
+        # Resize to content if desired
+        layout.addWidget(text_edit)
 
 
 class ChatWindow(QWidget):
@@ -123,7 +112,6 @@ def append_to_methods(func):
 
 def run_runners():
     app = QApplication(sys.argv)
-    loop = QEventLoop(app)
     windows = []
     sel_window = QWidget()
     sel_window.setWindowTitle("Select Runner")
@@ -140,8 +128,7 @@ def run_runners():
         btn.clicked.connect(handler)
         layout.addWidget(btn)
     sel_window.show()
-    with loop:
-        loop.run_forever()
+    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":

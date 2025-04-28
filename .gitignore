@@ -179,3 +179,4 @@ cython_debug/
 *.txt
 .DS_Store
 .vscode/
+*.ipynb

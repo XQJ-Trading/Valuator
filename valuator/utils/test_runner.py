@@ -11,14 +11,76 @@ from PyQt5.QtWidgets import (
     QFrame,
     QLabel,
     QHBoxLayout,
+    QShortcut,
 )
 from PyQt5.QtCore import Qt
-from typing import Callable
+from PyQt5.QtGui import QKeySequence
+from typing import Callable, List
+
+from utils.llm_utils import translate
+
+
+class TextWindow(QWidget):
+    def __init__(self, title: str, text: str, windows: List['TextWindow']):
+        super().__init__()
+        self.windows = windows
+        self.windows.append(self)
+        self.original_text = text
+        self.setWindowTitle(title)
+        self.resize(1000, 800)
+
+        # Add Command+W shortcut
+        shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+        shortcut.activated.connect(self.close)
+
+        layout = QVBoxLayout(self)
+        
+        # Button row
+        button_layout = QHBoxLayout()
+        
+        # Translate button
+        translate_btn = QPushButton("한글로 번역")
+        translate_btn.setFixedWidth(120)
+        translate_btn.clicked.connect(self.translate_text)
+        button_layout.addWidget(translate_btn)
+        
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        # Text area
+        self.text_edit = QTextEdit()
+        self.text_edit.setFocusPolicy(Qt.StrongFocus)
+        self.text_edit.setTextInteractionFlags(Qt.TextEditorInteraction)
+        try:
+            self.text_edit.setMarkdown(text)
+        except AttributeError:
+            self.text_edit.setPlainText(text)
+        
+        # Make text larger
+        self.text_edit.setStyleSheet("font-size: 14px;")
+        
+        layout.addWidget(self.text_edit)
+        
+    def closeEvent(self, event):
+        if self in self.windows:
+            self.windows.remove(self)
+        super().closeEvent(event)
+        
+    def translate_text(self):
+        try:
+            translated_text = translate(self.original_text)
+            try:
+                self.text_edit.setMarkdown(translated_text)
+            except AttributeError:
+                self.text_edit.setPlainText(translated_text)
+        except Exception as e:
+            self.text_edit.setPlainText(f"Translation error: {str(e)}")
 
 
 class BlockWidget(QFrame):
-    def __init__(self, title: str, text: str):
+    def __init__(self, title: str, text: str, windows: List[TextWindow]):
         super().__init__()
+        self.windows = windows
         # Style: simple rounded rectangle
         self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet(
@@ -26,10 +88,22 @@ class BlockWidget(QFrame):
         )
 
         layout = QVBoxLayout(self)
+        
+        # Title and button row
+        title_row = QHBoxLayout()
+        
         # Title label
         title_label = QLabel(title)
         title_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(title_label)
+        title_row.addWidget(title_label)
+        
+        # New Window button
+        new_window_btn = QPushButton("New Window")
+        new_window_btn.setFixedWidth(100)
+        new_window_btn.clicked.connect(lambda: self.open_new_window(title, text))
+        title_row.addWidget(new_window_btn)
+        
+        layout.addLayout(title_row)
 
         # Text area (Markdown-rendered)
         text_edit = QTextEdit()
@@ -42,14 +116,23 @@ class BlockWidget(QFrame):
             text_edit.setPlainText(text)
         # Resize to content if desired
         layout.addWidget(text_edit)
+        
+    def open_new_window(self, title: str, text: str):
+        window = TextWindow(title, text, self.windows)
+        window.show()
 
 
 class ChatWindow(QWidget):
-    def __init__(self, generator: Callable[[list[str]], str]):
+    def __init__(self, generator: Callable[[str], str]):
         super().__init__()
         self.generator = generator
         self.setWindowTitle(f"test {generator.__name__}")
         self.resize(800, 600)
+        self.text_windows = []  # Keep track of text windows
+
+        # Add Command+W shortcut
+        shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+        shortcut.activated.connect(self.close)
 
         # Main vertical layout: input area (1/3) on top, chat area (2/3) at bottom
         main_layout = QVBoxLayout(self)
@@ -58,8 +141,7 @@ class ChatWindow(QWidget):
         input_area = QWidget()
         input_layout = QVBoxLayout(input_area)
         self.input_edit = QTextEdit()
-        # self.input_edit.setPlaceholderText('example: {"corp": "Black Lab"}')
-        self.input_edit.setText('{"corp": "Black Lab"}')
+        self.input_edit.setText('Tesla')
         submit_btn = QPushButton("Submit")
         submit_btn.setFixedWidth(80)
         submit_btn.clicked.connect(self.add_message)
@@ -88,16 +170,18 @@ class ChatWindow(QWidget):
         if not text:
             return
         # Add a block for the user's question
-        user_block = BlockWidget("You", text)
+        user_block = BlockWidget("You", text, self.text_windows)
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, user_block)
 
         # Call generator (may sleep)
-        data = json.loads(text)
-        response_text = json.dumps(self.generator(data))
+        try:
+            response_text = self.generator(text)
+        except Exception as e:
+            response_text = f"Error: {str(e)}"
 
         # Add the response block
         title = self.generator.__name__
-        answer_block = BlockWidget(title, response_text)
+        answer_block = BlockWidget(title, response_text, self.text_windows)
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, answer_block)
         self.input_edit.clear()
 

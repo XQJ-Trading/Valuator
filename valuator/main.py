@@ -1,4 +1,4 @@
-import modules.example
+import modules.uniaut_boilerplate
 from utils.test_runner import run_runners
 
 

@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QShortcut,
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QKeySequence
+from PyQt5.QtGui import QKeySequence, QClipboard
 from typing import Callable, List
 
 from utils.llm_utils import translate
@@ -78,9 +78,10 @@ class TextWindow(QWidget):
 
 
 class BlockWidget(QFrame):
-    def __init__(self, title: str, text: str, windows: List[TextWindow]):
+    def __init__(self, title: str, text: str, windows: List['TextWindow']):
         super().__init__()
         self.windows = windows
+        self.text = text
         # Style: simple rounded rectangle
         self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet(
@@ -96,6 +97,12 @@ class BlockWidget(QFrame):
         title_label = QLabel(title)
         title_label.setStyleSheet("font-weight: bold;")
         title_row.addWidget(title_label)
+        
+        # Copy button
+        copy_btn = QPushButton("Copy")
+        copy_btn.setFixedWidth(80)
+        copy_btn.clicked.connect(self.copy_text)
+        title_row.addWidget(copy_btn)
         
         # New Window button
         new_window_btn = QPushButton("New Window")
@@ -120,6 +127,10 @@ class BlockWidget(QFrame):
     def open_new_window(self, title: str, text: str):
         window = TextWindow(title, text, self.windows)
         window.show()
+        
+    def copy_text(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.text)
 
 
 class ChatWindow(QWidget):
@@ -145,6 +156,11 @@ class ChatWindow(QWidget):
         submit_btn = QPushButton("Submit")
         submit_btn.setFixedWidth(80)
         submit_btn.clicked.connect(self.add_message)
+        
+        # Add Command+Enter shortcut
+        submit_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        submit_shortcut.activated.connect(self.add_message)
+        
         # Align button to the right
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -196,17 +212,34 @@ def append_to_methods(func):
 
 def run_runners():
     app = QApplication(sys.argv)
-    windows = []
+    chat_windows = []  # Renamed from 'windows' for clarity
     sel_window = QWidget()
     sel_window.setWindowTitle("Select Runner")
+
+    def close_all_windows():
+        # Close all TextWindows first
+        for cw in chat_windows:
+            # Iterate over a copy of the list as items are removed during iteration
+            for tw in list(cw.text_windows):
+                tw.close()
+        # Close all ChatWindows
+        for cw in list(chat_windows): # Iterate over a copy
+            cw.close()
+        sel_window.close() # Close the selection window itself
+
+    # Add Command+W shortcut
+    shortcut = QShortcut(QKeySequence("Ctrl+W"), sel_window)
+    shortcut.activated.connect(close_all_windows)
+
     layout = QVBoxLayout(sel_window)
     for func in list_of_methods:
         btn = QPushButton(func.__name__)
 
-        def handler(checked, f=func, windows=windows):
+        # Pass chat_windows list to the handler
+        def handler(checked, f=func, current_chat_windows=chat_windows):
             print(f)
             cw = ChatWindow(f)
-            windows.append(cw)
+            current_chat_windows.append(cw)
             cw.show()
 
         btn.clicked.connect(handler)

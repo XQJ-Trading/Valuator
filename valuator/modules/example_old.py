@@ -4,7 +4,7 @@ from valuator.utils.basic_utils import *
 from valuator.utils.llm_utils import *
 from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
 from valuator.utils.test_runner import append_to_methods
-from valuator.data_group.collector import fetch_using_readerLLM, get_report_url
+from valuator.utils.finsource.collector import fetch_using_readerLLM, get_report_url
 
 
 @append_to_methods

@@ -1,5 +1,6 @@
-import valuator.modules.example.basic
-import valuator.modules.example.iterating
+# import valuator.modules.example.basic
+# import valuator.modules.example.iterating
+import valuator.modules.example_old
 from valuator.utils.test_runner import run_runners
 
 

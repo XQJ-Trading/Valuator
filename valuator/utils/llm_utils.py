@@ -3,7 +3,7 @@ import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from utils.llm_zoo import *
+from valuator.utils.llm_zoo import *
 
 
 def parse_text(text: str, key_and_description: dict[str, str]) -> dict[str, str]:

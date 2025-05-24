@@ -1,9 +1,9 @@
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from utils.basic_utils import *
-from utils.llm_utils import *
-from utils.llm_zoo import *
-from utils.test_runner import append_to_methods
+from valuator.utils.basic_utils import *
+from valuator.utils.llm_utils import *
+from valuator.utils.llm_zoo import *
+from valuator.utils.test_runner import append_to_methods
 
 
 @append_to_methods

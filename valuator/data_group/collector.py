@@ -2,7 +2,7 @@ import re
 import requests
 
 import yfinance as yf
-from utils.llm_zoo import pplx
+from valuator.utils.llm_zoo import pplx
 
 
 def parse_and_clean_markdown_table(text):

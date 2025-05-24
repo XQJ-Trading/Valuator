@@ -1,6 +1,6 @@
-import modules.example.basic
-import modules.example.iterating
-from utils.test_runner import run_runners
+import valuator.modules.example.basic
+import valuator.modules.example.iterating
+from valuator.utils.test_runner import run_runners
 
 
 if __name__ == "__main__":

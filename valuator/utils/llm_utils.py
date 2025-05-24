@@ -1,6 +1,8 @@
 import json
 import re
 
+from langchain_core.messages import SystemMessage, HumanMessage
+
 from utils.llm_zoo import *
 
 
@@ -42,6 +44,13 @@ Based on these texts & guide, make it as a json formatted string.
     return d
 
 
-def quote_text(text: str, where: str) -> str:
-    # TODO
-    return "lorem ipsum"
+def translate(text: str, /, mode='invoke') -> str:
+    s_msg = SystemMessage('''
+    You are a professional translator in finance domain. 
+    Given English text, you should translate it into Korean text.
+    Text meaning must not be contaminated and changed.
+    Format and blank lines should be strictly unchanged.
+    ''')
+    h_msg = HumanMessage(text)
+    result = gpt_41_mini.invoke([s_msg, h_msg]).content
+    return result

@@ -1,3 +1,3 @@
 @echo off
-python valuator/main.py
+python -m valuator.main
 pause

@@ -1,15 +1,14 @@
 import pandas as pd
 
-from utils.basic_utils import *
-from utils.llm_utils import *
-from utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
-from utils.test_runner import append_to_methods
-from data_group.collector import fetch_using_readerLLM, get_report_url
+from valuator.utils.basic_utils import *
+from valuator.utils.llm_utils import *
+from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
+from valuator.utils.test_runner import append_to_methods
+from valuator.utils.finsource.collector import fetch_using_readerLLM, get_report_url
 
 
 @append_to_methods
-def analyze_as_finance(data: dict):
-    corp = data["corp"]
+def analyze_as_finance(corp: str) -> str:
     year = 2024
     url = get_report_url(corp)
     print(f"source url: {url}")
@@ -83,33 +82,31 @@ Please analyze the following financial data:
 
     segments = pd.read_json(segments, lines=True)
     segments["margin"] = segments["operating_income"] / segments["revenue"] * 100
-    return segments.to_dict(orient="records")
+    return segments.to_markdown()
 
 
 @append_to_methods
-def analyze_as_ceo(data: dict):
-    corp = data["corp"]
+def analyze_as_ceo(corp: str) -> str:
     result = gpt_41_nano.invoke(
         f"make me a report of {corp} in aspect of ceo brilliance & integrity"
     ).content
-    return {"report": result}
+    return result
 
 
 @append_to_methods
-def analyze_as_business(data: dict):
-    corp = data["corp"]
+def analyze_as_business(corp: str) -> str:
     result = gpt_41_nano.invoke(
         f"make me a report of {corp} in aspect of business act brilliance"
     ).content
-    return {"report": result}
+    return result
 
 
 @append_to_methods
-def summary(data: dict):
-    finance_report = analyze_as_finance(data)["report"]
-    ceo_report = analyze_as_ceo(data)["report"]
-    business_report = analyze_as_business(data)["report"]
+def summary(corp: str) -> str:
+    finance_report = analyze_as_finance(corp)
+    ceo_report = analyze_as_ceo(corp)
+    business_report = analyze_as_business(corp)
     result = gpt_41_mini.invoke(
         f"summarize these three contents: 1 - {finance_report} \n\n 2 - {ceo_report} \n\n 3 - {business_report}"
     ).content
-    return {"summary": result}
+    return result

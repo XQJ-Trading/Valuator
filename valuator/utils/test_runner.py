@@ -17,7 +17,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QKeySequence, QClipboard
 from typing import Callable, List
 
-from utils.llm_utils import translate
+from valuator.utils.llm_utils import translate
 
 
 class TextWindow(QWidget):

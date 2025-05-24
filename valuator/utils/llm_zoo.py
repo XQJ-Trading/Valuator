@@ -3,7 +3,7 @@ import os
 from langchain_perplexity import ChatPerplexity
 from langchain_openai import ChatOpenAI
 
-from utils.basic_utils import *
+from valuator.utils.basic_utils import *
 
 
 check_api_key('PPLX_API_KEY')

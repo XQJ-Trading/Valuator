@@ -1,5 +1,5 @@
 import sys
-import json
+import traceback
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -21,7 +21,7 @@ from valuator.utils.llm_utils import translate
 
 
 class TextWindow(QWidget):
-    def __init__(self, title: str, text: str, windows: List['TextWindow']):
+    def __init__(self, title: str, text: str, windows: List["TextWindow"]):
         super().__init__()
         self.windows = windows
         self.windows.append(self)
@@ -34,19 +34,19 @@ class TextWindow(QWidget):
         shortcut.activated.connect(self.close)
 
         layout = QVBoxLayout(self)
-        
+
         # Button row
         button_layout = QHBoxLayout()
-        
+
         # Translate button
         translate_btn = QPushButton("한글로 번역")
         translate_btn.setFixedWidth(120)
         translate_btn.clicked.connect(self.translate_text)
         button_layout.addWidget(translate_btn)
-        
+
         button_layout.addStretch()
         layout.addLayout(button_layout)
-        
+
         # Text area
         self.text_edit = QTextEdit()
         self.text_edit.setFocusPolicy(Qt.StrongFocus)
@@ -55,17 +55,17 @@ class TextWindow(QWidget):
             self.text_edit.setMarkdown(text)
         except AttributeError:
             self.text_edit.setPlainText(text)
-        
+
         # Make text larger
         self.text_edit.setStyleSheet("font-size: 14px;")
-        
+
         layout.addWidget(self.text_edit)
-        
+
     def closeEvent(self, event):
         if self in self.windows:
             self.windows.remove(self)
         super().closeEvent(event)
-        
+
     def translate_text(self):
         try:
             translated_text = translate(self.original_text)
@@ -78,7 +78,7 @@ class TextWindow(QWidget):
 
 
 class BlockWidget(QFrame):
-    def __init__(self, title: str, text: str, windows: List['TextWindow']):
+    def __init__(self, title: str, text: str, windows: List["TextWindow"]):
         super().__init__()
         self.windows = windows
         self.text = text
@@ -89,27 +89,27 @@ class BlockWidget(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        
+
         # Title and button row
         title_row = QHBoxLayout()
-        
+
         # Title label
         title_label = QLabel(title)
         title_label.setStyleSheet("font-weight: bold;")
         title_row.addWidget(title_label)
-        
+
         # Copy button
         copy_btn = QPushButton("Copy")
         copy_btn.setFixedWidth(80)
         copy_btn.clicked.connect(self.copy_text)
         title_row.addWidget(copy_btn)
-        
+
         # New Window button
         new_window_btn = QPushButton("New Window")
         new_window_btn.setFixedWidth(100)
         new_window_btn.clicked.connect(lambda: self.open_new_window(title, text))
         title_row.addWidget(new_window_btn)
-        
+
         layout.addLayout(title_row)
 
         # Text area (Markdown-rendered)
@@ -123,11 +123,11 @@ class BlockWidget(QFrame):
             text_edit.setPlainText(text)
         # Resize to content if desired
         layout.addWidget(text_edit)
-        
+
     def open_new_window(self, title: str, text: str):
         window = TextWindow(title, text, self.windows)
         window.show()
-        
+
     def copy_text(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.text)
@@ -152,15 +152,15 @@ class ChatWindow(QWidget):
         input_area = QWidget()
         input_layout = QVBoxLayout(input_area)
         self.input_edit = QTextEdit()
-        self.input_edit.setText('Tesla')
+        self.input_edit.setText("Tesla")
         submit_btn = QPushButton("Submit")
         submit_btn.setFixedWidth(80)
         submit_btn.clicked.connect(self.add_message)
-        
+
         # Add Command+Enter shortcut
         submit_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
         submit_shortcut.activated.connect(self.add_message)
-        
+
         # Align button to the right
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -193,7 +193,7 @@ class ChatWindow(QWidget):
         try:
             response_text = self.generator(text)
         except Exception as e:
-            response_text = f"Error: {str(e)}"
+            response_text = f"Error: {e} \n {traceback.format_exc()}"
 
         # Add the response block
         title = self.generator.__name__
@@ -223,9 +223,9 @@ def run_runners():
             for tw in list(cw.text_windows):
                 tw.close()
         # Close all ChatWindows
-        for cw in list(chat_windows): # Iterate over a copy
+        for cw in list(chat_windows):  # Iterate over a copy
             cw.close()
-        sel_window.close() # Close the selection window itself
+        sel_window.close()  # Close the selection window itself
 
     # Add Command+W shortcut
     shortcut = QShortcut(QKeySequence("Ctrl+W"), sel_window)

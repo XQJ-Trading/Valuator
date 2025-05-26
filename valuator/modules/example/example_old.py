@@ -1,23 +1,27 @@
+from io import StringIO
+
 import pandas as pd
 
 from valuator.utils.basic_utils import *
 from valuator.utils.llm_utils import *
 from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
 from valuator.utils.test_runner import append_to_methods
-from valuator.utils.finsource.collector import fetch_using_readerLLM, get_report_url
+from valuator.utils.finsource.collector import fetch_using_readerLLM
+from valuator.utils.finsource.sec_collector import get_10k_html_link
 
 
 @append_to_methods
 def analyze_as_finance(corp: str) -> str:
     year = 2024
-    url = get_report_url(corp)
+    url = get_10k_html_link(corp)
+    # url = get_report_url(corp)
     print(f"source url: {url}")
     source = fetch_using_readerLLM(corp, url)
 
     summary = ""
-    step = 2000
-    for s in range(0, len(source), step):
-        e = min(s + step, len(source))
+    chunk_size = 2000
+    for s in range(0, len(source), chunk_size):
+        e = min(s + chunk_size, len(source))
         print(f"step: {s} / {len(source)}")
         src = "".join(source[s:e])
         summary += gpt_41_nano.invoke(
@@ -80,7 +84,7 @@ Please analyze the following financial data:
 """
     ).content
 
-    segments = pd.read_json(segments, lines=True)
+    segments = pd.read_json(StringIO(segments), lines=True)
     segments["margin"] = segments["operating_income"] / segments["revenue"] * 100
     return segments.to_markdown()
 

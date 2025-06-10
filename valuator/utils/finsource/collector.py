@@ -2,10 +2,9 @@ import re
 import requests
 
 import yfinance as yf
-from valuator.utils.llm_zoo import pplx
 
 
-def parse_and_clean_markdown_table(text):
+def parse_and_clean_markdown_table(text) -> str:
     if text.isspace() or all(c == "\t" for c in text):
         return ""
     else:
@@ -13,17 +12,11 @@ def parse_and_clean_markdown_table(text):
         return re.sub(pattern, "", text)
 
 
-# def get_report_url(corp: str) -> str:
-#     ticker, cik = get_ticker_and_cik(corp)
-#     url = pplx.invoke(
-#         f"""Give me a {corp}({ticker})'s 2025 10-K(annual report) SEC HTML link.
-# Link must start with https://www.sec.gov/Archives/edgar/data/{cik}/
-# Do not explaination."""
-#     ).content
-#     return url
-
-
 def fetch_using_readerLLM(corp: str, url: str):
+    """
+    Jina Reader LLM를 사용하여 10-K 보고서 HTML을 markdown 형식으로 가져옵니다.
+
+    """
     proxy_url = f"https://r.jina.ai/{url}"
     params = {
         "X-Engine": "browser",

@@ -193,6 +193,7 @@ class ChatWindow(QWidget):
         try:
             response_text = self.generator(text)
         except Exception as e:
+            print(f"Error in generator: {e}, {traceback.format_exc()}")
             response_text = f"Error: {e} \n {traceback.format_exc()}"
 
         # Add the response block

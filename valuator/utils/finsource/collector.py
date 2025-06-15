@@ -35,7 +35,7 @@ def fetch_using_readerLLM(corp: str, url: str):
         if (clean_line := parse_and_clean_markdown_table(line))
     ]
     with open(
-        f"./utils/finsource/data/{corp}-10-k.html", "w", encoding="utf-8"
+        f"valuator/utils/finsource/data/{corp}-10-k.html", "w", encoding="utf-8"
     ) as file:
         file.write("\n".join(text))
     return text

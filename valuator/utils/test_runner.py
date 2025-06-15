@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QShortcut,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QObject
 from PyQt5.QtGui import QKeySequence, QClipboard
 from typing import Callable, List
 
@@ -32,6 +32,9 @@ class TextWindow(QWidget):
         # Add Command+W shortcut
         shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
         shortcut.activated.connect(self.close)
+        
+        # Add key event filter for Korean input
+        self.installEventFilter(self)
 
         layout = QVBoxLayout(self)
 
@@ -75,6 +78,13 @@ class TextWindow(QWidget):
                 self.text_edit.setPlainText(translated_text)
         except Exception as e:
             self.text_edit.setPlainText(f"Translation error: {str(e)}")
+
+    def eventFilter(self, obj, event):
+        if event.type() == event.KeyPress:
+            if event.key() == Qt.Key_W and event.modifiers() == Qt.ControlModifier:
+                self.close()
+                return True
+        return super().eventFilter(obj, event)
 
 
 class BlockWidget(QFrame):
@@ -144,6 +154,9 @@ class ChatWindow(QWidget):
         # Add Command+W shortcut
         shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
         shortcut.activated.connect(self.close)
+        
+        # Add key event filter for Korean input
+        self.installEventFilter(self)
 
         # Main vertical layout: input area (1/3) on top, chat area (2/3) at bottom
         main_layout = QVBoxLayout(self)
@@ -152,7 +165,9 @@ class ChatWindow(QWidget):
         input_area = QWidget()
         input_layout = QVBoxLayout(input_area)
         self.input_edit = QTextEdit()
-        self.input_edit.setText("Tesla")
+        self.input_edit.setText(
+            example_of_method[self.generator.__name__]
+        )
         submit_btn = QPushButton("Submit")
         submit_btn.setFixedWidth(80)
         submit_btn.clicked.connect(self.add_message)
@@ -194,7 +209,12 @@ class ChatWindow(QWidget):
             response_text = self.generator(text)
         except Exception as e:
             print(f"Error in generator: {e}, {traceback.format_exc()}")
-            response_text = f"Error: {e} \n {traceback.format_exc()}"
+            response_text = f"""
+```
+Error: {e}
+{traceback.format_exc()}
+```
+            """
 
         # Add the response block
         title = self.generator.__name__
@@ -202,13 +222,23 @@ class ChatWindow(QWidget):
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, answer_block)
         self.input_edit.clear()
 
+    def eventFilter(self, obj, event):
+        if event.type() == event.KeyPress:
+            if event.key() == Qt.Key_W and event.modifiers() == Qt.ControlModifier:
+                self.close()
+                return True
+        return super().eventFilter(obj, event)
+
 
 list_of_methods = []
+example_of_method = {}
 
-
-def append_to_methods(func):
-    list_of_methods.append(func)
-    return func
+def append_to_methods(example_input='BRK.A'):
+    def decorator(func):
+        list_of_methods.append(func)
+        example_of_method[func.__name__] = example_input
+        return func
+    return decorator
 
 
 def run_runners():
@@ -228,9 +258,25 @@ def run_runners():
             cw.close()
         sel_window.close()  # Close the selection window itself
 
+    class EventFilter(QObject):
+        def __init__(self, window, windows_list):
+            super().__init__()
+            self.window = window
+            self.windows_list = windows_list
+
+        def eventFilter(self, obj, event):
+            if event.type() == event.KeyPress:
+                if event.key() == Qt.Key_W and event.modifiers() == Qt.ControlModifier:
+                    close_all_windows()
+                    return True
+            return super().eventFilter(obj, event)
+
     # Add Command+W shortcut
     shortcut = QShortcut(QKeySequence("Ctrl+W"), sel_window)
     shortcut.activated.connect(close_all_windows)
+    
+    # Add key event filter for Korean input
+    sel_window.installEventFilter(EventFilter(sel_window, chat_windows))
 
     layout = QVBoxLayout(sel_window)
     for func in list_of_methods:

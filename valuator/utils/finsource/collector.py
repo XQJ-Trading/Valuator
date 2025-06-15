@@ -2,10 +2,9 @@ import re
 import requests
 
 import yfinance as yf
-from valuator.utils.llm_zoo import pplx
 
 
-def parse_and_clean_markdown_table(text):
+def parse_and_clean_markdown_table(text) -> str:
     if text.isspace() or all(c == "\t" for c in text):
         return ""
     else:
@@ -13,16 +12,11 @@ def parse_and_clean_markdown_table(text):
         return re.sub(pattern, "", text)
 
 
-def get_report_url(corp: str) -> str:
-    url = pplx.invoke(
-        f"""Give me a {corp}'s 2024 10-K(annual report) SEC HTML link.
-Link must start with https://www.sec.gov/Archives/edgar/data/
-Do not explaination."""
-    ).content
-    return url
-
-
 def fetch_using_readerLLM(corp: str, url: str):
+    """
+    Jina Reader LLM를 사용하여 10-K 보고서 HTML을 markdown 형식으로 가져옵니다.
+
+    """
     proxy_url = f"https://r.jina.ai/{url}"
     params = {
         "X-Engine": "browser",
@@ -40,7 +34,9 @@ def fetch_using_readerLLM(corp: str, url: str):
         for line in response
         if (clean_line := parse_and_clean_markdown_table(line))
     ]
-    with open(f"valuator/utils/finsource/data/{corp}-10-k.html", "w", encoding="utf-8") as file:
+    with open(
+        f"./utils/finsource/data/{corp}-10-k.html", "w", encoding="utf-8"
+    ) as file:
         file.write("\n".join(text))
     return text
 
@@ -79,4 +75,4 @@ if __name__ == "__main__":
     # url = "https://www.sec.gov/Archives/edgar/data/1018724/000101872425000004/amzn-20241231.htm"
     url = "https://microsoft.gcs-web.com/node/33446/html"
     html = fetch_using_readerLLM(url)
-    print(html[:1000]) 
+    print(html[:1000])

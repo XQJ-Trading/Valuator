@@ -1,23 +1,27 @@
+from io import StringIO
+
 import pandas as pd
 
 from valuator.utils.basic_utils import *
 from valuator.utils.llm_utils import *
 from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
 from valuator.utils.test_runner import append_to_methods
-from valuator.utils.finsource.collector import fetch_using_readerLLM, get_report_url
+from valuator.utils.finsource.collector import fetch_using_readerLLM
+from valuator.utils.finsource.sec_collector import get_10k_html_link
 
 
 @append_to_methods
 def analyze_as_finance(corp: str) -> str:
     year = 2024
-    url = get_report_url(corp)
+    url = get_10k_html_link(corp)
+    # url = get_report_url(corp)
     print(f"source url: {url}")
     source = fetch_using_readerLLM(corp, url)
 
     summary = ""
-    step = 2000
-    for s in range(0, len(source), step):
-        e = min(s + step, len(source))
+    chunk_size = 2000
+    for s in range(0, len(source), chunk_size):
+        e = min(s + chunk_size, len(source))
         print(f"step: {s} / {len(source)}")
         src = "".join(source[s:e])
         summary += gpt_41_nano.invoke(
@@ -88,41 +92,52 @@ Please analyze the following financial data:
 
     # Fix JSON parsing warning by using StringIO
     from io import StringIO
+
     segments = pd.read_json(StringIO(segments_json), lines=True)
-    
+
     # Get business analysis for each segment
     business_reports = {}
-    for segment in segments['segment']:
+    for segment in segments["segment"]:
         business_analysis = analyze_as_business(corp, segment)
         business_reports[segment] = business_analysis
-        
+
         # Update operating income if missing
-        if pd.isna(segments.loc[segments['segment'] == segment, 'operating_income'].iloc[0]):
+        if pd.isna(
+            segments.loc[segments["segment"] == segment, "operating_income"].iloc[0]
+        ):
             try:
-                opm_str = str(business_analysis['segment_analysis']['estimated_opm'])
+                opm_str = str(business_analysis["segment_analysis"]["estimated_opm"])
                 # Handle range format (e.g., "20-25%")
-                if '-' in opm_str:
-                    opm_str = opm_str.split('-')[0]  # Take the lower bound
+                if "-" in opm_str:
+                    opm_str = opm_str.split("-")[0]  # Take the lower bound
                 # Remove any non-numeric characters except decimal point
-                opm_str = ''.join(c for c in opm_str if c.isdigit() or c == '.')
+                opm_str = "".join(c for c in opm_str if c.isdigit() or c == ".")
                 estimated_opm = float(opm_str)
-                revenue = segments.loc[segments['segment'] == segment, 'revenue'].iloc[0]
-                segments.loc[segments['segment'] == segment, 'operating_income'] = revenue * (estimated_opm / 100)
+                revenue = segments.loc[segments["segment"] == segment, "revenue"].iloc[
+                    0
+                ]
+                segments.loc[segments["segment"] == segment, "operating_income"] = (
+                    revenue * (estimated_opm / 100)
+                )
             except (KeyError, ValueError) as e:
-                print(f"Warning: Could not update operating income for segment {segment}: {str(e)}")
-    
+                print(
+                    f"Warning: Could not update operating income for segment {segment}: {str(e)}"
+                )
+
     # Validate and fix operating income and margin calculations
     for idx, row in segments.iterrows():
-        revenue = row['revenue']
-        operating_income = row['operating_income']
-        
+        revenue = row["revenue"]
+        operating_income = row["operating_income"]
+
         # If operating income is greater than revenue, cap it at 90% of revenue
         if operating_income > revenue:
-            segments.loc[idx, 'operating_income'] = revenue * 0.9
-            print(f"Warning: Operating income for {row['segment']} was capped at 90% of revenue")
-    
+            segments.loc[idx, "operating_income"] = revenue * 0.9
+            print(
+                f"Warning: Operating income for {row['segment']} was capped at 90% of revenue"
+            )
+
     segments["margin"] = segments["operating_income"] / segments["revenue"] * 100
-    
+
     # Create financial data table (Segment Performance)
     financial_data = f"""# Financial Data for {corp}
 
@@ -176,38 +191,54 @@ Present this data as a single JSON object.
 """
     ).content
 
-    balance_sheet_table_md = "## Detailed Balance Sheet\n\nNot available or could not be parsed.\n"
+    balance_sheet_table_md = (
+        "## Detailed Balance Sheet\n\nNot available or could not be parsed.\n"
+    )
     try:
         # Strip Markdown code fences if present
         import re
-        fence_match = re.search(r'```(?:json)?\\s*(\\{.*?\\})\\s*```', balance_sheet_json_str, re.S)
+
+        fence_match = re.search(
+            r"```(?:json)?\\s*(\\{.*?\\})\\s*```", balance_sheet_json_str, re.S
+        )
         if fence_match:
             clean_json_bs = fence_match.group(1)
         else:
-            start_bs = balance_sheet_json_str.find('{')
-            end_bs = balance_sheet_json_str.rfind('}')
-            clean_json_bs = balance_sheet_json_str[start_bs:end_bs+1] if start_bs != -1 and end_bs != -1 else balance_sheet_json_str
-        
+            start_bs = balance_sheet_json_str.find("{")
+            end_bs = balance_sheet_json_str.rfind("}")
+            clean_json_bs = (
+                balance_sheet_json_str[start_bs : end_bs + 1]
+                if start_bs != -1 and end_bs != -1
+                else balance_sheet_json_str
+            )
+
         import json
+
         bs_data = json.loads(clean_json_bs).get("balance_sheet", {})
 
         if bs_data:
             md_parts = ["## Detailed Balance Sheet\n"]
 
-            for category, details in [("Assets", bs_data.get("assets")), 
-                                      ("Liabilities", bs_data.get("liabilities")), 
-                                      ("Equity", bs_data.get("equity"))]:
+            for category, details in [
+                ("Assets", bs_data.get("assets")),
+                ("Liabilities", bs_data.get("liabilities")),
+                ("Equity", bs_data.get("equity")),
+            ]:
                 if not details:
                     continue
-                
+
                 md_parts.append(f"### {category}\n")
                 md_parts.append("| Item                      | Amount   |")
                 md_parts.append("|---------------------------|----------|")
-                md_parts.append(f"| **Total {category}**      | **{details.get('total', 'N/A')}** |")
+                md_parts.append(
+                    f"| **Total {category}**      | **{details.get('total', 'N/A')}** |"
+                )
                 for comp in details.get("components", []):
-                    md_parts.append(f"| {comp.get('item', 'N/A')}         | {comp.get('value', 'N/A')}    |")
+                    md_parts.append(
+                        f"| {comp.get('item', 'N/A')}         | {comp.get('value', 'N/A')}    |"
+                    )
                 md_parts.append("\n")
-            
+
             balance_sheet_table_md = "\n".join(md_parts)
         else:
             print("Warning: Balance sheet data was empty after parsing.")
@@ -216,16 +247,18 @@ Present this data as a single JSON object.
         print(f"Warning: Could not parse Balance Sheet JSON: {e}")
         print(f"Raw Balance Sheet LLM output: {balance_sheet_json_str}")
     except Exception as e:
-        print(f"Warning: An unexpected error occurred while processing balance sheet data: {e}")
+        print(
+            f"Warning: An unexpected error occurred while processing balance sheet data: {e}"
+        )
         print(f"Raw Balance Sheet LLM output: {balance_sheet_json_str}")
     # --- End New: Extract and format detailed Balance Sheet ---
-    
+
     # Create business analysis report
     business_report = f"""# Business Analysis Report for {corp}
 
 ## Business Segment Analysis
 """
-    
+
     # Add business analysis for each segment
     for segment, analysis in business_reports.items():
         try:
@@ -246,7 +279,7 @@ Present this data as a single JSON object.
 ### {segment}
 Error processing analysis for this segment.
 """
-    
+
     # Combine both reports
     combined_report = f"""{financial_data}
 
@@ -254,13 +287,14 @@ Error processing analysis for this segment.
 ---
 
 {business_report}"""
-    
+
     return combined_report
 
 
 @append_to_methods
 def analyze_as_ceo(corp: str) -> str:
-    s_msg = SystemMessage('''
+    s_msg = SystemMessage(
+        """
 You are an expert investment-analysis assistant.
 Your task is to evaluate a public company from the perspective of a long-term investor, focusing on (1) the quality of its CEO & senior leadership team, and (2) the broader organizational culture and governance. Base your work on the philosophies of Philip Fisher, Warren Buffett and Charlie Munger.
 
@@ -301,9 +335,10 @@ Stage 3: Integrated Judgment
 • Summarize key strengths, weaknesses, and central risks.
 • Give an overall "leadership & culture quality" rating (e.g. Excellent, Good, Fair, Poor).
 • Provide a concise investment-recommendation rationale from a long-term, Buffett-/Fisher-style standpoint.
-    ''')
-    
-    h_msg = HumanMessage(content=f'''company_name: {corp}''')
+    """
+    )
+
+    h_msg = HumanMessage(content=f"""company_name: {corp}""")
 
     result = pplx.invoke([s_msg, h_msg]).content
     return result
@@ -311,7 +346,8 @@ Stage 3: Integrated Judgment
 
 @append_to_methods
 def analyze_as_business(corp: str, segment: str = None) -> dict:
-    s_msg = SystemMessage('''
+    s_msg = SystemMessage(
+        """
 You are an expert business analyst specializing in industry and competitive analysis.
 Your task is to analyze a company's business segment and provide detailed insights.
 
@@ -336,29 +372,36 @@ Guidelines:
 - For OPM estimation, consider industry standards, company history, and competitive position
 - Be specific and actionable in your analysis
 - The estimated_opm must be a number between 0 and 100
-''')
-    
-    h_msg = HumanMessage(content=f'''company_name: {corp}
-business_segment: {segment if segment else "Overall Business"}''')
+"""
+    )
+
+    h_msg = HumanMessage(
+        content=f"""company_name: {corp}
+business_segment: {segment if segment else "Overall Business"}"""
+    )
 
     result = pplx.invoke([s_msg, h_msg]).content
-    
+
     # Parse the response into a dictionary
     try:
         # Try to parse as JSON first
         import json
         from io import StringIO
+
         analysis = json.loads(result)
     except json.JSONDecodeError:
         # If JSON parsing fails, use GPT to parse the text
-        analysis = parse_text(result, {
-            "industry_analysis": "Industry analysis details",
-            "competitive_analysis": "Competitive analysis details",
-            "segment_analysis": "Segment analysis details including estimated_opm"
-        })
-        
+        analysis = parse_text(
+            result,
+            {
+                "industry_analysis": "Industry analysis details",
+                "competitive_analysis": "Competitive analysis details",
+                "segment_analysis": "Segment analysis details including estimated_opm",
+            },
+        )
+
         # If segment_analysis is a string, try to extract the estimated_opm
-        if isinstance(analysis.get('segment_analysis'), str):
+        if isinstance(analysis.get("segment_analysis"), str):
             try:
                 # Use GPT to extract the estimated_opm from the text
                 opm_text = gpt_41_nano.invoke(
@@ -367,26 +410,26 @@ business_segment: {segment if segment else "Overall Business"}''')
                     
                     Text: {analysis['segment_analysis']}"""
                 ).content
-                
+
                 # Convert the extracted text to a float
                 estimated_opm = float(opm_text.strip())
-                
+
                 # Create a structured segment_analysis dictionary
-                analysis['segment_analysis'] = {
-                    "description": analysis['segment_analysis'],
+                analysis["segment_analysis"] = {
+                    "description": analysis["segment_analysis"],
                     "market_share": "Not specified",
                     "growth_potential": "Not specified",
-                    "estimated_opm": estimated_opm
+                    "estimated_opm": estimated_opm,
                 }
             except (ValueError, Exception) as e:
                 print(f"Warning: Could not extract OPM for segment {segment}: {str(e)}")
-                analysis['segment_analysis'] = {
-                    "description": analysis['segment_analysis'],
+                analysis["segment_analysis"] = {
+                    "description": analysis["segment_analysis"],
                     "market_share": "Not specified",
                     "growth_potential": "Not specified",
-                    "estimated_opm": 0
+                    "estimated_opm": 0,
                 }
-    
+
     return analysis
 
 
@@ -394,7 +437,7 @@ business_segment: {segment if segment else "Overall Business"}''')
 def summary(corp: str) -> str:
     finance_report = analyze_as_finance(corp)
     ceo_report = analyze_as_ceo(corp)
-    
+
     result = gpt_41_mini.invoke(
         f"""Summarize the following analysis:
 1. Financial and Business Analysis:
@@ -414,7 +457,7 @@ def analyze(corp: str) -> str:
     # Get CEO and financial analysis reports
     ceo_report = analyze_as_ceo(corp)
     finance_report = analyze_as_finance(corp)
-    
+
     # Extract growth rates and operating margins for each segment
     growth_analysis = gpt_41_mini.invoke(
         f"""[Goal]
@@ -453,18 +496,24 @@ Financial Report:
     try:
         import re
         import json
-        
+
         # Clean and parse JSON
-        fence_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', growth_analysis, re.S)
+        fence_match = re.search(
+            r"```(?:json)?\s*(\{.*?\})\s*```", growth_analysis, re.S
+        )
         if fence_match:
             clean_json = fence_match.group(1)
         else:
-            start = growth_analysis.find('{')
-            end = growth_analysis.rfind('}')
-            clean_json = growth_analysis[start:end+1] if start != -1 and end != -1 else growth_analysis
-        
+            start = growth_analysis.find("{")
+            end = growth_analysis.rfind("}")
+            clean_json = (
+                growth_analysis[start : end + 1]
+                if start != -1 and end != -1
+                else growth_analysis
+            )
+
         growth_data = json.loads(clean_json)
-        
+
         # Extract current financial data
         current_financials = gpt_41_mini.invoke(
             f"""[Goal]
@@ -495,104 +544,129 @@ Extract the current financial data from the provided report.
 - If exact values are not available, use reasonable estimates
 """
         ).content
-        
+
         # Parse current financials
-        fence_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', current_financials, re.S)
+        fence_match = re.search(
+            r"```(?:json)?\s*(\{.*?\})\s*```", current_financials, re.S
+        )
         if fence_match:
             clean_json = fence_match.group(1)
         else:
-            start = current_financials.find('{')
-            end = current_financials.rfind('}')
-            clean_json = current_financials[start:end+1] if start != -1 and end != -1 else current_financials
-        
+            start = current_financials.find("{")
+            end = current_financials.rfind("}")
+            clean_json = (
+                current_financials[start : end + 1]
+                if start != -1 and end != -1
+                else current_financials
+            )
+
         current_data = json.loads(clean_json)
-        
+
         # Calculate 5-year projections
         tax_rate = 0.25  # 25% tax rate
         years = 5
-        
+
         # Initialize projection data
         projection_data = []
-        
+
         # For each year
         for year in range(years):
             year_data = {
                 "year": year + 1,
                 "assets": {"total": 0, "liabilities": 0, "equity": 0},
-                "segments": []
+                "segments": [],
             }
-            
+
             # Calculate segment revenues and operating income
             total_operating_income = 0
             for segment in growth_data["segments"]:
                 segment_name = segment["name"]
                 growth_rate = float(segment["growth_rate"]) / 100
                 operating_margin = float(segment["operating_margin"]) / 100
-                
+
                 # Find current revenue for this segment
                 current_revenue = next(
-                    (float(s["revenue"]) for s in current_data["segments"] if s["name"] == segment_name),
-                    0
+                    (
+                        float(s["revenue"])
+                        for s in current_data["segments"]
+                        if s["name"] == segment_name
+                    ),
+                    0,
                 )
-                
+
                 # Calculate projected revenue and operating income
                 projected_revenue = current_revenue * (1 + growth_rate) ** (year + 1)
                 operating_income = projected_revenue * operating_margin
                 total_operating_income += operating_income
-                
-                year_data["segments"].append({
-                    "name": segment_name,
-                    "revenue": projected_revenue
-                })
-            
+
+                year_data["segments"].append(
+                    {"name": segment_name, "revenue": projected_revenue}
+                )
+
             # Calculate net income after tax
             net_income = total_operating_income * (1 - tax_rate)
-            
+
             # Update balance sheet
             if year == 0:
                 # First year: use current values as base
                 year_data["assets"]["total"] = float(current_data["assets"]["total"])
-                year_data["assets"]["liabilities"] = float(current_data["assets"]["liabilities"])
+                year_data["assets"]["liabilities"] = float(
+                    current_data["assets"]["liabilities"]
+                )
                 year_data["assets"]["equity"] = float(current_data["assets"]["equity"])
             else:
                 # Subsequent years: add net income to equity and maintain debt ratio
                 prev_year = projection_data[year - 1]
-                debt_ratio = prev_year["assets"]["liabilities"] / prev_year["assets"]["total"]
-                
-                year_data["assets"]["equity"] = prev_year["assets"]["equity"] + net_income
-                year_data["assets"]["total"] = year_data["assets"]["equity"] / (1 - debt_ratio)
-                year_data["assets"]["liabilities"] = year_data["assets"]["total"] * debt_ratio
-            
+                debt_ratio = (
+                    prev_year["assets"]["liabilities"] / prev_year["assets"]["total"]
+                )
+
+                year_data["assets"]["equity"] = (
+                    prev_year["assets"]["equity"] + net_income
+                )
+                year_data["assets"]["total"] = year_data["assets"]["equity"] / (
+                    1 - debt_ratio
+                )
+                year_data["assets"]["liabilities"] = (
+                    year_data["assets"]["total"] * debt_ratio
+                )
+
             projection_data.append(year_data)
-        
+
         # Format the output as a markdown table
         output = f"# 5-Year Financial Projection for {corp}\n\n"
-        
+
         # Revenue table
         output += "## Revenue by Segment\n"
-        output += "| Year | " + " | ".join(segment["name"] for segment in growth_data["segments"]) + " |\n"
-        output += "|------|" + "|".join(["------" for _ in growth_data["segments"]]) + "|\n"
-        
+        output += (
+            "| Year | "
+            + " | ".join(segment["name"] for segment in growth_data["segments"])
+            + " |\n"
+        )
+        output += (
+            "|------|" + "|".join(["------" for _ in growth_data["segments"]]) + "|\n"
+        )
+
         for year_data in projection_data:
             row = [f"Year {year_data['year']}"]
             for segment in growth_data["segments"]:
                 segment_data = next(
                     (s for s in year_data["segments"] if s["name"] == segment["name"]),
-                    {"revenue": 0}
+                    {"revenue": 0},
                 )
                 row.append(f"${segment_data['revenue']:,.0f}")
             output += "| " + " | ".join(row) + " |\n"
-        
+
         # Balance sheet table
         output += "\n## Balance Sheet\n"
         output += "| Year | Total Assets | Liabilities | Equity |\n"
         output += "|------|--------------|-------------|--------|\n"
-        
+
         for year_data in projection_data:
             output += f"| Year {year_data['year']} | ${year_data['assets']['total']:,.0f} | ${year_data['assets']['liabilities']:,.0f} | ${year_data['assets']['equity']:,.0f} |\n"
-        
+
         return output
-        
+
     except Exception as e:
         print(f"Error in analyze function: {str(e)}")
         return f"Error generating analysis: {str(e)}"
@@ -602,7 +676,7 @@ Extract the current financial data from the provided report.
 def valuation(corp: str, discount_rate: float, terminal_growth: float) -> str:
     """
     Perform DCF valuation using 5-year projections.
-    
+
     Args:
         corp: Company name
         discount_rate: Discount rate (e.g., 0.10 for 10%)
@@ -610,7 +684,7 @@ def valuation(corp: str, discount_rate: float, terminal_growth: float) -> str:
     """
     # Get 5-year projections
     projection_report = analyze(corp)
-    
+
     # Extract projection data
     projection_data = gpt_41_mini.invoke(
         f"""[Goal]
@@ -644,22 +718,28 @@ Extract the financial projection data from the provided report.
 - Calculate net income as operating income * (1 - 0.25) for tax rate
 """
     ).content
-    
+
     try:
         import re
         import json
-        
+
         # Clean and parse JSON
-        fence_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', projection_data, re.S)
+        fence_match = re.search(
+            r"```(?:json)?\s*(\{.*?\})\s*```", projection_data, re.S
+        )
         if fence_match:
             clean_json = fence_match.group(1)
         else:
-            start = projection_data.find('{')
-            end = projection_data.rfind('}')
-            clean_json = projection_data[start:end+1] if start != -1 and end != -1 else projection_data
-        
+            start = projection_data.find("{")
+            end = projection_data.rfind("}")
+            clean_json = (
+                projection_data[start : end + 1]
+                if start != -1 and end != -1
+                else projection_data
+            )
+
         data = json.loads(clean_json)
-        
+
         # Calculate DCF
         def calculate_dcf(projections, discount_rate, terminal_growth):
             # Calculate free cash flow for each year
@@ -669,39 +749,41 @@ Extract the financial projection data from the provided report.
                 # For simplicity, we'll use Net Income as a proxy for FCF
                 fcf = float(year["net_income"])
                 fcf_values.append(fcf)
-            
+
             # Calculate present value of projected cash flows
             pv_fcf = []
             for i, fcf in enumerate(fcf_values):
                 pv = fcf / ((1 + discount_rate) ** (i + 1))
                 pv_fcf.append(pv)
-            
+
             # Calculate terminal value
             last_fcf = fcf_values[-1]
-            terminal_value = (last_fcf * (1 + terminal_growth)) / (discount_rate - terminal_growth)
+            terminal_value = (last_fcf * (1 + terminal_growth)) / (
+                discount_rate - terminal_growth
+            )
             pv_terminal = terminal_value / ((1 + discount_rate) ** len(fcf_values))
-            
+
             # Calculate enterprise value
             enterprise_value = sum(pv_fcf) + pv_terminal
-            
+
             # Get current debt
             current_debt = float(projections[0]["assets"]["liabilities"])
-            
+
             # Calculate equity value
             equity_value = enterprise_value - current_debt
-            
+
             return {
                 "fcf_values": fcf_values,
                 "pv_fcf": pv_fcf,
                 "terminal_value": terminal_value,
                 "pv_terminal": pv_terminal,
                 "enterprise_value": enterprise_value,
-                "equity_value": equity_value
+                "equity_value": equity_value,
             }
-        
+
         # Perform DCF calculation
         dcf_result = calculate_dcf(data["projections"], discount_rate, terminal_growth)
-        
+
         # Format output
         output = f"""# DCF Valuation for {corp}
 
@@ -714,10 +796,12 @@ Extract the financial projection data from the provided report.
 | Year | Free Cash Flow | Present Value |
 |------|----------------|---------------|
 """
-        
-        for i, (fcf, pv) in enumerate(zip(dcf_result["fcf_values"], dcf_result["pv_fcf"])):
+
+        for i, (fcf, pv) in enumerate(
+            zip(dcf_result["fcf_values"], dcf_result["pv_fcf"])
+        ):
             output += f"| {i+1} | ${fcf:,.0f} | ${pv:,.0f} |\n"
-        
+
         output += f"""
 ## Terminal Value
 - Terminal Value: ${dcf_result["terminal_value"]:,.0f}
@@ -728,9 +812,9 @@ Extract the financial projection data from the provided report.
 - Current Debt: ${float(data["projections"][0]["assets"]["liabilities"]):,.0f}
 - Equity Value: ${dcf_result["equity_value"]:,.0f}
 """
-        
+
         return output
-        
+
     except Exception as e:
         print(f"Error in valuation function: {str(e)}")
         return f"Error performing valuation: {str(e)}"

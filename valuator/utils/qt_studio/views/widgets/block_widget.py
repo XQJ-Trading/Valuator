@@ -1,0 +1,123 @@
+from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QApplication
+from PyQt5.QtCore import pyqtSignal
+import markdown
+
+class BlockWidget(QFrame):
+    """
+    제목, 텍스트 상자, 버튼을 포함하는 재사용 가능한 위젯.
+    """
+    # 이 위젯 자체의 버튼 클릭 시그널 (필요 시 외부에서 사용)
+    copy_clicked = pyqtSignal()
+    open_in_new_window_clicked = pyqtSignal()
+
+    def __init__(self, title: str, text: str, level: str = "INFO", parent=None):
+        super().__init__(parent)
+        self._raw_text = text  # 원본 텍스트 저장
+        self._is_md_rendered = False
+        
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("""
+            QFrame { /* The main widget's frame */
+                background-color: #2E2E2E;
+                border: 1px solid #454545;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #EAEAEA;
+                font-weight: bold; 
+                font-size: 14px;
+                padding-left: 5px; /* Add some padding */
+            }
+            QTextEdit {
+                background-color: #252525;
+                color: #D3D3D3;
+                border-radius: 4px;
+                border: 1px solid #454545;
+                font-size: 13px;
+                padding: 8px;
+            }
+            QPushButton {
+                background-color: #4A4A4A;
+                color: #EAEAEA;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #5A5A5A;
+            }
+            QPushButton:pressed {
+                background-color: #6A6A6A;
+            }
+        """)
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+
+        # Title and button row
+        title_row = QHBoxLayout()
+        self.title_label = QLabel(title)
+        
+        # 레벨에 따라 제목 색상 동적 변경
+        if level == "ERROR":
+            title_color = "#E57373" # Soft Red
+        elif level == "SUCCESS":
+            title_color = "#81C784" # Soft Green
+        else:
+            title_color = "#EAEAEA" # Default
+        self.title_label.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {title_color};")
+        
+        title_row.addWidget(self.title_label)
+        title_row.addStretch()
+
+        # Buttons
+        self.new_window_btn = QPushButton("Open")
+        self.copy_btn = QPushButton("Copy")
+        self.md_button = QPushButton("Render as MD")
+        title_row.addWidget(self.new_window_btn)
+        title_row.addWidget(self.copy_btn)
+        title_row.addWidget(self.md_button)
+        
+        layout.addLayout(title_row)
+
+        # Text area
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlainText(self._raw_text)
+        self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit)
+
+        # Connect internal signals
+        self.copy_btn.clicked.connect(self._on_copy)
+        self.md_button.clicked.connect(self.toggle_md_render)
+        # self.new_window_btn.clicked.connect(self.open_in_new_window_clicked) # 외부에서 연결
+
+    def _on_copy(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self._raw_text)
+        self.copy_clicked.emit()
+
+    def set_text(self, text: str):
+        """외부에서 위젯의 텍스트를 설정합니다. 렌더링 상태를 유지합니다."""
+        self._raw_text = text
+        if self._is_md_rendered:
+            html = markdown.markdown(self._raw_text)
+            self.text_edit.setHtml(html)
+        else:
+            self.text_edit.setPlainText(self._raw_text)
+
+    def toggle_md_render(self):
+        """마크다운 렌더링 상태를 토글합니다."""
+        self._is_md_rendered = not self._is_md_rendered
+        
+        if self._is_md_rendered:
+            # 현재 표시된 텍스트가 원본이라고 가정하고 렌더링
+            self._raw_text = self.text_edit.toPlainText()
+            html = markdown.markdown(self._raw_text)
+            self.text_edit.setHtml(html)
+            self.md_button.setText("Show Raw")
+        else:
+            # 저장된 원본 텍스트로 복원
+            self.text_edit.setPlainText(self._raw_text)
+            self.md_button.setText("Render as MD")

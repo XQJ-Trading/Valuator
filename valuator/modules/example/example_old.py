@@ -5,7 +5,7 @@ import pandas as pd
 from valuator.utils.basic_utils import *
 from valuator.utils.llm_utils import *
 from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
-from valuator.utils.test_runner import append_to_methods
+from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.finsource.collector import fetch_using_readerLLM
 from valuator.utils.finsource.sec_collector import get_10k_html_link
 

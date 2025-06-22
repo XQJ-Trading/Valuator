@@ -1,6 +1,30 @@
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QApplication
+from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QApplication, QSizePolicy, QWidget
 from PyQt5.QtCore import pyqtSignal
 import markdown
+
+# "Open" 버튼 클릭 시 전체 텍스트를 보여주는 새 창 클래스
+class TextWindow(QWidget):
+    def __init__(self, title, content, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setGeometry(100, 100, 800, 600) # 창 위치와 크기 설정
+
+        layout = QVBoxLayout(self)
+        text_edit = QTextEdit()
+        text_edit.setPlainText(content)
+        text_edit.setReadOnly(True)
+        # BlockWidget과 유사한 스타일 적용
+        text_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: #252525;
+                color: #D3D3D3;
+                border: none;
+                font-size: 14px;
+                padding: 8px;
+            }
+        """)
+        layout.addWidget(text_edit)
+        self.setLayout(layout)
 
 class BlockWidget(QFrame):
     """
@@ -14,6 +38,7 @@ class BlockWidget(QFrame):
         super().__init__(parent)
         self._raw_text = text  # 원본 텍스트 저장
         self._is_md_rendered = False
+        self.extra_windows = [] # 열린 새 창들의 참조를 저장할 리스트
         
         self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet("""
@@ -59,6 +84,7 @@ class BlockWidget(QFrame):
         # Title and button row
         title_row = QHBoxLayout()
         self.title_label = QLabel(title)
+        self.title_label.setWordWrap(True)
         
         # 레벨에 따라 제목 색상 동적 변경
         if level == "ERROR":
@@ -70,12 +96,17 @@ class BlockWidget(QFrame):
         self.title_label.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {title_color};")
         
         title_row.addWidget(self.title_label)
-        title_row.addStretch()
+        # title_row.addStretch() # 이 라인을 제거하여 제목이 남는 공간을 채우도록 함
 
         # Buttons
         self.new_window_btn = QPushButton("Open")
         self.copy_btn = QPushButton("Copy")
         self.md_button = QPushButton("Render as MD")
+
+        # 버튼들이 텍스트 크기에 맞게 조절되도록 크기 정책 설정
+        for btn in [self.new_window_btn, self.copy_btn, self.md_button]:
+            btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
         title_row.addWidget(self.new_window_btn)
         title_row.addWidget(self.copy_btn)
         title_row.addWidget(self.md_button)
@@ -91,12 +122,25 @@ class BlockWidget(QFrame):
         # Connect internal signals
         self.copy_btn.clicked.connect(self._on_copy)
         self.md_button.clicked.connect(self.toggle_md_render)
-        # self.new_window_btn.clicked.connect(self.open_in_new_window_clicked) # 외부에서 연결
+        self.new_window_btn.clicked.connect(self._open_in_new_window) # Open 버튼 연결
 
     def _on_copy(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self._raw_text)
         self.copy_clicked.emit()
+
+    def _open_in_new_window(self):
+        """전체 텍스트 내용을 새 창에서 엽니다."""
+        # 새 창 인스턴스 생성
+        new_window = TextWindow(f"Full View: {self.title_label.text()}", self._raw_text)
+        
+        # 창이 닫힐 때 리스트에서 자동으로 제거되도록 destroyed 시그널에 연결
+        new_window.destroyed.connect(lambda: self.extra_windows.remove(new_window))
+        
+        # 창 참조를 저장하여 가비지 컬렉션을 방지
+        self.extra_windows.append(new_window)
+        
+        new_window.show()
 
     def set_text(self, text: str):
         """외부에서 위젯의 텍스트를 설정합니다. 렌더링 상태를 유지합니다."""

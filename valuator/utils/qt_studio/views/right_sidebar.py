@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QStackedWidget, QLabel
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, Qt
 from valuator.utils.qt_studio.views.widgets.block_widget import BlockWidget
 from typing import List, Tuple
 import re # 정규표현식 모듈 임포트
@@ -17,6 +17,7 @@ class LogListView(QWidget):
         # Scroll Area
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
         self.container = QWidget()
         self.layout = QVBoxLayout(self.container)

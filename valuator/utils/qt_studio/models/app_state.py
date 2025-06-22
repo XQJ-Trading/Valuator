@@ -76,7 +76,7 @@ class AppState(QObject):
                 file_size = os.path.getsize(LOG_FILE_PATH)
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 base, ext = os.path.splitext(LOG_FILE_PATH)
-                archive_path = f"{base}_{timestamp}.json.bak"
+                archive_path = f"{base}_{timestamp}.json"
                 
                 action = "Forced archiving" if forced else f"Archiving due to size ({file_size / (1024*1024):.2f}MB)"
                 print(f"INFO: {action}. Moving log to {archive_path}")

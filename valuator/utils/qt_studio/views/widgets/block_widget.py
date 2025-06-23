@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QApplication, QSizePolicy, QWidget
+from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QApplication, QSizePolicy, QWidget, QMainWindow
 from PyQt5.QtCore import pyqtSignal
 import markdown
 
@@ -25,6 +25,34 @@ class TextWindow(QWidget):
         """)
         layout.addWidget(text_edit)
         self.setLayout(layout)
+
+DARK_MODE_TABLE_STYLE = '''<style>
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #23272e;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+th, td {
+  border: 1px solid #3a3f4b;
+  padding: 8px 12px;
+  text-align: left;
+  color: #e0e6ed;
+}
+th {
+  background: #2d3440;
+  color: #7ec7ff;
+  font-weight: bold;
+}
+tr:nth-child(even) {
+  background: #262b33;
+}
+tr:nth-child(odd) {
+  background: #23272e;
+}
+</style>'''
 
 class BlockWidget(QFrame):
     """
@@ -60,6 +88,7 @@ class BlockWidget(QFrame):
                 border: 1px solid #454545;
                 font-size: 13px;
                 padding: 8px;
+                font-family: 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Arial', 'sans-serif';
             }
             QPushButton {
                 background-color: #4A4A4A;
@@ -130,23 +159,48 @@ class BlockWidget(QFrame):
         self.copy_clicked.emit()
 
     def _open_in_new_window(self):
-        """전체 텍스트 내용을 새 창에서 엽니다."""
-        # 새 창 인스턴스 생성
-        new_window = TextWindow(f"Full View: {self.title_label.text()}", self._raw_text)
-        
-        # 창이 닫힐 때 리스트에서 자동으로 제거되도록 destroyed 시그널에 연결
+        """전체 텍스트 내용을 새 창에서 BlockWidget 스타일로 엽니다."""
+        from PyQt5.QtWidgets import QMainWindow
+        class FullTextWindow(QMainWindow):
+            def __init__(self, title, text, level):
+                super().__init__()
+                self.setWindowTitle(title)
+                self.setGeometry(100, 100, 900, 700)
+                widget = FullTextBlockWidget(title, text, level)
+                self.setCentralWidget(widget)
+        new_window = FullTextWindow(f"Full View: {self.title_label.text()}", self._raw_text, self.title_label.text())
         new_window.destroyed.connect(lambda: self.extra_windows.remove(new_window))
-        
-        # 창 참조를 저장하여 가비지 컬렉션을 방지
         self.extra_windows.append(new_window)
-        
         new_window.show()
 
     def set_text(self, text: str):
         """외부에서 위젯의 텍스트를 설정합니다. 렌더링 상태를 유지합니다."""
         self._raw_text = text
+        if getattr(self, 'title_label', None) and self.title_label.text().upper().startswith('[ERROR]'):
+            # [ERROR]로 시작하면 monospace
+            self.text_edit.setStyleSheet("""
+                background-color: #252525;
+                color: #D3D3D3;
+                border-radius: 4px;
+                border: 1px solid #454545;
+                font-size: 13px;
+                padding: 8px;
+                font-family: 'D2Coding', 'Consolas', 'Menlo', 'Monaco', 'monospace';
+            """)
+            self.text_edit.setPlainText(self._raw_text)
+            return
+        # 정상 결과는 시스템 기본 폰트
+        self.text_edit.setStyleSheet("""
+            background-color: #252525;
+            color: #D3D3D3;
+            border-radius: 4px;
+            border: 1px solid #454545;
+            font-size: 13px;
+            padding: 8px;
+        """)
         if self._is_md_rendered:
-            html = markdown.markdown(self._raw_text)
+            html = markdown.markdown(self._raw_text, extensions=['tables'])
+            html = DARK_MODE_TABLE_STYLE + html
             self.text_edit.setHtml(html)
         else:
             self.text_edit.setPlainText(self._raw_text)
@@ -158,10 +212,16 @@ class BlockWidget(QFrame):
         if self._is_md_rendered:
             # 현재 표시된 텍스트가 원본이라고 가정하고 렌더링
             self._raw_text = self.text_edit.toPlainText()
-            html = markdown.markdown(self._raw_text)
+            html = markdown.markdown(self._raw_text, extensions=['tables'])
+            html = DARK_MODE_TABLE_STYLE + html
             self.text_edit.setHtml(html)
             self.md_button.setText("Show Raw")
         else:
             # 저장된 원본 텍스트로 복원
             self.text_edit.setPlainText(self._raw_text)
             self.md_button.setText("Render as MD")
+
+class FullTextBlockWidget(BlockWidget):
+    def __init__(self, title: str, text: str, level: str = "INFO", parent=None):
+        super().__init__(title, text, level, parent)
+        self.new_window_btn.setDisabled(True)

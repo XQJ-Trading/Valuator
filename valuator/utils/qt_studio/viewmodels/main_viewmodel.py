@@ -1,6 +1,36 @@
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QThread
 from valuator.utils.qt_studio.models.app_state import AppState
 import traceback
+import inspect
+
+class FunctionRunner(QThread):
+    log_signal = pyqtSignal(str, str)  # (level, message)
+    result_signal = pyqtSignal(object) # 최종 결과
+    error_signal = pyqtSignal(str)     # 에러 메시지
+
+    def __init__(self, func, args=(), kwargs=None, parent=None):
+        super().__init__(parent)
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs or {}
+        self._is_running = True
+
+    def run(self):
+        try:
+            # 함수 실행 중간에 로그를 남기고 싶으면, 로그 콜백을 kwargs로 전달
+            def log_callback(level, msg):
+                self.log_signal.emit(level, msg)
+
+            # 함수가 log_callback 파라미터를 받을 수 있는지 확인
+            sig = inspect.signature(self.func)
+            if 'log_callback' in sig.parameters:
+                self.kwargs['log_callback'] = log_callback
+
+            result = self.func(*self.args, **self.kwargs)
+            self.result_signal.emit(result)
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.error_signal.emit(tb)
 
 class MainViewModel(QObject):
     """
@@ -22,6 +52,7 @@ class MainViewModel(QObject):
         # Connect to model signals
         self._model.functions_changed.connect(self.update_function_list)
         self._model.logs_changed.connect(self.update_log_list)
+        self._model.output_changed.connect(self.function_execution_result.emit)  # 출력 변경 시그널 연결
 
     def load_initial_data(self):
         """ 초기 데이터 로드를 트리거합니다. """
@@ -72,3 +103,33 @@ class MainViewModel(QObject):
     def clear_logs_requested(self):
         """View로부터 로그 초기화 요청을 받아 Model에 전달합니다."""
         self._model.archive_and_clear_logs()
+
+    def execute_function_async(self, func, *args, **kwargs):
+        """
+        주어진 함수를 별도의 QThread(FunctionRunner)에서 비동기로 실행.
+        실행 중에는 output에 '실행중...'을 표시하고, 중간 로그/최종 결과/에러를 각각 시그널로 받아 처리.
+        """
+        self._model.set_output("실행중...")
+        self._runner = FunctionRunner(func, args, kwargs)
+        self._runner.log_signal.connect(lambda level, msg: self._model.add_log(level, msg))
+        self._runner.result_signal.connect(self._on_function_result)
+        self._runner.error_signal.connect(self._on_function_error)
+        self._runner.start()
+
+    def _on_function_result(self, result):
+        self._model.set_output(str(result))
+        self._runner = None
+
+    def _on_function_error(self, tb):
+        self._model.set_output(f"ERROR\n{tb}")
+        self._runner = None
+
+    def execute_selected_function_async(self, input_text: str):
+        """
+        선택된 함수를 비동기로 실행합니다.
+        """
+        if not self._selected_function:
+            self._model.add_log("ERROR", "No function selected to execute.")
+            return
+        func = self._selected_function
+        self.execute_function_async(func, input_text)

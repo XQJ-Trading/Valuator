@@ -37,31 +37,34 @@ class LogListView(QWidget):
 
     def update_logs(self, logs: List[Tuple[str, str]]):
         print(f"[DEBUG] View: Received {len(logs)} logs to display.")
-        # Clear existing logs
-        for i in reversed(range(self.layout.count() - 1)):
-            widget = self.layout.itemAt(i).widget()
-            if widget:
+        # Clear existing logs except the last stretch
+        for i in reversed(range(self.layout.count())):
+            item = self.layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget and not isinstance(widget, QLabel):  # stretch는 widget이 None
                 widget.setParent(None)
+            elif widget is None and i != self.layout.count() - 1:
+                # stretch가 마지막이 아니면 제거
+                self.layout.takeAt(i)
 
         # Add new logs
         for level, message in logs:
             # 메시지에서 함수명 파싱
             func_name_match = re.search(r"'(.*?)'", message)
             func_name = func_name_match.group(1) if func_name_match else "System"
-            
             # 새로운 제목 생성
             title = f"[{level}] {func_name}"
-            
-            # 제목을 50자로 제한
             if len(title) > 50:
                 title = title[:47] + "..."
-
-            # BlockWidget 생성 시 level 전달
             block = BlockWidget(title, message, level=level)
             self.layout.insertWidget(self.layout.count() - 1, block)
-        
-        # QTimer.singleShot을 사용하여 UI 갱신 후 스크롤을 내립니다.
-        QTimer.singleShot(0, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
+
+        # stretch가 마지막에 없으면 추가
+        if self.layout.count() == 0 or self.layout.itemAt(self.layout.count() - 1).widget() is not None:
+            self.layout.addStretch()
+
+        # 로그 추가 후 스크롤을 맨 아래로
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
 
 class RightSidebarView(QWidget):
     """ 우측 사이드바 전체 (Sector C) """

@@ -29,6 +29,7 @@ class AppState(QObject):
     # Signals
     functions_changed = pyqtSignal()
     logs_changed = pyqtSignal()
+    output_changed = pyqtSignal(str)  # 출력 변경 시그널
     
     @classmethod
     def get_instance(cls):
@@ -46,6 +47,7 @@ class AppState(QObject):
             self.utils: List[Callable] = [] # Placeholder for future
             self.logs: List[Tuple[str, str]] = [] # (level, message)
             self.function_examples: dict[str, str] = {} # 예제 입력 저장
+            self._output: str = ""  # 출력 저장 변수
             AppState._instance = self
             self.load_logs_from_file()
 
@@ -145,3 +147,12 @@ class AppState(QObject):
     def get_function_example(self, func_name: str) -> str:
         """ 함수의 예제 입력을 반환합니다. """
         return self.function_examples.get(func_name, "")
+
+    def set_output(self, output: str):
+        """출력을 설정하고 시그널을 발생시킵니다."""
+        self._output = output
+        self.output_changed.emit(output)
+
+    def get_output(self) -> str:
+        """현재 출력을 반환합니다."""
+        return self._output

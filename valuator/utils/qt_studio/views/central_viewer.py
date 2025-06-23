@@ -37,7 +37,7 @@ class FunctionTestView(QWidget):
 
     def execute_function(self):
         input_text = self.input_area.toPlainText()
-        self._viewmodel.execute_selected_function(input_text)
+        self._viewmodel.execute_selected_function_async(input_text)
         
     def update_result(self, result_text):
         self.output_block.set_text(result_text)

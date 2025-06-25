@@ -5,12 +5,12 @@ import pandas as pd
 from valuator.utils.basic_utils import *
 from valuator.utils.llm_utils import *
 from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
-from valuator.utils.test_runner import append_to_methods
+from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.finsource.collector import fetch_using_readerLLM
 from valuator.utils.finsource.sec_collector import get_10k_html_link
 
 
-@append_to_methods
+@append_to_methods()
 def analyze_as_finance(corp: str) -> str:
     year = 2024
     url = get_10k_html_link(corp)
@@ -291,7 +291,7 @@ Error processing analysis for this segment.
     return combined_report
 
 
-@append_to_methods
+@append_to_methods()
 def analyze_as_ceo(corp: str) -> str:
     s_msg = SystemMessage(
         """
@@ -344,7 +344,7 @@ Stage 3: Integrated Judgment
     return result
 
 
-@append_to_methods
+@append_to_methods()
 def analyze_as_business(corp: str, segment: str = None) -> dict:
     s_msg = SystemMessage(
         """
@@ -433,7 +433,9 @@ business_segment: {segment if segment else "Overall Business"}"""
     return analysis
 
 
-@append_to_methods
+
+
+@append_to_methods()
 def summary(corp: str) -> str:
     finance_report = analyze_as_finance(corp)
     ceo_report = analyze_as_ceo(corp)
@@ -452,7 +454,7 @@ Please provide a comprehensive summary that highlights key findings, risks, and 
     return result
 
 
-@append_to_methods
+@append_to_methods()
 def analyze(corp: str) -> str:
     # Get CEO and financial analysis reports
     ceo_report = analyze_as_ceo(corp)
@@ -672,16 +674,38 @@ Extract the current financial data from the provided report.
         return f"Error generating analysis: {str(e)}"
 
 
-@append_to_methods
-def valuation(corp: str, discount_rate: float, terminal_growth: float) -> str:
+
+@append_to_methods(example_input='{"corp": "BBY", "discount_rate": 0.085, "terminal_growth": 0.025}')
+def valuation(params_json: str) -> str:
     """
     Perform DCF valuation using 5-year projections.
 
     Args:
-        corp: Company name
-        discount_rate: Discount rate (e.g., 0.10 for 10%)
-        terminal_growth: Terminal growth rate (e.g., 0.03 for 3%)
+        params_json: JSON string containing parameters:
+            {
+                "corp": str,  # Company name
+                "discount_rate": float,  # e.g., 0.10 for 10%
+                "terminal_growth": float  # e.g., 0.03 for 3%
+            }
+
+    Example:
+        params = {
+            "corp": "BBY",  # Best Buy
+            "discount_rate": 0.085,  # 8.5% discount rate
+            "terminal_growth": 0.025  # 2.5% terminal growth rate
+        }
+        result = valuation(json.dumps(params))
     """
+    # Parse parameters from JSON
+    import json
+    try:
+        params = json.loads(params_json)
+        corp = str(params["corp"])
+        discount_rate = float(params["discount_rate"])
+        terminal_growth = float(params["terminal_growth"])
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        return f"Error parsing parameters: {str(e)}"
+
     # Get 5-year projections
     projection_report = analyze(corp)
 

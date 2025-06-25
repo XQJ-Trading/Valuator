@@ -26,7 +26,7 @@ def get_ticker_and_cik(company_name: str) -> tuple[str, str]:
     (ticker, cik) = get_ticker_and_cik("Microsoft")
     >>> msft 0000789019
     """
-    company_ticker_path = "./utils/finsource/data/sec_company_tickers.json"
+    company_ticker_path = "valuator/utils/finsource/data/sec_company_tickers.json"
     if os.path.exists(company_ticker_path):
         with open(company_ticker_path, "r", encoding="utf-8") as f:
             df = pd.read_json(f)

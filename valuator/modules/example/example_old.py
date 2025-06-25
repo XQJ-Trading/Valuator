@@ -116,9 +116,9 @@ Please analyze the following financial data:
                 revenue = segments.loc[segments["segment"] == segment, "revenue"].iloc[
                     0
                 ]
-                segments.loc[segments["segment"] == segment, "operating_income"] = (
-                    revenue * (estimated_opm / 100)
-                )
+                segments.loc[
+                    segments["segment"] == segment, "operating_income"
+                ] = revenue * (estimated_opm / 100)
             except (KeyError, ValueError) as e:
                 print(
                     f"Warning: Could not update operating income for segment {segment}: {str(e)}"

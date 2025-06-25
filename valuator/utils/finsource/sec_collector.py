@@ -1,3 +1,4 @@
+import re
 import os
 import requests
 
@@ -5,12 +6,12 @@ import pandas as pd
 
 
 def match_sec_company_tickers(
-    df: pd.DataFrame, column: str, search_query: str
+    df: pd.DataFrame, column: str, query: str
 ) -> pd.DataFrame:
+    escaped_query = re.escape(query)
+    pattern = "[^a-zA-Z0-9]*".join(list(escaped_query))
     return df[
-        df[column]
-        .astype(str)
-        .str.contains(search_query, case=False, na=False, regex=False)
+        df[column].astype(str).str.contains(pattern, case=False, na=False, regex=True)
     ]
 
 
@@ -64,9 +65,12 @@ def get_ticker_and_cik(company_name: str) -> tuple[str, str]:
     if matched_rows is not None:
         ticker = matched_rows["ticker"].lower()
         cik = str(matched_rows["cik_str"]).zfill(10)
-        return ticker, cik
+        return re.sub(r"[^a-zA-Z0-9]", "", ticker), cik
     else:
-        ValueError(f"회사명을 찾을 수 없습니다: {company_name}. " "회사명이 정확한지 확인해주세요.")
+        ValueError(
+            f"회사명을 찾을 수 없습니다: {company_name}. "
+            "회사명이 정확한지 확인해주세요."
+        )
 
 
 def get_10k_html_link(company_name: str, year=2024) -> str:

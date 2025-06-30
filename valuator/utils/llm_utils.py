@@ -26,14 +26,18 @@ Based on these texts & guide, make it as a json formatted string.
 
     try:
         # Strip Markdown code fences if present
-        fence_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', result_json, re.S)
+        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", result_json, re.S)
         if fence_match:
             clean_json = fence_match.group(1)
         else:
             # Fallback: extract substring between first '{' and last '}'
-            start = result_json.find('{')
-            end = result_json.rfind('}')
-            clean_json = result_json[start:end+1] if start != -1 and end != -1 else result_json
+            start = result_json.find("{")
+            end = result_json.rfind("}")
+            clean_json = (
+                result_json[start : end + 1]
+                if start != -1 and end != -1
+                else result_json
+            )
         d = json.loads(clean_json)
     except Exception:
         print("parsing error")
@@ -44,13 +48,15 @@ Based on these texts & guide, make it as a json formatted string.
     return d
 
 
-def translate(text: str, /, mode='invoke') -> str:
-    s_msg = SystemMessage('''
+def translate(text: str, /, mode="invoke") -> str:
+    s_msg = SystemMessage(
+        """
     You are a professional translator in finance domain. 
     Given English text, you should translate it into Korean text.
     Text meaning must not be contaminated and changed.
     Format and blank lines should be strictly unchanged.
-    ''')
+    """
+    )
     h_msg = HumanMessage(text)
     result = gpt_41_mini.invoke([s_msg, h_msg]).content
     return result

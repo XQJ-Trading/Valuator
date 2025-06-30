@@ -8,6 +8,7 @@ from valuator.utils.llm_zoo import gpt_41, gpt_41_mini, gpt_41_nano, pplx
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.finsource.collector import fetch_using_readerLLM
 from valuator.utils.finsource.sec_collector import get_10k_html_link
+from valuator.utils.qt_studio.models.app_state import AppState
 
 
 @append_to_methods()
@@ -433,8 +434,6 @@ business_segment: {segment if segment else "Overall Business"}"""
     return analysis
 
 
-
-
 @append_to_methods()
 def summary(corp: str) -> str:
     finance_report = analyze_as_finance(corp)
@@ -674,8 +673,9 @@ Extract the current financial data from the provided report.
         return f"Error generating analysis: {str(e)}"
 
 
-
-@append_to_methods(example_input='{"corp": "BBY", "discount_rate": 0.085, "terminal_growth": 0.025}')
+@append_to_methods(
+    example_input='{"corp": "BBY", "discount_rate": 0.085, "terminal_growth": 0.025}'
+)
 def valuation(params_json: str) -> str:
     """
     Perform DCF valuation using 5-year projections.
@@ -696,8 +696,10 @@ def valuation(params_json: str) -> str:
         }
         result = valuation(json.dumps(params))
     """
+    app_state = AppState.get_instance()
     # Parse parameters from JSON
     import json
+
     try:
         params = json.loads(params_json)
         corp = str(params["corp"])
@@ -836,9 +838,10 @@ Extract the financial projection data from the provided report.
 - Current Debt: ${float(data["projections"][0]["assets"]["liabilities"]):,.0f}
 - Equity Value: ${dcf_result["equity_value"]:,.0f}
 """
-
+        app_state.add_log("SUCCESS", f"DCF Valuation Results for {corp}:\n{output}")
         return output
 
     except Exception as e:
+        app_state.add_log("SUCCESS", f"Error in valuation function: {str(e)}")
         print(f"Error in valuation function: {str(e)}")
         return f"Error performing valuation: {str(e)}"

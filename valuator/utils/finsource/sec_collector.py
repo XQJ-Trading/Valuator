@@ -1,7 +1,22 @@
+import re
 import os
 import requests
 
 import pandas as pd
+
+
+def match_sec_company_tickers(
+    df: pd.DataFrame, column: str, query: str
+) -> pd.DataFrame:
+    escaped_query = re.escape(query)
+    if column == "title":
+        pattern = "[^a-zA-Z0-9]*".join(list(escaped_query))
+    else:
+        pattern = f"^{re.escape(query)}$"
+
+    return df[
+        df[column].astype(str).str.contains(pattern, case=False, na=False, regex=True)
+    ]
 
 
 def get_ticker_and_cik(company_name: str) -> tuple[str, str]:
@@ -40,15 +55,23 @@ def get_ticker_and_cik(company_name: str) -> tuple[str, str]:
         )
     df.columns = ["cik_str", "ticker", "title"]
 
-    # 회사명 검색 (대소문자 무시)
-    matched = df[df["title"].str.contains(company_name, case=False, na=False)]
+    matched_rows = None
 
-    if not matched.empty:
-        ticker = matched.iloc[0]["ticker"].lower()
-        cik = str(matched.iloc[0]["cik_str"]).zfill(10)  # 10자리 0-padding
-        return ticker, cik
+    ticker_matches = match_sec_company_tickers(df, "ticker", company_name)
+
+    if not ticker_matches.empty:
+        matched_rows = ticker_matches.iloc[0]
     else:
-        raise ValueError(
+        title_matches = match_sec_company_tickers(df, "title", company_name)
+        if not title_matches.empty:
+            matched_rows = title_matches.iloc[0]
+
+    if matched_rows is not None:
+        ticker = matched_rows["ticker"].lower()
+        cik = str(matched_rows["cik_str"]).zfill(10)
+        return re.sub(r"[^a-zA-Z0-9]", "", ticker), cik
+    else:
+        ValueError(
             f"회사명을 찾을 수 없습니다: {company_name}. "
             "회사명이 정확한지 확인해주세요."
         )
@@ -87,12 +110,12 @@ def get_10k_html_link(company_name: str, year=2024) -> str:
     forms = filings.get("form", [])
     report_dates = filings.get("reportDate", [])
     accession_numbers = filings.get("accessionNumber", [])
-
     if not (len(forms) == len(report_dates) == len(accession_numbers)):
         raise ValueError(
             "Mismatch in lengths of 'form', 'reportDate', and 'accessionNumber' fields."
         )
 
+    html_url = ""
     for i, (form, report_date, accession_number) in enumerate(
         zip(forms, report_dates, accession_numbers)
     ):
@@ -103,5 +126,17 @@ def get_10k_html_link(company_name: str, year=2024) -> str:
             acc_no = accession_number.replace("-", "")
 
             # SEC EDGAR의 HTML 보고서 URL 구성
-            html_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no}/{ticker}-{report_date}.htm"
-            return html_url
+            for suffix in ["", "x10k"]:
+                try:
+                    html_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no}/{ticker}-{report_date}{suffix}.htm"
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (compatible; MyResearchBot/1.0; contact: myemail@example.com)"  # header에 email 주소가 반드시 필요함.
+                    }
+                    response = requests.get(html_url, headers=headers)
+                    response.raise_for_status()
+                    return html_url
+                except requests.exceptions.RequestException as e:
+                    print(f"[DEBUG] Failed to fetch {url}: {e}")
+    raise ValueError(
+        f"❌ 10-K report not found for {company_name} ({ticker}) in {year}. URLs: {html_url}"
+    )

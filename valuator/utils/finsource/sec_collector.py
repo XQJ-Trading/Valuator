@@ -9,7 +9,11 @@ def match_sec_company_tickers(
     df: pd.DataFrame, column: str, query: str
 ) -> pd.DataFrame:
     escaped_query = re.escape(query)
-    pattern = "[^a-zA-Z0-9]*".join(list(escaped_query))
+    if column == "title":
+        pattern = "[^a-zA-Z0-9]*".join(list(escaped_query))
+    else:
+        pattern = f"^{re.escape(query)}$"
+
     return df[
         df[column].astype(str).str.contains(pattern, case=False, na=False, regex=True)
     ]
@@ -53,14 +57,14 @@ def get_ticker_and_cik(company_name: str) -> tuple[str, str]:
 
     matched_rows = None
 
-    title_matches = match_sec_company_tickers(df, "title", company_name)
+    ticker_matches = match_sec_company_tickers(df, "ticker", company_name)
 
-    if not title_matches.empty:
-        matched_rows = title_matches.iloc[0]
+    if not ticker_matches.empty:
+        matched_rows = ticker_matches.iloc[0]
     else:
-        ticker_matches = match_sec_company_tickers(df, "ticker", company_name)
-        if not ticker_matches.empty:
-            matched_rows = ticker_matches.iloc[0]
+        title_matches = match_sec_company_tickers(df, "title", company_name)
+        if not title_matches.empty:
+            matched_rows = title_matches.iloc[0]
 
     if matched_rows is not None:
         ticker = matched_rows["ticker"].lower()
@@ -111,6 +115,7 @@ def get_10k_html_link(company_name: str, year=2024) -> str:
             "Mismatch in lengths of 'form', 'reportDate', and 'accessionNumber' fields."
         )
 
+    html_url = ""
     for i, (form, report_date, accession_number) in enumerate(
         zip(forms, report_dates, accession_numbers)
     ):

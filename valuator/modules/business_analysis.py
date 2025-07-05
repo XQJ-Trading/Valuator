@@ -48,7 +48,8 @@ Guidelines:
 - Focus on both qualitative and quantitative aspects
 - For OPM estimation, consider industry standards, company history, and competitive position
 - Be specific and actionable in your analysis
-- The estimated_opm must be a number between 0 and 100
+- The estimated_opm must be a number between 0 and 100.
+- Segment classification should primarily follow SEC standards, but the first-level classification must be based on product type, service type, or business type.
 """
     )
 

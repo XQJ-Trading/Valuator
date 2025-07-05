@@ -9,6 +9,7 @@ from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import pplx, gpt_41_nano
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.llm_utils import parse_text, SystemMessage, HumanMessage
+from valuator.utils.qt_studio.models.app_state import AppState
 
 
 @append_to_methods()
@@ -49,16 +50,22 @@ Guidelines:
 - For OPM estimation, consider industry standards, company history, and competitive position
 - Be specific and actionable in your analysis
 - The estimated_opm must be a number between 0 and 100.
-- Segment classification should primarily follow SEC standards, but the first-level classification must be based on product type, service type, or business type.
+- Use SEC segment information as reference, but ensure first-level classification is product-centric
+- Primary segment classification should be based on product type, service type, or business type
+- When analyzing segments, prioritize product-based categorization over organizational structure
 """
     )
 
     h_msg = HumanMessage(
         content=f"""company_name: {corp}
-business_segment: {segment if segment else "Overall Business"}"""
+SEC-given business_segment : {segment if segment else "Overall Business"}"""
     )
 
     result = pplx.invoke([s_msg, h_msg]).content
+
+    # log the result
+    app_state = AppState.get_instance()
+    app_state.add_log("INFO", f"Business analysis result for {corp}: {result[:200]}...")
 
     analysis: Dict[str, Any] = {}
     try:

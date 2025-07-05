@@ -123,6 +123,7 @@ Please analyze the following financial data:
                 print(
                     f"Warning: Could not update operating income for segment {segment}: {str(e)}"
                 )
+                raise
 
     # Validate and fix operating income and margin calculations
     for idx, row in segments.iterrows():
@@ -260,6 +261,7 @@ Present this data as a single JSON object.
 ### {segment}
 Error processing analysis for this segment.
 """
+            raise
 
     # Combine both reports
     combined_report = f"""{financial_data}
@@ -407,6 +409,7 @@ business_segment: {segment if segment else "Overall Business"}"""
                     "growth_potential": "Not specified",
                     "estimated_opm": 0,
                 }
+                raise
 
     return analysis
 

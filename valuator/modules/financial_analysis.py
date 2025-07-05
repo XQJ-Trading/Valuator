@@ -114,10 +114,7 @@ def analyze_as_finance(corp: str) -> str:
 """
         except Exception as e:
             print(f"Warning: Error processing analysis for segment {segment}: {str(e)}")
-            business_report += f"""
-### {segment}
-Error processing analysis for this segment.
-"""
+            raise
 
     # Combine both reports
     combined_report = f"""{financial_data}
@@ -214,5 +211,4 @@ Please redefine these segments using product-centric classification while preser
         
     except Exception as e:
         print(f"Warning: Could not redefine segments for {corp}: {str(e)}")
-        # Fallback to original segments
-        return segments_df
+        raise

@@ -118,11 +118,6 @@ SEC-given business_segment : {segment if segment else "Overall Business"}"""
                 }
             except (ValueError, Exception) as e:
                 print(f"Warning: Could not extract OPM for segment {segment}: {str(e)}")
-                analysis["segment_analysis"] = {
-                    "description": analysis["segment_analysis"],
-                    "market_share": "Not specified",
-                    "growth_potential": "Not specified",
-                    "estimated_opm": 0,
-                }
+                raise
 
     return analysis

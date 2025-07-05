@@ -28,6 +28,7 @@ def parse_json_from_llm_output(text):
         text = "\n".join(str(t) for t in text)
     if not isinstance(text, str):
         raise ValueError("Input must be a string or list of strings.")
+    
     # 코드펜스 우선
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
     if fence_match:
@@ -39,4 +40,26 @@ def parse_json_from_llm_output(text):
             clean_json = text[start : end + 1]
         else:
             clean_json = text
-    return json.loads(clean_json)
+    
+    # Remove comments from JSON
+    # Remove single-line comments (# or //)
+    clean_json = re.sub(r'//.*$', '', clean_json, flags=re.MULTILINE)
+    clean_json = re.sub(r'#.*$', '', clean_json, flags=re.MULTILINE)
+    
+    # Remove trailing commas before closing braces/brackets
+    clean_json = re.sub(r',(\s*[}\]])', r'\1', clean_json)
+    
+    try:
+        return json.loads(clean_json)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: JSON parsing failed at line {e.lineno}, column {e.colno}")
+        print(f"ERROR: Error message: {e.msg}")
+        print(f"ERROR: Problematic text around error:")
+        lines = clean_json.split('\n')
+        if e.lineno <= len(lines):
+            start_line = max(0, e.lineno - 2)
+            end_line = min(len(lines), e.lineno + 2)
+            for i in range(start_line, end_line):
+                marker = ">>> " if i == e.lineno - 1 else "    "
+                print(f"{marker}{i+1:3d}: {lines[i]}")
+        raise

@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from PyQt5.QtCore import QObject, pyqtSignal
 from typing import Callable, List, Tuple
+from valuator.utils.qt_studio.models.font_manager import FontManager
 
 LOG_FILE_PATH = "logs/qt_studio_logs.json"
 LOG_SIZE_LIMIT = 1 * 1024 * 1024 # 1MB
@@ -48,6 +49,7 @@ class AppState(QObject):
             self.logs: List[Tuple[str, str]] = [] # (level, message)
             self.function_examples: dict[str, str] = {} # 예제 입력 저장
             self._output: str = ""  # 출력 저장 변수
+            self.font_manager = FontManager.get_instance()  # 폰트 매니저 초기화
             AppState._instance = self
             self.load_logs_from_file()
 

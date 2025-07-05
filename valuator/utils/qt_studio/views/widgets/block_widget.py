@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QApplication, QSizePolicy, QWidget, QMainWindow
 from PyQt5.QtCore import pyqtSignal
+from valuator.utils.qt_studio.models.font_manager import FontManager
 import markdown
 
 # "Open" 버튼 클릭 시 전체 텍스트를 보여주는 새 창 클래스
@@ -67,44 +68,13 @@ class BlockWidget(QFrame):
         self._raw_text = text  # 원본 텍스트 저장
         self._is_md_rendered = False
         self.extra_windows = [] # 열린 새 창들의 참조를 저장할 리스트
+        self._font_manager = FontManager.get_instance()
         
         self.setFrameShape(QFrame.StyledPanel)
-        self.setStyleSheet("""
-            QFrame { /* The main widget's frame */
-                background-color: #2E2E2E;
-                border: 1px solid #454545;
-                border-radius: 8px;
-            }
-            QLabel {
-                color: #EAEAEA;
-                font-weight: bold; 
-                font-size: 14px;
-                padding-left: 5px; /* Add some padding */
-            }
-            QTextEdit {
-                background-color: #252525;
-                color: #D3D3D3;
-                border-radius: 4px;
-                border: 1px solid #454545;
-                font-size: 13px;
-                padding: 8px;
-                font-family: 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Arial', 'sans-serif';
-            }
-            QPushButton {
-                background-color: #4A4A4A;
-                color: #EAEAEA;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #5A5A5A;
-            }
-            QPushButton:pressed {
-                background-color: #6A6A6A;
-            }
-        """)
+        self._update_stylesheet()
+        
+        # 폰트 크기 변경 시그널 연결
+        self._font_manager.font_scale_changed.connect(self._update_stylesheet)
 
         # Main layout
         layout = QVBoxLayout(self)
@@ -122,7 +92,7 @@ class BlockWidget(QFrame):
             title_color = "#81C784" # Soft Green
         else:
             title_color = "#EAEAEA" # Default
-        self.title_label.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {title_color};")
+        self._update_title_style(title_color)
         
         title_row.addWidget(self.title_label)
         # title_row.addStretch() # 이 라인을 제거하여 제목이 남는 공간을 채우도록 함
@@ -178,26 +148,11 @@ class BlockWidget(QFrame):
         self._raw_text = text
         if getattr(self, 'title_label', None) and self.title_label.text().upper().startswith('[ERROR]'):
             # [ERROR]로 시작하면 monospace
-            self.text_edit.setStyleSheet("""
-                background-color: #252525;
-                color: #D3D3D3;
-                border-radius: 4px;
-                border: 1px solid #454545;
-                font-size: 13px;
-                padding: 8px;
-                font-family: 'D2Coding', 'Consolas', 'Menlo', 'Monaco', 'monospace';
-            """)
+            self._update_error_text_style()
             self.text_edit.setPlainText(self._raw_text)
             return
         # 정상 결과는 시스템 기본 폰트
-        self.text_edit.setStyleSheet("""
-            background-color: #252525;
-            color: #D3D3D3;
-            border-radius: 4px;
-            border: 1px solid #454545;
-            font-size: 13px;
-            padding: 8px;
-        """)
+        self._update_normal_text_style()
         if self._is_md_rendered:
             html = markdown.markdown(self._raw_text, extensions=['tables'])
             html = DARK_MODE_TABLE_STYLE + html
@@ -220,6 +175,80 @@ class BlockWidget(QFrame):
             # 저장된 원본 텍스트로 복원
             self.text_edit.setPlainText(self._raw_text)
             self.md_button.setText("Render as MD")
+
+    def _update_stylesheet(self):
+        """현재 폰트 크기에 맞게 스타일시트를 업데이트합니다."""
+        label_size = self._font_manager.get_font_size("label")
+        text_size = self._font_manager.get_font_size("text")
+        button_size = self._font_manager.get_font_size("button")
+        
+        stylesheet = f"""
+            QFrame {{ /* The main widget's frame */
+                background-color: #2E2E2E;
+                border: 1px solid #454545;
+                border-radius: 8px;
+            }}
+            QLabel {{
+                color: #EAEAEA;
+                font-weight: bold; 
+                font-size: {label_size}px;
+                padding-left: 5px; /* Add some padding */
+            }}
+            QTextEdit {{
+                background-color: #252525;
+                color: #D3D3D3;
+                border-radius: 4px;
+                border: 1px solid #454545;
+                font-size: {text_size}px;
+                padding: 8px;
+                font-family: 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Arial', 'sans-serif';
+            }}
+            QPushButton {{
+                background-color: #4A4A4A;
+                color: #EAEAEA;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 4px;
+                font-size: {button_size}px;
+            }}
+            QPushButton:hover {{
+                background-color: #5A5A5A;
+            }}
+            QPushButton:pressed {{
+                background-color: #6A6A6A;
+            }}
+        """
+        self.setStyleSheet(stylesheet)
+    
+    def _update_title_style(self, color: str):
+        """제목 라벨의 스타일을 업데이트합니다."""
+        title_size = self._font_manager.get_font_size("title")
+        self.title_label.setStyleSheet(f"font-weight: bold; font-size: {title_size}px; color: {color};")
+    
+    def _update_normal_text_style(self):
+        """일반 텍스트 스타일을 업데이트합니다."""
+        text_size = self._font_manager.get_font_size("text")
+        self.text_edit.setStyleSheet(f"""
+            background-color: #252525;
+            color: #D3D3D3;
+            border-radius: 4px;
+            border: 1px solid #454545;
+            font-size: {text_size}px;
+            padding: 8px;
+        """)
+    
+    def _update_error_text_style(self):
+        """에러 텍스트 스타일을 업데이트합니다."""
+        text_size = self._font_manager.get_font_size("text")
+        self.text_edit.setStyleSheet(f"""
+            background-color: #252525;
+            color: #D3D3D3;
+            border-radius: 4px;
+            border: 1px solid #454545;
+            font-size: {text_size}px;
+            padding: 8px;
+            font-family: 'D2Coding', 'Consolas', 'Menlo', 'Monaco', 'monospace';
+        """)
 
 class FullTextBlockWidget(BlockWidget):
     def __init__(self, title: str, text: str, level: str = "INFO", parent=None):

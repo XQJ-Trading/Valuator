@@ -204,4 +204,4 @@ Extract the current financial data from the provided report.
 
     except Exception as e:
         print(f"Error in analyze function: {str(e)}")
-        return f"Error generating analysis: {str(e)}"
+        raise

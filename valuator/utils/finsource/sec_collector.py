@@ -71,7 +71,7 @@ def get_ticker_and_cik(company_name: str) -> tuple[str, str]:
         cik = str(matched_rows["cik_str"]).zfill(10)
         return re.sub(r"[^a-zA-Z0-9]", "", ticker), cik
     else:
-        ValueError(
+        raise ValueError(
             f"회사명을 찾을 수 없습니다: {company_name}. "
             "회사명이 정확한지 확인해주세요."
         )

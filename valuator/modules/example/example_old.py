@@ -9,6 +9,7 @@ from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.finsource.collector import fetch_using_readerLLM
 from valuator.utils.finsource.sec_collector import get_10k_html_link
 from valuator.utils.qt_studio.models.app_state import AppState
+from valuator.utils.basic_utils import parse_json_from_llm_output
 
 
 @append_to_methods()
@@ -92,8 +93,6 @@ Please analyze the following financial data:
     ).content
 
     # Fix JSON parsing warning by using StringIO
-    from io import StringIO
-
     segments = pd.read_json(StringIO(segments_json), lines=True)
 
     # Get business analysis for each segment
@@ -197,25 +196,9 @@ Present this data as a single JSON object.
     )
     try:
         # Strip Markdown code fences if present
-        import re
-
-        fence_match = re.search(
-            r"```(?:json)?\\s*(\\{.*?\\})\\s*```", balance_sheet_json_str, re.S
+        bs_data = parse_json_from_llm_output(balance_sheet_json_str).get(
+            "balance_sheet", {}
         )
-        if fence_match:
-            clean_json_bs = fence_match.group(1)
-        else:
-            start_bs = balance_sheet_json_str.find("{")
-            end_bs = balance_sheet_json_str.rfind("}")
-            clean_json_bs = (
-                balance_sheet_json_str[start_bs : end_bs + 1]
-                if start_bs != -1 and end_bs != -1
-                else balance_sheet_json_str
-            )
-
-        import json
-
-        bs_data = json.loads(clean_json_bs).get("balance_sheet", {})
 
         if bs_data:
             md_parts = ["## Detailed Balance Sheet\n"]
@@ -244,9 +227,6 @@ Present this data as a single JSON object.
         else:
             print("Warning: Balance sheet data was empty after parsing.")
 
-    except json.JSONDecodeError as e:
-        print(f"Warning: Could not parse Balance Sheet JSON: {e}")
-        print(f"Raw Balance Sheet LLM output: {balance_sheet_json_str}")
     except Exception as e:
         print(
             f"Warning: An unexpected error occurred while processing balance sheet data: {e}"
@@ -386,10 +366,7 @@ business_segment: {segment if segment else "Overall Business"}"""
     # Parse the response into a dictionary
     try:
         # Try to parse as JSON first
-        import json
-        from io import StringIO
-
-        analysis = json.loads(result)
+        analysis = parse_json_from_llm_output(result)
     except json.JSONDecodeError:
         # If JSON parsing fails, use GPT to parse the text
         analysis = parse_text(
@@ -495,25 +472,8 @@ Financial Report:
 
     # Parse the growth analysis
     try:
-        import re
-        import json
-
         # Clean and parse JSON
-        fence_match = re.search(
-            r"```(?:json)?\s*(\{.*?\})\s*```", growth_analysis, re.S
-        )
-        if fence_match:
-            clean_json = fence_match.group(1)
-        else:
-            start = growth_analysis.find("{")
-            end = growth_analysis.rfind("}")
-            clean_json = (
-                growth_analysis[start : end + 1]
-                if start != -1 and end != -1
-                else growth_analysis
-            )
-
-        growth_data = json.loads(clean_json)
+        growth_data = parse_json_from_llm_output(growth_analysis)
 
         # Extract current financial data
         current_financials = gpt_41_mini.invoke(
@@ -547,21 +507,7 @@ Extract the current financial data from the provided report.
         ).content
 
         # Parse current financials
-        fence_match = re.search(
-            r"```(?:json)?\s*(\{.*?\})\s*```", current_financials, re.S
-        )
-        if fence_match:
-            clean_json = fence_match.group(1)
-        else:
-            start = current_financials.find("{")
-            end = current_financials.rfind("}")
-            clean_json = (
-                current_financials[start : end + 1]
-                if start != -1 and end != -1
-                else current_financials
-            )
-
-        current_data = json.loads(clean_json)
+        current_data = parse_json_from_llm_output(current_financials)
 
         # Calculate 5-year projections
         tax_rate = 0.25  # 25% tax rate
@@ -746,25 +692,8 @@ Extract the financial projection data from the provided report.
     ).content
 
     try:
-        import re
-        import json
-
         # Clean and parse JSON
-        fence_match = re.search(
-            r"```(?:json)?\s*(\{.*?\})\s*```", projection_data, re.S
-        )
-        if fence_match:
-            clean_json = fence_match.group(1)
-        else:
-            start = projection_data.find("{")
-            end = projection_data.rfind("}")
-            clean_json = (
-                projection_data[start : end + 1]
-                if start != -1 and end != -1
-                else projection_data
-            )
-
-        data = json.loads(clean_json)
+        data = parse_json_from_llm_output(projection_data)
 
         # Calculate DCF
         def calculate_dcf(projections, discount_rate, terminal_growth):

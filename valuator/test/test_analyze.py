@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from valuator.utils.qt_studio.models.app_state import AppState
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.finsource.sec_collector import get_ticker_and_cik, get_10k_html_link
-from valuator.modules.example.example_old import valuation
+from valuator.modules.valuation import valuation
 
 
 # Dummy function for testing
@@ -39,8 +39,8 @@ def test_log_capture():
 
 
 tickers = [
-    #     "AAPL",
-    # "MSFT",
+    "AAPL",
+    "MSFT",
     "PEP",
     "NVDA",
     "SBUX",

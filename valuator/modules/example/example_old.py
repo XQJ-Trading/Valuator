@@ -767,10 +767,18 @@ Extract the financial projection data from the provided report.
 - Current Debt: ${float(data["projections"][0]["assets"]["liabilities"]):,.0f}
 - Equity Value: ${dcf_result["equity_value"]:,.0f}
 """
-        app_state.add_log("SUCCESS", f"DCF Valuation Results for {corp}:\n{output}")
+        app_state.add_log(
+            level="SUCCESS",
+            message=f"DCF Valuation Results for {corp}:\n{output}",
+            title=f"[SUCCESS] DCF Valuation for {corp}"
+        )
         return output
 
     except Exception as e:
-        app_state.add_log("SUCCESS", f"Error in valuation function: {str(e)}")
+        app_state.add_log(
+            level="ERROR",
+            message=f"Error in valuation function: {str(e)}",
+            title=f"[ERROR] DCF Valuation for {corp}"
+        )
         print(f"Error in valuation function: {str(e)}")
         return f"Error performing valuation: {str(e)}"

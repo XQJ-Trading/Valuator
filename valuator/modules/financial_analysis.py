@@ -201,10 +201,14 @@ Please redefine these segments using product-centric classification while preser
         # Convert to DataFrame
         redefined_segments = pd.DataFrame(redefined_data["segments"])
         
-        # Log the redefinition process
+        # Log the redefinition process using the updated API format
         from valuator.utils.qt_studio.models.app_state import AppState
         app_state = AppState.get_instance()
-        app_state.add_log("INFO", f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created")
+        app_state.add_log(
+            level="INFO",
+            message=f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created",
+            title=f"[INFO] Redefined Segments"
+        )
         
         return redefined_segments
         

@@ -63,9 +63,13 @@ SEC-given business_segment : {segment if segment else "Overall Business"}"""
 
     result = pplx.invoke([s_msg, h_msg]).content
 
-    # log the result
+    # 로그 저장 함수 명세 변경에 따라 title, message, level을 명확히 전달 (재정의된 API 형식 적용)
     app_state = AppState.get_instance()
-    app_state.add_log("INFO", f"Business analysis result for {corp}: {result[:200]}...")
+    app_state.add_log(
+        level="INFO",
+        message=f"Business analysis result for {corp}: {result[:200]}...",
+        title=f"[INFO] Business analysis for {corp}"
+    )
 
     analysis: Dict[str, Any] = {}
     try:

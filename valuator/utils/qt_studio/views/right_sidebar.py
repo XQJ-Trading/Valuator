@@ -35,7 +35,7 @@ class LogListView(QWidget):
         # Connections
         self.clear_button.clicked.connect(self._viewmodel.clear_logs_requested)
 
-    def update_logs(self, logs: List[Tuple[str, str]]):
+    def update_logs(self, logs):
         print(f"[DEBUG] View: Received {len(logs)} logs to display.")
         # Clear existing logs except the last stretch
         for i in reversed(range(self.layout.count())):
@@ -47,15 +47,11 @@ class LogListView(QWidget):
                 # stretch가 마지막이 아니면 제거
                 self.layout.takeAt(i)
 
-        # Add new logs
-        for level, message in logs:
-            # 메시지에서 함수명 파싱
-            func_name_match = re.search(r"'(.*?)'", message)
-            func_name = func_name_match.group(1) if func_name_match else "System"
-            # 새로운 제목 생성
-            title = f"[{level}] {func_name}"
-            if len(title) > 50:
-                title = title[:47] + "..."
+        # Add new logs (dict 기반)
+        for log in logs:
+            title = log.get('title', '[INFO] System')
+            message = log.get('message', '')
+            level = log.get('level', 'INFO')
             block = BlockWidget(title, message, level=level)
             self.layout.insertWidget(self.layout.count() - 1, block)
 

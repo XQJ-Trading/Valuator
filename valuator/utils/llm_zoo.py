@@ -18,4 +18,4 @@ gpt_41_nano = ChatOpenAI(api_key=openai_api_key, model="gpt-4.1-nano")
 
 pplx_api_key = os.getenv("PPLX_API_KEY")
 
-pplx = ChatPerplexity(api_key=pplx_api_key, model="sonar")
+pplx = ChatPerplexity(api_key=pplx_api_key, model="sonar", temperature=0.0)

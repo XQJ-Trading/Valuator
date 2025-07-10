@@ -150,9 +150,26 @@ def calculate_dcf(
     """
     # Calculate free cash flow for each year
     fcf_values = []
+    app_state = AppState.get_instance()
+    
     for year in projections:
+        # Log the net_income value for debugging
+        app_state.add_log(
+            level="INFO",
+            message=f"Year {year.get('year', 'Unknown')} net_income: {year.get('net_income', 'None')}",
+            title="[DEBUG] Net Income Values"
+        )
+        
         # Free Cash Flow = Net Income + Depreciation - CapEx - Change in Working Capital
         # For simplicity, we'll use Net Income as a proxy for FCF
+        if year["net_income"] is None:
+            app_state.add_log(
+                level="ERROR",
+                message=f"Year {year.get('year', 'Unknown')} has None net_income. Year data: {year}",
+                title="[ERROR] Missing Net Income Data"
+            )
+            raise ValueError(f"Year {year.get('year', 'Unknown')} has None net_income")
+        
         fcf = float(year["net_income"])
         fcf_values.append(fcf)
 

@@ -41,7 +41,16 @@ class MainWindow(QMainWindow):
     # keyPressEvent 메서드를 오버라이드하여 단축키 처리
     def keyPressEvent(self, event):
         """ 키보드 이벤트를 직접 처리하여 한/영 상태와 무관하게 단축키를 감지합니다. """
-        if event.key() == Qt.Key_W and event.modifiers() == Qt.ControlModifier:
-            QApplication.instance().quit()
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_W:
+                QApplication.instance().quit()
+            elif event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:  # Ctrl + Plus 또는 Ctrl + =
+                self._viewmodel.increase_font_size()
+            elif event.key() == Qt.Key_Minus:  # Ctrl + Minus
+                self._viewmodel.decrease_font_size()
+            elif event.key() == Qt.Key_0:  # Ctrl + 0
+                self._viewmodel.reset_font_size()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)

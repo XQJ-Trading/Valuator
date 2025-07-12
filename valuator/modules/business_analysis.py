@@ -3,13 +3,21 @@ Business analysis module for industry and competitive analysis.
 """
 
 import json
+import logging
 from typing import Dict, Optional, Any
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import pplx, gpt_41_nano
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.llm_utils import parse_text, SystemMessage, HumanMessage
+from valuator.utils.qt_studio.models.app_state import AppState
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @append_to_methods()
 def analyze_as_business(corp: str, segment: Optional[str] = None) -> Dict[str, Any]:
@@ -48,16 +56,22 @@ Guidelines:
 - Focus on both qualitative and quantitative aspects
 - For OPM estimation, consider industry standards, company history, and competitive position
 - Be specific and actionable in your analysis
-- The estimated_opm must be a number between 0 and 100
+- The estimated_opm must be a number between 0 and 100.
+- Use SEC segment information as reference, but ensure first-level classification is product-centric
+- Primary segment classification should be based on product type, service type, or business type
+- When analyzing segments, prioritize product-based categorization over organizational structure
 """
     )
 
     h_msg = HumanMessage(
         content=f"""company_name: {corp}
-business_segment: {segment if segment else "Overall Business"}"""
+SEC-given business_segment : {segment if segment else "Overall Business"}"""
     )
 
     result = pplx.invoke([s_msg, h_msg]).content
+
+    # INFO log - CLI만 출력
+    logger.info(f"Business analysis result for {corp}: {result[:200]}...")
 
     analysis: Dict[str, Any] = {}
     try:
@@ -105,12 +119,8 @@ business_segment: {segment if segment else "Overall Business"}"""
                     "estimated_opm": estimated_opm,
                 }
             except (ValueError, Exception) as e:
-                print(f"Warning: Could not extract OPM for segment {segment}: {str(e)}")
-                analysis["segment_analysis"] = {
-                    "description": analysis["segment_analysis"],
-                    "market_share": "Not specified",
-                    "growth_potential": "Not specified",
-                    "estimated_opm": 0,
-                }
+                # CLI 로그로 변경
+                logger.warning(f"Could not extract OPM for segment {segment}: {str(e)}")
+                raise
 
     return analysis

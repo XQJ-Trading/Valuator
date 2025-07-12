@@ -2,12 +2,19 @@
 Projection analysis module for 5-year financial projections.
 """
 
+import logging
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import gpt_41_mini
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.modules.financial_analysis import analyze_as_finance
 from valuator.modules.ceo_analysis import analyze_as_ceo
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @append_to_methods()
 def analyze(corp: str) -> str:
@@ -55,6 +62,7 @@ Financial Report:
 - Operating margins should be based on historical data
 - All percentages should be numbers without the % symbol
 - If data is not available, use reasonable industry averages
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
 """
     ).content
 
@@ -91,6 +99,7 @@ Extract the current financial data from the provided report.
 - All monetary values should be numbers without currency symbols
 - Use the most recent available data
 - If exact values are not available, use reasonable estimates
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
 """
         ).content
 
@@ -140,6 +149,10 @@ Extract the current financial data from the provided report.
 
             # Calculate net income after tax
             net_income = total_operating_income * (1 - tax_rate)
+
+            # Add net income to year data
+            year_data["net_income"] = net_income
+            year_data["operating_income"] = total_operating_income
 
             # Update balance sheet
             if year == 0:
@@ -192,6 +205,14 @@ Extract the current financial data from the provided report.
                 row.append(f"${segment_data['revenue']:,.0f}")
             output += "| " + " | ".join(row) + " |\n"
 
+        # Income statement table
+        output += "\n## Income Statement\n"
+        output += "| Year | Operating Income | Net Income |\n"
+        output += "|------|------------------|------------|\n"
+
+        for year_data in projection_data:
+            output += f"| Year {year_data['year']} | ${year_data['operating_income']:,.0f} | ${year_data['net_income']:,.0f} |\n"
+
         # Balance sheet table
         output += "\n## Balance Sheet\n"
         output += "| Year | Total Assets | Liabilities | Equity |\n"
@@ -203,5 +224,6 @@ Extract the current financial data from the provided report.
         return output
 
     except Exception as e:
-        print(f"Error in analyze function: {str(e)}")
-        return f"Error generating analysis: {str(e)}"
+        # CLI 로그로 변경
+        logger.error(f"Error in analyze function: {str(e)}")
+        raise

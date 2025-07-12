@@ -2,10 +2,17 @@
 CEO analysis module for leadership and governance evaluation.
 """
 
+import logging
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import pplx
 from valuator.utils.llm_utils import SystemMessage, HumanMessage
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @append_to_methods()
 def analyze_as_ceo(corp: str) -> str:

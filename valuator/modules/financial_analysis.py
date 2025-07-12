@@ -4,6 +4,7 @@ Financial analysis module for company financial data analysis.
 
 from io import StringIO
 import pandas as pd
+import logging
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.modules.analysis_utils import (
@@ -13,6 +14,16 @@ from valuator.modules.analysis_utils import (
     format_balance_sheet_markdown,
 )
 from valuator.modules.business_analysis import analyze_as_business
+from valuator.utils.llm_zoo import pplx
+from valuator.utils.llm_utils import SystemMessage, HumanMessage
+from valuator.utils.basic_utils import parse_json_from_llm_output
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 @append_to_methods()
@@ -29,18 +40,22 @@ def analyze_as_finance(corp: str) -> str:
     year = 2024
 
     summary = fetch_company_data(corp)
-    segments_json = extract_segments_in_company(corp, summary, year)
-    segments = pd.read_json(StringIO(segments_json), lines=True)
+    segments = extract_segments_in_company(corp, summary, year)
 
-    # Get business analysis for each segment
+    # Redefine segments based on product-centric classification
+    redefined_segments = redefine_segments_product_centric(corp, segments, summary)
+
+    # Get business analysis for each redefined segment
     business_reports = {}
-    for segment in segments["segment"]:
+    for segment in redefined_segments["segment"]:
         business_analysis = analyze_as_business(corp, segment)
         business_reports[segment] = business_analysis
 
         # Update operating income if missing
         if pd.isna(
-            segments.loc[segments["segment"] == segment, "operating_income"].iloc[0]
+            redefined_segments.loc[
+                redefined_segments["segment"] == segment, "operating_income"
+            ].iloc[0]
         ):
             try:
                 opm_str = str(business_analysis["segment_analysis"]["estimated_opm"])
@@ -50,36 +65,40 @@ def analyze_as_finance(corp: str) -> str:
                 # Remove any non-numeric characters except decimal point
                 opm_str = "".join(c for c in opm_str if c.isdigit() or c == ".")
                 estimated_opm = float(opm_str)
-                revenue = segments.loc[segments["segment"] == segment, "revenue"].iloc[
-                    0
-                ]
-                segments.loc[segments["segment"] == segment, "operating_income"] = (
-                    revenue * (estimated_opm / 100)
-                )
+                revenue = redefined_segments.loc[
+                    redefined_segments["segment"] == segment, "revenue"
+                ].iloc[0]
+                redefined_segments.loc[
+                    redefined_segments["segment"] == segment, "operating_income"
+                ] = revenue * (estimated_opm / 100)
             except (KeyError, ValueError) as e:
-                print(
-                    f"Warning: Could not update operating income for segment {segment}: {str(e)}"
+                # CLI 로그로 변경
+                logger.warning(
+                    f"Could not update operating income for segment {segment}: {str(e)}"
                 )
 
     # Validate and fix operating income and margin calculations
-    for idx, row in segments.iterrows():
+    for idx, row in redefined_segments.iterrows():
         revenue = row["revenue"]
         operating_income = row["operating_income"]
 
         # If operating income is greater than revenue, cap it at 90% of revenue
         if operating_income > revenue:
-            segments.loc[idx, "operating_income"] = revenue * 0.9
-            print(
-                f"Warning: Operating income for {row['segment']} was capped at 90% of revenue"
+            redefined_segments.loc[idx, "operating_income"] = revenue * 0.9
+            # CLI 로그로 변경
+            logger.warning(
+                f"Operating income for {row['segment']} was capped at 90% of revenue"
             )
 
-    segments["margin"] = segments["operating_income"] / segments["revenue"] * 100
+    redefined_segments["margin"] = (
+        redefined_segments["operating_income"] / redefined_segments["revenue"] * 100
+    )
 
     # Create financial data table (Segment Performance)
     financial_data = f"""# Financial Data for {corp}
 
-## Segment Performance
-{segments.to_markdown()}
+## Segment Performance (Product-Centric Classification)
+{redefined_segments.to_markdown()}
 """
 
     # Extract and format detailed Balance Sheet
@@ -107,11 +126,9 @@ def analyze_as_finance(corp: str) -> str:
 {analysis.get('segment_analysis', {}).get('description', 'No segment analysis available')}
 """
         except Exception as e:
-            print(f"Warning: Error processing analysis for segment {segment}: {str(e)}")
-            business_report += f"""
-### {segment}
-Error processing analysis for this segment.
-"""
+            # CLI 로그로 변경
+            logger.warning(f"Error processing analysis for segment {segment}: {str(e)}")
+            raise
 
     # Combine both reports
     combined_report = f"""{financial_data}
@@ -122,3 +139,91 @@ Error processing analysis for this segment.
 {business_report}"""
 
     return combined_report
+
+
+def redefine_segments_product_centric(
+    corp: str, segments_df: pd.DataFrame, summary: str
+) -> pd.DataFrame:
+    """
+    Redefine SEC-based segments using product-centric classification.
+
+    Args:
+        corp: Company name
+        segments_df: Original SEC-based segments DataFrame
+        summary: Financial summary text
+
+    Returns:
+        Redefined segments DataFrame with product-centric classification
+    """
+    # Prepare SEC segments data for LLM
+    sec_segments_data = segments_df.to_dict("records")
+
+    s_msg = SystemMessage(
+        """
+You are an expert business analyst specializing in product-centric segment classification.
+Your task is to review SEC-reported business segments and redefine them based on product types, 
+services, or business activities rather than organizational structure.
+
+Guidelines:
+- Use SEC segment information as reference, but ensure first-level classification is product-centric
+- Primary segment classification should be based on product type, service type, or business type
+- When analyzing segments, prioritize product-based categorization over organizational structure
+- Maintain revenue and operating income data from original segments
+- Combine related segments if they represent similar products/services
+- Split segments if they contain distinct product categories
+
+Output Format:
+{
+    "segments": [
+        {
+            "segment": "Product-Centric Segment Name",
+            "revenue": number,
+            "operating_income": number,
+            "growth_rate": number,
+            "description": "Brief description of products/services in this segment"
+        }
+    ]
+}
+
+Rules:
+- All monetary values must be in Million USD
+- Final output must be a valid JSON object.
+- Preserve original financial data while reclassifying segments
+- Ensure total revenue matches original data
+- Provide clear rationale for reclassification
+"""
+    )
+
+    h_msg = HumanMessage(
+        content=f"""Company: {corp}
+
+SEC-Reported Segments:
+{sec_segments_data}
+
+Financial Summary Context:
+{summary}
+
+Please redefine these segments using product-centric classification while preserving financial data."""
+    )
+
+    result = pplx.invoke([s_msg, h_msg]).content
+    logger.info(f"Redefined segments for {corp}: {result}")
+
+    try:
+        # Parse the redefined segments
+        redefined_data = parse_json_from_llm_output(result)
+
+        # Convert to DataFrame
+        redefined_segments = pd.DataFrame(redefined_data["segments"])
+
+        # INFO log - CLI만 출력
+        logger.info(
+            f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created"
+        )
+
+        return redefined_segments
+
+    except Exception as e:
+        # CLI 로그로 변경
+        logger.warning(f"Could not redefine segments for {corp}: {str(e)}")
+        raise

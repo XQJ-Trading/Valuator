@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from PyQt5.QtCore import QObject, pyqtSignal
 from typing import Callable, List, Tuple
+from valuator.utils.qt_studio.models.font_manager import FontManager
 
 LOG_FILE_PATH = "logs/qt_studio_logs.json"
 LOG_SIZE_LIMIT = 1 * 1024 * 1024 # 1MB
@@ -48,6 +49,7 @@ class AppState(QObject):
             self.logs: List[Tuple[str, str]] = [] # (level, message)
             self.function_examples: dict[str, str] = {} # 예제 입력 저장
             self._output: str = ""  # 출력 저장 변수
+            self.font_manager = FontManager.get_instance()  # 폰트 매니저 초기화
             AppState._instance = self
             self.load_logs_from_file()
 
@@ -57,9 +59,25 @@ class AppState(QObject):
             self.function_examples[func.__name__] = example
             self.functions_changed.emit()
 
-    def add_log(self, level: str, message: str):
+    def add_log(self, level: str, message: str, title: str = None, timestamp: str = None):
         self._check_and_rotate_log_file()
-        self.logs.append((level, message))
+        # title 자동 생성 (기존 파싱 로직 활용)
+        if title is None:
+            import re
+            func_name_match = re.search(r"'(.*?)'", message)
+            func_name = func_name_match.group(1) if func_name_match else "System"
+            title = f"[{level}] {func_name}"
+            if len(title) > 50:
+                title = title[:47] + "..."
+        if timestamp is None:
+            timestamp = datetime.now().isoformat(timespec='seconds')
+        log_entry = {
+            "level": level,
+            "title": title,
+            "message": message,
+            "timestamp": timestamp
+        }
+        self.logs.append(log_entry)
         self.logs_changed.emit()
         self.save_logs_to_file()
 
@@ -126,11 +144,40 @@ class AppState(QObject):
         self.logs_changed.emit()
 
     def load_logs_from_file(self):
-        """Loads logs from a JSON file if it exists."""
+        """Loads logs from a JSON file if it exists. Handles migration from old format."""
         if os.path.exists(LOG_FILE_PATH):
             try:
                 with open(LOG_FILE_PATH, 'r', encoding='utf-8') as f:
-                    self.logs = json.load(f)
+                    loaded = json.load(f)
+                # 마이그레이션: 구버전([level, message]) → 신버전(dict)
+                if loaded and isinstance(loaded[0], list):
+                    migrated = []
+                    for entry in loaded:
+                        if len(entry) == 2:
+                            level, message = entry
+                            # title 생성 로직 재사용
+                            import re
+                            func_name_match = re.search(r"'(.*?)'", message)
+                            func_name = func_name_match.group(1) if func_name_match else "System"
+                            title = f"[{level}] {func_name}"
+                            if len(title) > 50:
+                                title = title[:47] + "..."
+                            migrated.append({
+                                "level": level,
+                                "title": title,
+                                "message": message,
+                                "timestamp": None
+                            })
+                        else:
+                            migrated.append({
+                                "level": "INFO",
+                                "title": "[INFO] System",
+                                "message": str(entry),
+                                "timestamp": None
+                            })
+                    self.logs = migrated
+                else:
+                    self.logs = loaded
                 self.logs_changed.emit()
             except (json.JSONDecodeError, IOError) as e:
                 print(f"WARNING: Could not load log file {LOG_FILE_PATH}. Error: {e}")
@@ -138,7 +185,7 @@ class AppState(QObject):
         else:
             self.logs = []
 
-    def get_all_logs(self) -> List[Tuple[str, str]]:
+    def get_all_logs(self) -> list:
         return self.logs
 
     def get_all_functions(self) -> List[Callable]:

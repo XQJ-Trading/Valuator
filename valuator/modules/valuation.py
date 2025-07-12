@@ -3,14 +3,22 @@ Valuation module for DCF (Discounted Cash Flow) analysis.
 """
 
 import json
+import logging
 from typing import Any
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
-from valuator.utils.llm_zoo import gpt_41_mini
+from valuator.utils.llm_zoo import gpt_41_mini, gpt_41
+from valuator.utils.llm_utils import HumanMessage
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.qt_studio.models.app_state import AppState
 from valuator.modules.analyze import analyze
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @append_to_methods(
     example_input='{"corp": "BBY", "discount_rate": 0.085, "terminal_growth": 0.025}'
@@ -50,7 +58,7 @@ def valuation(params_json: str) -> str:
     projection_report = analyze(corp)
 
     # Extract projection data
-    projection_data = gpt_41_mini.invoke(
+    prompt = HumanMessage(
         f"""[Goal]
 Extract the financial projection data from the provided report.
 
@@ -76,12 +84,19 @@ Extract the financial projection data from the provided report.
 }}
 
 [Rules]
-- All monetary values should be numbers without currency symbols
+- All monetary values should be numbers without currency symbols and must be fully calculated numeric values (no formulas or expressions).
+- Do not output any arithmetic expressions; ensure all sums and calculations are evaluated and presented as numbers.
 - Extract data for all 5 years
+- If net_income is not available, calculate it as operating_income * 0.75 (assuming 25% tax rate)
 - Calculate operating income as sum of segment revenues * operating margins
-- Calculate net income as operating income * (1 - 0.25) for tax rate
-"""
-    ).content
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
+""")
+    
+    logger.info(f"Prompt: {prompt}")
+
+    projection_data = gpt_41.invoke([prompt]).content
+
+    logger.info(f"Projection data: {projection_data}")
 
     try:
         # Clean and parse JSON
@@ -106,25 +121,36 @@ Extract the financial projection data from the provided report.
         for i, (fcf, pv) in enumerate(
             zip(dcf_result["fcf_values"], dcf_result["pv_fcf"])
         ):
-            output += f"| {i+1} | ${fcf:,.0f} | ${pv:,.0f} |\n"
+            output += f"| {i+1} | ${fcf:.0f}M | ${pv:.0f}M |\n"
 
         output += f"""
 ## Terminal Value
-- Terminal Value: ${dcf_result["terminal_value"]:,.0f}
-- Present Value of Terminal Value: ${dcf_result["pv_terminal"]:,.0f}
+- Terminal Value: ${dcf_result["terminal_value"]:.0f}M
+- Present Value of Terminal Value: ${dcf_result["pv_terminal"]:.0f}M
 
 ## Valuation Results
-- Enterprise Value: ${dcf_result["enterprise_value"]:,.0f}
-- Current Debt: ${float(data["projections"][0]["assets"]["liabilities"]):,.0f}
-- Equity Value: ${dcf_result["equity_value"]:,.0f}
+- Enterprise Value: ${dcf_result["enterprise_value"]:.0f}M
+- Current Debt: ${float(data["projections"][0]["assets"]["liabilities"]):.0f}M
+- Equity Value: ${dcf_result["equity_value"]:.0f}M
 """
-        app_state.add_log("SUCCESS", f"DCF Valuation Results for {corp}:\n{output}")
+        # SUCCESS log - UI 표시
+        app_state.add_log(
+            level="SUCCESS",
+            message=f"DCF Valuation Results for {corp}:\n{output}",
+            title=f"[SUCCESS] DCF Valuation for {corp}"
+        )
         return output
 
     except Exception as e:
-        app_state.add_log("ERROR", f"Error in valuation function: {str(e)}")
-        print(f"Error in valuation function: {str(e)}")
-        return f"Error performing valuation: {str(e)}"
+        # ERROR log - UI 표시
+        app_state.add_log(
+            level="ERROR",
+            message=f"Error in valuation function: {str(e)}",
+            title=f"[ERROR] DCF Valuation for {corp}"
+        )
+        # CLI 로그로 변경
+        logger.error(f"Error in valuation function: {str(e)}")
+        raise
 
 
 def calculate_dcf(
@@ -143,10 +169,32 @@ def calculate_dcf(
     """
     # Calculate free cash flow for each year
     fcf_values = []
+    app_state = AppState.get_instance()
+    
     for year in projections:
+        # INFO log - CLI만 출력
+        logger.info(f"Year {year.get('year', 'Unknown')} net_income: {year.get('net_income', 'None')}")
+        
         # Free Cash Flow = Net Income + Depreciation - CapEx - Change in Working Capital
         # For simplicity, we'll use Net Income as a proxy for FCF
-        fcf = float(year["net_income"])
+        if year["net_income"] is None:
+            # Try to calculate net income from operating income
+            if year.get("operating_income") is not None:
+                # Assuming 25% tax rate
+                net_income = float(year["operating_income"]) * 0.75
+                logger.info(f"Calculated net_income from operating_income for year {year.get('year', 'Unknown')}: {net_income}")
+            else:
+                # ERROR log - UI 표시
+                app_state.add_log(
+                    level="ERROR",
+                    message=f"Year {year.get('year', 'Unknown')} has None net_income and no operating_income. Year data: {year}",
+                    title="[ERROR] Missing Net Income Data"
+                )
+                raise ValueError(f"Year {year.get('year', 'Unknown')} has None net_income and no operating_income")
+        else:
+            net_income = float(year["net_income"])
+        
+        fcf = net_income
         fcf_values.append(fcf)
 
     # Calculate present value of projected cash flows

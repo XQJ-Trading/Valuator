@@ -1,11 +1,14 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QScrollArea, QStackedWidget, QLabel
 from functools import partial
+from valuator.utils.qt_studio.models.font_manager import FontManager
 
 class FunctionListView(QWidget):
     """ 함수 목록을 버튼으로 표시하는 스크롤 가능한 뷰 """
     def __init__(self, viewmodel, parent=None):
         super().__init__(parent)
         self._viewmodel = viewmodel
+        self._font_manager = FontManager.get_instance()
+        
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
@@ -19,6 +22,9 @@ class FunctionListView(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.scroll_area)
+        
+        # 폰트 크기 변경 시그널 연결
+        self._font_manager.font_scale_changed.connect(self._update_button_fonts)
 
     def update_functions(self, functions):
         # Clear existing buttons
@@ -34,6 +40,17 @@ class FunctionListView(QWidget):
             self.layout.addWidget(btn)
         
         self.layout.addStretch()
+        
+        # 초기 폰트 크기 적용
+        self._update_button_fonts()
+    
+    def _update_button_fonts(self):
+        """모든 버튼의 폰트 크기를 업데이트합니다."""
+        button_size = self._font_manager.get_font_size("button")
+        for i in range(self.layout.count()):
+            item = self.layout.itemAt(i)
+            if item.widget() and isinstance(item.widget(), QPushButton):
+                item.widget().setStyleSheet(f"font-size: {button_size}px;")
 
 class LeftSidebarView(QWidget):
     """ 좌측 사이드바 전체 (Sector A) """

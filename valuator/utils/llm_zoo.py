@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 
-from langchain_community.chat_models import ChatPerplexity
+from langchain_perplexity import ChatPerplexity
 from langchain_openai import ChatOpenAI
 
 from valuator.utils.basic_utils import *

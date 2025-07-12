@@ -123,6 +123,7 @@ Please analyze the following financial data:
                 print(
                     f"Warning: Could not update operating income for segment {segment}: {str(e)}"
                 )
+                raise
 
     # Validate and fix operating income and margin calculations
     for idx, row in segments.iterrows():
@@ -260,6 +261,7 @@ Present this data as a single JSON object.
 ### {segment}
 Error processing analysis for this segment.
 """
+            raise
 
     # Combine both reports
     combined_report = f"""{financial_data}
@@ -407,6 +409,7 @@ business_segment: {segment if segment else "Overall Business"}"""
                     "growth_potential": "Not specified",
                     "estimated_opm": 0,
                 }
+                raise
 
     return analysis
 
@@ -767,10 +770,18 @@ Extract the financial projection data from the provided report.
 - Current Debt: ${float(data["projections"][0]["assets"]["liabilities"]):,.0f}
 - Equity Value: ${dcf_result["equity_value"]:,.0f}
 """
-        app_state.add_log("SUCCESS", f"DCF Valuation Results for {corp}:\n{output}")
+        app_state.add_log(
+            level="SUCCESS",
+            message=f"DCF Valuation Results for {corp}:\n{output}",
+            title=f"[SUCCESS] DCF Valuation for {corp}"
+        )
         return output
 
     except Exception as e:
-        app_state.add_log("SUCCESS", f"Error in valuation function: {str(e)}")
+        app_state.add_log(
+            level="ERROR",
+            message=f"Error in valuation function: {str(e)}",
+            title=f"[ERROR] DCF Valuation for {corp}"
+        )
         print(f"Error in valuation function: {str(e)}")
         return f"Error performing valuation: {str(e)}"

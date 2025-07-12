@@ -20,10 +20,11 @@ from valuator.utils.basic_utils import parse_json_from_llm_output
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 @append_to_methods()
 def analyze_as_finance(corp: str) -> str:
@@ -39,12 +40,11 @@ def analyze_as_finance(corp: str) -> str:
     year = 2024
 
     summary = fetch_company_data(corp)
-    segments_json = extract_segments_in_company(corp, summary, year)
-    segments = pd.read_json(StringIO(segments_json), lines=True)
+    segments = extract_segments_in_company(corp, summary, year)
 
     # Redefine segments based on product-centric classification
     redefined_segments = redefine_segments_product_centric(corp, segments, summary)
-    
+
     # Get business analysis for each redefined segment
     business_reports = {}
     for segment in redefined_segments["segment"]:
@@ -53,7 +53,9 @@ def analyze_as_finance(corp: str) -> str:
 
         # Update operating income if missing
         if pd.isna(
-            redefined_segments.loc[redefined_segments["segment"] == segment, "operating_income"].iloc[0]
+            redefined_segments.loc[
+                redefined_segments["segment"] == segment, "operating_income"
+            ].iloc[0]
         ):
             try:
                 opm_str = str(business_analysis["segment_analysis"]["estimated_opm"])
@@ -63,15 +65,17 @@ def analyze_as_finance(corp: str) -> str:
                 # Remove any non-numeric characters except decimal point
                 opm_str = "".join(c for c in opm_str if c.isdigit() or c == ".")
                 estimated_opm = float(opm_str)
-                revenue = redefined_segments.loc[redefined_segments["segment"] == segment, "revenue"].iloc[
-                    0
-                ]
-                redefined_segments.loc[redefined_segments["segment"] == segment, "operating_income"] = (
-                    revenue * (estimated_opm / 100)
-                )
+                revenue = redefined_segments.loc[
+                    redefined_segments["segment"] == segment, "revenue"
+                ].iloc[0]
+                redefined_segments.loc[
+                    redefined_segments["segment"] == segment, "operating_income"
+                ] = revenue * (estimated_opm / 100)
             except (KeyError, ValueError) as e:
                 # CLI 로그로 변경
-                logger.warning(f"Could not update operating income for segment {segment}: {str(e)}")
+                logger.warning(
+                    f"Could not update operating income for segment {segment}: {str(e)}"
+                )
 
     # Validate and fix operating income and margin calculations
     for idx, row in redefined_segments.iterrows():
@@ -82,9 +86,13 @@ def analyze_as_finance(corp: str) -> str:
         if operating_income > revenue:
             redefined_segments.loc[idx, "operating_income"] = revenue * 0.9
             # CLI 로그로 변경
-            logger.warning(f"Operating income for {row['segment']} was capped at 90% of revenue")
+            logger.warning(
+                f"Operating income for {row['segment']} was capped at 90% of revenue"
+            )
 
-    redefined_segments["margin"] = redefined_segments["operating_income"] / redefined_segments["revenue"] * 100
+    redefined_segments["margin"] = (
+        redefined_segments["operating_income"] / redefined_segments["revenue"] * 100
+    )
 
     # Create financial data table (Segment Performance)
     financial_data = f"""# Financial Data for {corp}
@@ -133,21 +141,23 @@ def analyze_as_finance(corp: str) -> str:
     return combined_report
 
 
-def redefine_segments_product_centric(corp: str, segments_df: pd.DataFrame, summary: str) -> pd.DataFrame:
+def redefine_segments_product_centric(
+    corp: str, segments_df: pd.DataFrame, summary: str
+) -> pd.DataFrame:
     """
     Redefine SEC-based segments using product-centric classification.
-    
+
     Args:
         corp: Company name
         segments_df: Original SEC-based segments DataFrame
         summary: Financial summary text
-        
+
     Returns:
         Redefined segments DataFrame with product-centric classification
     """
     # Prepare SEC segments data for LLM
-    sec_segments_data = segments_df.to_dict('records')
-    
+    sec_segments_data = segments_df.to_dict("records")
+
     s_msg = SystemMessage(
         """
 You are an expert business analyst specializing in product-centric segment classification.
@@ -183,7 +193,7 @@ Rules:
 - Provide clear rationale for reclassification
 """
     )
-    
+
     h_msg = HumanMessage(
         content=f"""Company: {corp}
 
@@ -195,22 +205,24 @@ Financial Summary Context:
 
 Please redefine these segments using product-centric classification while preserving financial data."""
     )
-    
+
     result = pplx.invoke([s_msg, h_msg]).content
     logger.info(f"Redefined segments for {corp}: {result}")
-    
+
     try:
         # Parse the redefined segments
         redefined_data = parse_json_from_llm_output(result)
-        
+
         # Convert to DataFrame
         redefined_segments = pd.DataFrame(redefined_data["segments"])
-        
+
         # INFO log - CLI만 출력
-        logger.info(f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created")
-        
+        logger.info(
+            f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created"
+        )
+
         return redefined_segments
-        
+
     except Exception as e:
         # CLI 로그로 변경
         logger.warning(f"Could not redefine segments for {corp}: {str(e)}")

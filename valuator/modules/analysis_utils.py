@@ -3,6 +3,11 @@ Common utilities for financial analysis modules.
 """
 
 import logging
+from io import StringIO
+
+import pandas as pd
+
+from valuator.utils.llm_utils import retry
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.llm_zoo import gpt_41_nano, gpt_41_mini
 from valuator.utils.finsource.collector import fetch_using_readerLLM
@@ -10,10 +15,11 @@ from valuator.utils.finsource.sec_collector import get_10k_html_link
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 def fetch_company_data(corp: str) -> str:
     """
@@ -82,7 +88,10 @@ Please analyze the following financial data:
     return summary
 
 
-def extract_segments_in_company(corp: str, summary: str, year: int = 2024) -> str:
+@retry(tries=3)
+def extract_segments_in_company(
+    corp: str, summary: str, year: int = 2024
+) -> pd.DataFrame:
     """
     Extract segment-wise revenue and operating income data.
 
@@ -94,7 +103,7 @@ def extract_segments_in_company(corp: str, summary: str, year: int = 2024) -> st
     Returns:
         JSON string with segment data
     """
-    segments_json = gpt_41_mini.invoke(
+    segments = gpt_41_mini.invoke(
         f"""[Goal]
 - You are a financial analyst. Extract segment-wise revenue and operating income for {corp} of {year} from the provided source material.
 {summary}
@@ -112,15 +121,16 @@ def extract_segments_in_company(corp: str, summary: str, year: int = 2024) -> st
 [Rules]
 - Only output one JSON Lines block.
 - Do not add any explanation.
-- Numbers must be in Million USD.
+- Numbers must be in Million USD (1M$ units).
 - If operating income is missing, set it to null but still report actual segments.
 - Never make up segments or revenue figures.
 - Output must be valid for `pd.read_json(data, lines=True)`.
-- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
 """
     ).content
 
-    return str(segments_json)
+    logger.info(f"Segments JSON: {segments}")
+    segments = pd.read_json(StringIO(str(segments)), lines=True)
+    return segments
 
 
 def extract_balance_sheet(summary: str) -> str:
@@ -229,7 +239,9 @@ def format_balance_sheet_markdown(balance_sheet_json_str: str) -> str:
             logger.warning("Balance sheet data was empty after parsing.")
 
     except Exception as e:
-        logger.warning(f"An unexpected error occurred while processing balance sheet data: {e}")
+        logger.warning(
+            f"An unexpected error occurred while processing balance sheet data: {e}"
+        )
         logger.warning(f"Raw Balance Sheet LLM output: {balance_sheet_json_str}")
 
     return balance_sheet_table_md

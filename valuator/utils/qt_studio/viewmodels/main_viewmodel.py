@@ -44,6 +44,7 @@ class MainViewModel(QObject):
     central_view_changed = pyqtSignal(object) # View 위젯을 전달
     function_execution_result = pyqtSignal(str)
     font_scale_changed = pyqtSignal(float)  # 폰트 크기 변경 시그널
+    upload_finished = pyqtSignal(str)  # Firestore document id or error message
 
     def __init__(self, model: AppState):
         super().__init__()
@@ -195,3 +196,11 @@ class MainViewModel(QObject):
     def reset_font_size(self):
         """폰트 크기를 기본값으로 초기화합니다."""
         self._model.font_manager.reset_font_size()
+
+    def upload_logs_requested(self):
+        """View로부터 로그 업로드 요청을 받아 Model에 전달하고, 완료 시 시그널을 emit합니다."""
+        try:
+            doc_id = self._model.upload_logs_to_firestore()
+            self.upload_finished.emit(doc_id)
+        except Exception as e:
+            self.upload_finished.emit(f"업로드 실패: {str(e)}")

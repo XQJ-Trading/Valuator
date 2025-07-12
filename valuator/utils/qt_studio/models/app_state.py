@@ -1,9 +1,13 @@
 import os
 import json
 from datetime import datetime
-from PyQt5.QtCore import QObject, pyqtSignal
 from typing import Callable, List, Tuple
+
+from PyQt5.QtCore import QObject, pyqtSignal
+from google.cloud import firestore
+
 from valuator.utils.qt_studio.models.font_manager import FontManager
+
 
 LOG_FILE_PATH = "logs/qt_studio_logs.json"
 LOG_SIZE_LIMIT = 1 * 1024 * 1024 # 1MB
@@ -203,3 +207,16 @@ class AppState(QObject):
     def get_output(self) -> str:
         """현재 출력을 반환합니다."""
         return self._output
+
+    def upload_logs_to_firestore(self):
+        """
+        현재 로그를 Firestore에 업로드하고, 생성된 document id를 반환합니다.
+        실패 시 예외를 발생시킵니다.
+        """
+        cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "serviceAccountKey.json")
+        db = firestore.Client.from_service_account_json(cred_path)
+        logs = self.get_all_logs()
+        # 자동 document id 생성
+        doc_ref = db.collection('log-v1').document()
+        doc_ref.set({'content': logs})
+        return doc_ref.id

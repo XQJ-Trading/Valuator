@@ -3,6 +3,7 @@ Business analysis module for industry and competitive analysis.
 """
 
 import json
+import logging
 from typing import Dict, Optional, Any
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
@@ -11,6 +12,12 @@ from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.llm_utils import parse_text, SystemMessage, HumanMessage
 from valuator.utils.qt_studio.models.app_state import AppState
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @append_to_methods()
 def analyze_as_business(corp: str, segment: Optional[str] = None) -> Dict[str, Any]:
@@ -63,13 +70,8 @@ SEC-given business_segment : {segment if segment else "Overall Business"}"""
 
     result = pplx.invoke([s_msg, h_msg]).content
 
-    # 로그 저장 함수 명세 변경에 따라 title, message, level을 명확히 전달 (재정의된 API 형식 적용)
-    app_state = AppState.get_instance()
-    app_state.add_log(
-        level="INFO",
-        message=f"Business analysis result for {corp}: {result[:200]}...",
-        title=f"[INFO] Business analysis for {corp}"
-    )
+    # INFO log - CLI만 출력
+    logger.info(f"Business analysis result for {corp}: {result[:200]}...")
 
     analysis: Dict[str, Any] = {}
     try:
@@ -117,7 +119,8 @@ SEC-given business_segment : {segment if segment else "Overall Business"}"""
                     "estimated_opm": estimated_opm,
                 }
             except (ValueError, Exception) as e:
-                print(f"Warning: Could not extract OPM for segment {segment}: {str(e)}")
+                # CLI 로그로 변경
+                logger.warning(f"Could not extract OPM for segment {segment}: {str(e)}")
                 raise
 
     return analysis

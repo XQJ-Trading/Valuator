@@ -2,11 +2,18 @@
 Common utilities for financial analysis modules.
 """
 
+import logging
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.llm_zoo import gpt_41_nano, gpt_41_mini
 from valuator.utils.finsource.collector import fetch_using_readerLLM
 from valuator.utils.finsource.sec_collector import get_10k_html_link
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def fetch_company_data(corp: str) -> str:
     """
@@ -20,14 +27,14 @@ def fetch_company_data(corp: str) -> str:
         Concatenated financial data as string
     """
     url = get_10k_html_link(corp)
-    print(f"source url: {url}")
+    logger.info(f"source url: {url}")
     source = fetch_using_readerLLM(corp, url)
 
     summary = ""
     chunk_size = 2000
     for s in range(0, len(source), chunk_size):
         e = min(s + chunk_size, len(source))
-        print(f"step: {s} / {len(source)}")
+        logger.info(f"step: {s} / {len(source)}")
         src = "".join(source[s:e])
         chunk_summary = gpt_41_nano.invoke(
             f"""## Role
@@ -62,7 +69,8 @@ You are acting as an expert financial analyst specializing in segment performanc
 - Begin with a brief executive summary highlighting key findings (1-2 paragraphs)
 - Present the company-wide financial overview table
 - Present segment performance tables with comparative metrics
-- Organize all data into clearly formatted markdown tables
+- Organize all data into clearly formatted markdown tables.
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
 
 ## Source Material
 Please analyze the following financial data:
@@ -108,6 +116,7 @@ def extract_segments_in_company(corp: str, summary: str, year: int = 2024) -> st
 - If operating income is missing, set it to null but still report actual segments.
 - Never make up segments or revenue figures.
 - Output must be valid for `pd.read_json(data, lines=True)`.
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
 """
     ).content
 
@@ -166,6 +175,7 @@ Present this data as a single JSON object.
 - Ensure all monetary values in the JSON are strings.
 - If specific components are not found in the source, you can omit them from the 'components' list or use an empty list.
 - If a total (e.g., Total Assets) is not found, use "N/A" as its value.
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
 """
     ).content
 
@@ -216,12 +226,10 @@ def format_balance_sheet_markdown(balance_sheet_json_str: str) -> str:
 
             balance_sheet_table_md = "\n".join(md_parts)
         else:
-            print("Warning: Balance sheet data was empty after parsing.")
+            logger.warning("Balance sheet data was empty after parsing.")
 
     except Exception as e:
-        print(
-            f"Warning: An unexpected error occurred while processing balance sheet data: {e}"
-        )
-        print(f"Raw Balance Sheet LLM output: {balance_sheet_json_str}")
+        logger.warning(f"An unexpected error occurred while processing balance sheet data: {e}")
+        logger.warning(f"Raw Balance Sheet LLM output: {balance_sheet_json_str}")
 
     return balance_sheet_table_md

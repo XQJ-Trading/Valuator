@@ -4,6 +4,7 @@ Financial analysis module for company financial data analysis.
 
 from io import StringIO
 import pandas as pd
+import logging
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.modules.analysis_utils import (
@@ -17,6 +18,12 @@ from valuator.utils.llm_zoo import pplx
 from valuator.utils.llm_utils import SystemMessage, HumanMessage
 from valuator.utils.basic_utils import parse_json_from_llm_output
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @append_to_methods()
 def analyze_as_finance(corp: str) -> str:
@@ -63,9 +70,8 @@ def analyze_as_finance(corp: str) -> str:
                     revenue * (estimated_opm / 100)
                 )
             except (KeyError, ValueError) as e:
-                print(
-                    f"Warning: Could not update operating income for segment {segment}: {str(e)}"
-                )
+                # CLI 로그로 변경
+                logger.warning(f"Could not update operating income for segment {segment}: {str(e)}")
 
     # Validate and fix operating income and margin calculations
     for idx, row in redefined_segments.iterrows():
@@ -75,9 +81,8 @@ def analyze_as_finance(corp: str) -> str:
         # If operating income is greater than revenue, cap it at 90% of revenue
         if operating_income > revenue:
             redefined_segments.loc[idx, "operating_income"] = revenue * 0.9
-            print(
-                f"Warning: Operating income for {row['segment']} was capped at 90% of revenue"
-            )
+            # CLI 로그로 변경
+            logger.warning(f"Operating income for {row['segment']} was capped at 90% of revenue")
 
     redefined_segments["margin"] = redefined_segments["operating_income"] / redefined_segments["revenue"] * 100
 
@@ -113,7 +118,8 @@ def analyze_as_finance(corp: str) -> str:
 {analysis.get('segment_analysis', {}).get('description', 'No segment analysis available')}
 """
         except Exception as e:
-            print(f"Warning: Error processing analysis for segment {segment}: {str(e)}")
+            # CLI 로그로 변경
+            logger.warning(f"Error processing analysis for segment {segment}: {str(e)}")
             raise
 
     # Combine both reports
@@ -171,6 +177,7 @@ Output Format:
 
 Rules:
 - All monetary values must be in Million USD
+- Final output must be a valid JSON object.
 - Preserve original financial data while reclassifying segments
 - Ensure total revenue matches original data
 - Provide clear rationale for reclassification
@@ -184,12 +191,13 @@ SEC-Reported Segments:
 {sec_segments_data}
 
 Financial Summary Context:
-{summary[:2000]}...
+{summary}
 
 Please redefine these segments using product-centric classification while preserving financial data."""
     )
     
     result = pplx.invoke([s_msg, h_msg]).content
+    logger.info(f"Redefined segments for {corp}: {result}")
     
     try:
         # Parse the redefined segments
@@ -198,17 +206,12 @@ Please redefine these segments using product-centric classification while preser
         # Convert to DataFrame
         redefined_segments = pd.DataFrame(redefined_data["segments"])
         
-        # Log the redefinition process using the updated API format
-        from valuator.utils.qt_studio.models.app_state import AppState
-        app_state = AppState.get_instance()
-        app_state.add_log(
-            level="INFO",
-            message=f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created",
-            title=f"[INFO] Redefined Segments"
-        )
+        # INFO log - CLI만 출력
+        logger.info(f"Redefined segments for {corp}: {len(redefined_segments)} product-centric segments created")
         
         return redefined_segments
         
     except Exception as e:
-        print(f"Warning: Could not redefine segments for {corp}: {str(e)}")
+        # CLI 로그로 변경
+        logger.warning(f"Could not redefine segments for {corp}: {str(e)}")
         raise

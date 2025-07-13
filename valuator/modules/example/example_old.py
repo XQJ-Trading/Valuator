@@ -773,7 +773,7 @@ Extract the financial projection data from the provided report.
         app_state.add_log(
             level="SUCCESS",
             message=f"DCF Valuation Results for {corp}:\n{output}",
-            title=f"[SUCCESS] DCF Valuation for {corp}"
+            title=f"[SUCCESS] DCF Valuation for {corp}",
         )
         return output
 
@@ -781,7 +781,7 @@ Extract the financial projection data from the provided report.
         app_state.add_log(
             level="ERROR",
             message=f"Error in valuation function: {str(e)}",
-            title=f"[ERROR] DCF Valuation for {corp}"
+            title=f"[ERROR] DCF Valuation for {corp}",
         )
         print(f"Error in valuation function: {str(e)}")
         return f"Error performing valuation: {str(e)}"

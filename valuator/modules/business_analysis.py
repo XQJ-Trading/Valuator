@@ -14,10 +14,11 @@ from valuator.utils.qt_studio.models.app_state import AppState
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 @append_to_methods()
 def analyze_as_business(corp: str, segment: Optional[str] = None) -> Dict[str, Any]:

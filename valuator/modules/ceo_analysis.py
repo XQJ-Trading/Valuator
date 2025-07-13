@@ -9,10 +9,11 @@ from valuator.utils.llm_utils import SystemMessage, HumanMessage
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 @append_to_methods()
 def analyze_as_ceo(corp: str) -> str:

@@ -15,10 +15,11 @@ from valuator.modules.analyze import analyze
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 @append_to_methods(
     example_input='{"corp": "BBY", "discount_rate": 0.085, "terminal_growth": 0.025}'
@@ -90,8 +91,9 @@ Extract the financial projection data from the provided report.
 - If net_income is not available, calculate it as operating_income * 0.75 (assuming 25% tax rate)
 - Calculate operating income as sum of segment revenues * operating margins
 - Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
-""")
-    
+"""
+    )
+
     logger.info(f"Prompt: {prompt}")
 
     projection_data = gpt_41.invoke([prompt]).content
@@ -137,7 +139,7 @@ Extract the financial projection data from the provided report.
         app_state.add_log(
             level="SUCCESS",
             message=f"DCF Valuation Results for {corp}:\n{output}",
-            title=f"[SUCCESS] DCF Valuation for {corp}"
+            title=f"[SUCCESS] DCF Valuation for {corp}",
         )
         return output
 
@@ -146,7 +148,7 @@ Extract the financial projection data from the provided report.
         app_state.add_log(
             level="ERROR",
             message=f"Error in valuation function: {str(e)}",
-            title=f"[ERROR] DCF Valuation for {corp}"
+            title=f"[ERROR] DCF Valuation for {corp}",
         )
         # CLI 로그로 변경
         logger.error(f"Error in valuation function: {str(e)}")
@@ -170,11 +172,13 @@ def calculate_dcf(
     # Calculate free cash flow for each year
     fcf_values = []
     app_state = AppState.get_instance()
-    
+
     for year in projections:
         # INFO log - CLI만 출력
-        logger.info(f"Year {year.get('year', 'Unknown')} net_income: {year.get('net_income', 'None')}")
-        
+        logger.info(
+            f"Year {year.get('year', 'Unknown')} net_income: {year.get('net_income', 'None')}"
+        )
+
         # Free Cash Flow = Net Income + Depreciation - CapEx - Change in Working Capital
         # For simplicity, we'll use Net Income as a proxy for FCF
         if year["net_income"] is None:
@@ -182,18 +186,22 @@ def calculate_dcf(
             if year.get("operating_income") is not None:
                 # Assuming 25% tax rate
                 net_income = float(year["operating_income"]) * 0.75
-                logger.info(f"Calculated net_income from operating_income for year {year.get('year', 'Unknown')}: {net_income}")
+                logger.info(
+                    f"Calculated net_income from operating_income for year {year.get('year', 'Unknown')}: {net_income}"
+                )
             else:
                 # ERROR log - UI 표시
                 app_state.add_log(
                     level="ERROR",
                     message=f"Year {year.get('year', 'Unknown')} has None net_income and no operating_income. Year data: {year}",
-                    title="[ERROR] Missing Net Income Data"
+                    title="[ERROR] Missing Net Income Data",
                 )
-                raise ValueError(f"Year {year.get('year', 'Unknown')} has None net_income and no operating_income")
+                raise ValueError(
+                    f"Year {year.get('year', 'Unknown')} has None net_income and no operating_income"
+                )
         else:
             net_income = float(year["net_income"])
-        
+
         fcf = net_income
         fcf_values.append(fcf)
 

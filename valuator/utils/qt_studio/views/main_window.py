@@ -4,11 +4,13 @@ from valuator.utils.qt_studio.views.left_sidebar import LeftSidebarView
 from valuator.utils.qt_studio.views.right_sidebar import RightSidebarView
 from valuator.utils.qt_studio.views.central_viewer import CentralView
 
+
 class MainWindow(QMainWindow):
     """
     애플리케이션의 메인 윈도우.
     세 개의 섹터(A, B, C) 레이아웃을 구성하고 각 뷰를 배치합니다.
     """
+
     def __init__(self, viewmodel):
         super().__init__()
         self._viewmodel = viewmodel
@@ -35,16 +37,18 @@ class MainWindow(QMainWindow):
 
         # Set initial sizes for the sections
         splitter.setSizes([200, 800, 600])
-        
+
         main_layout.addWidget(splitter)
 
     # keyPressEvent 메서드를 오버라이드하여 단축키 처리
     def keyPressEvent(self, event):
-        """ 키보드 이벤트를 직접 처리하여 한/영 상태와 무관하게 단축키를 감지합니다. """
+        """키보드 이벤트를 직접 처리하여 한/영 상태와 무관하게 단축키를 감지합니다."""
         if event.modifiers() == Qt.ControlModifier:
             if event.key() == Qt.Key_W:
                 QApplication.instance().quit()
-            elif event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:  # Ctrl + Plus 또는 Ctrl + =
+            elif (
+                event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal
+            ):  # Ctrl + Plus 또는 Ctrl + =
                 self._viewmodel.increase_font_size()
             elif event.key() == Qt.Key_Minus:  # Ctrl + Minus
                 self._viewmodel.decrease_font_size()

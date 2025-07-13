@@ -11,10 +11,11 @@ from valuator.modules.ceo_analysis import analyze_as_ceo
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 @append_to_methods()
 def analyze(corp: str) -> str:

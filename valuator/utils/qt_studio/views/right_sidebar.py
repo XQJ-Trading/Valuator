@@ -28,12 +28,17 @@ class LogListView(QWidget):
         # Button Area
         button_layout = QHBoxLayout()
         self.clear_button = QPushButton("Clear and Save")
+        self.upload_button = QPushButton("Upload")
         button_layout.addStretch() # 버튼을 오른쪽으로 정렬
         button_layout.addWidget(self.clear_button)
+        button_layout.addWidget(self.upload_button)
         main_layout.addLayout(button_layout)
 
         # Connections
         self.clear_button.clicked.connect(self._viewmodel.clear_logs_requested)
+        self.upload_button.clicked.connect(self._viewmodel.upload_logs_requested)
+        if hasattr(self._viewmodel, 'upload_finished'):
+            self._viewmodel.upload_finished.connect(self.show_upload_result)
 
     def update_logs(self, logs):
         print(f"[DEBUG] View: Received {len(logs)} logs to display.")
@@ -61,6 +66,11 @@ class LogListView(QWidget):
 
         # 로그 추가 후 스크롤을 맨 아래로
         QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
+
+    def show_upload_result(self, doc_id):
+        from PyQt5.QtWidgets import QMessageBox
+        url = f"https://qt-studio-log-viewer.vercel.app/{doc_id}"
+        QMessageBox.information(self, "업로드 완료", f"업로드가 완료되었습니다!\n\n아래 링크를 복사해 사용하세요:\n{url}")
 
 class RightSidebarView(QWidget):
     """ 우측 사이드바 전체 (Sector C) """

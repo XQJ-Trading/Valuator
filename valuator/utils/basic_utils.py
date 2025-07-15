@@ -119,6 +119,17 @@ def parse_json_from_llm_output(text):
         title="[DEBUG] JSON Parse Final",
     )
 
+    clean_json_before = clean_json
+    # 정규식을 사용하여 숫자 사이에 있는 쉼표를 모두 제거
+    clean_json = re.sub(r"(?<=\d),(?=\d)", "", clean_json)
+
+    if clean_json != clean_json_before:
+        app_state.add_log(
+            level="DEBUG",
+            message="Removed commas from numbers in JSON",
+            title="[DEBUG] JSON Parse Cleaning",
+        )
+
     try:
         result = json.loads(clean_json)
         app_state.add_log(

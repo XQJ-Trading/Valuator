@@ -31,11 +31,11 @@ def test_log_capture():
     # Fetch logs
     logs = app_state.get_all_logs()
     # There should be at least INFO and SUCCESS logs
-    assert any("Executing 'test_func'" in msg for level, msg in logs)
-    assert any("Hello world" in msg for level, msg in logs)
+    assert any("Executing 'test_func'" in log["message"] for log in logs)
+    assert any("Hello world" in log["message"] for log in logs)
     # Optionally, print logs for debug
-    for level, msg in logs:
-        print(f"[{level}] {msg}")
+    for log in logs:
+        print(f"[{log['level']}] {log['message']}")
 
 
 tickers = [
@@ -49,6 +49,7 @@ tickers = [
     "XOM",
     "JPM",
     "RTX",
+    "BBY",
 ]
 
 
@@ -105,12 +106,14 @@ def test_valuation_logging():
             logs = app_state.get_all_logs()
             # There should be at least INFO and SUCCESS logs for valuation
             assert any(
-                "Executing 'valuation'" in msg and ticker in msg for level, msg in logs
+                "Executing 'valuation'" in log["message"] and ticker in log["message"]
+                for log in logs
             ), f"No INFO log for valuation({ticker})"
             try:
                 assert any(
-                    "DCF Valuation" in msg or "Valuation Results" in msg
-                    for level, msg in logs
+                    "DCF Valuation" in log["message"]
+                    or "Valuation Results" in log["message"]
+                    for log in logs
                 ), f"No SUCCESS log for valuation({ticker})"
             except AssertionError as e:
                 print(e)
@@ -118,8 +121,8 @@ def test_valuation_logging():
             pytest.fail(f"valuation failed for {ticker}: {e}")
         finally:
             # Optionally, print logs for debug
-            for level, msg in app_state.get_all_logs():
-                print(f"[{level}] {msg}")
+            for log in app_state.get_all_logs():
+                print(f"[{log['level']}] {log['message']}")
             app_state.archive_and_clear_logs()
 
 

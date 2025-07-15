@@ -8,7 +8,7 @@ from typing import Any
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import gpt_41_mini, gpt_41
-from valuator.utils.llm_utils import HumanMessage
+from valuator.utils.llm_utils import HumanMessage, retry
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.qt_studio.models.app_state import AppState
 from valuator.modules.analyze import analyze
@@ -19,6 +19,54 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+@retry(tries=3)
+def projection(projection_report):
+    # Extract projection data
+    prompt = HumanMessage(
+        f"""[Goal]
+Extract the financial projection data from the provided report.
+
+[Source Material]
+{projection_report}
+
+[Output Format]
+{{
+    "projections": [
+        {{
+            "year": 1,
+            "revenue": "Total revenue value",
+            "operating_income": "Operating income value",
+            "net_income": "Net income value",
+            "assets": {{
+                "total": "Total assets value",
+                "liabilities": "Total liabilities value",
+                "equity": "Total equity value"
+            }}
+        }},
+        ...
+    ]
+}}
+
+[Rules]
+- All monetary values should be numbers without currency symbols and must be fully calculated numeric values (no formulas or expressions).
+- Do not output any arithmetic expressions; ensure all sums and calculations are evaluated and presented as numbers.
+- Extract data for all 5 years
+- If net_income is not available, calculate it as operating_income * 0.75 (assuming 25% tax rate)
+- Calculate operating income as sum of segment revenues * operating margins
+- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
+- Final output must be a valid JSON object.
+"""
+    )
+
+    #  logger.info(f"Prompt: {prompt}")
+
+    projection_data = gpt_41.invoke([prompt]).content
+
+    logger.info(f"Projection data: {projection_data}")
+    # projection_data = json.loads(str(projection_data))
+    return projection_data
 
 
 @append_to_methods(
@@ -57,48 +105,7 @@ def valuation(params_json: str) -> str:
 
     # Get 5-year projections
     projection_report = analyze(corp)
-
-    # Extract projection data
-    prompt = HumanMessage(
-        f"""[Goal]
-Extract the financial projection data from the provided report.
-
-[Source Material]
-{projection_report}
-
-[Output Format]
-{{
-    "projections": [
-        {{
-            "year": 1,
-            "revenue": "Total revenue value",
-            "operating_income": "Operating income value",
-            "net_income": "Net income value",
-            "assets": {{
-                "total": "Total assets value",
-                "liabilities": "Total liabilities value",
-                "equity": "Total equity value"
-            }}
-        }},
-        ...
-    ]
-}}
-
-[Rules]
-- All monetary values should be numbers without currency symbols and must be fully calculated numeric values (no formulas or expressions).
-- Do not output any arithmetic expressions; ensure all sums and calculations are evaluated and presented as numbers.
-- Extract data for all 5 years
-- If net_income is not available, calculate it as operating_income * 0.75 (assuming 25% tax rate)
-- Calculate operating income as sum of segment revenues * operating margins
-- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
-"""
-    )
-
-    logger.info(f"Prompt: {prompt}")
-
-    projection_data = gpt_41.invoke([prompt]).content
-
-    logger.info(f"Projection data: {projection_data}")
+    projection_data = projection(projection_report)
 
     try:
         # Clean and parse JSON

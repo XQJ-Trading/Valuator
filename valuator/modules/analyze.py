@@ -8,6 +8,7 @@ from valuator.utils.llm_zoo import gpt_41_mini
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.modules.financial_analysis import analyze_as_finance
 from valuator.modules.ceo_analysis import analyze_as_ceo
+import yfinance as yf
 
 # Configure logging
 logging.basicConfig(
@@ -72,21 +73,27 @@ Financial Report:
         # Clean and parse JSON
         growth_data = parse_json_from_llm_output(growth_analysis)
 
-        # Extract current financial data
+        ticker = yf.Ticker(corp)
+        bs = ticker.balance_sheet
+        years = "2024"
+
+        total_assets = bs.loc["Total Assets", years].iloc[0]
+        total_liabilities = bs.loc[
+            "Total Liabilities Net Minority Interest", years
+        ].iloc[0]
+        total_equity = bs.loc["Stockholders Equity", years].iloc[0]
+        logger.info(f"{total_assets}, {total_liabilities}, {total_equity}")
+
+        # For segment revenue, fallback to LLM extraction as before
         current_financials = gpt_41_mini.invoke(
             f"""[Goal]
-Extract the current financial data from the provided report.
+Extract the current segment revenue data from the provided report.
 
 [Source Material]
 {finance_report}
 
 [Output Format]
 {{
-    "assets": {{
-        "total": "Total Assets value",
-        "liabilities": "Total Liabilities value",
-        "equity": "Total Equity value"
-    }},
     "segments": [
         {{
             "name": "Segment Name",
@@ -104,8 +111,12 @@ Extract the current financial data from the provided report.
 """
         ).content
 
-        # Parse current financials
         current_data = parse_json_from_llm_output(current_financials)
+        current_data["assets"] = {
+            "total": float(total_assets) / 1_000_000,  # convert to millions
+            "liabilities": float(total_liabilities) / 1_000_000,
+            "equity": float(total_equity) / 1_000_000,
+        }
 
         # Calculate 5-year projections
         tax_rate = 0.25  # 25% tax rate

@@ -3,12 +3,14 @@ from typing import Optional
 
 from langchain_perplexity import ChatPerplexity
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from valuator.utils.basic_utils import *
 
 
 check_api_key("PPLX_API_KEY")
 check_api_key("OPENAI_API_KEY")
+check_api_key("GOOGLE_API_KEY")
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
@@ -18,6 +20,11 @@ gpt_41_nano = ChatOpenAI(api_key=openai_api_key, model="gpt-4.1-nano")
 
 
 pplx_api_key = os.getenv("PPLX_API_KEY")
+
+google_api_key = os.getenv("GOOGLE_API_KEY")
+
+gemini_2_5_pro = ChatGoogleGenerativeAI(api_key=google_api_key, model="gemini-2.5-pro")
+gemini_2_5_flash = ChatGoogleGenerativeAI(api_key=google_api_key, model="gemini-2.5-flash")
 
 
 class PPLX(ChatPerplexity):

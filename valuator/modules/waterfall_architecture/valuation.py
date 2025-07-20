@@ -11,7 +11,7 @@ from valuator.utils.llm_zoo import gpt_41_mini, gpt_41
 from valuator.utils.llm_utils import HumanMessage, retry
 from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.qt_studio.models.app_state import AppState
-from valuator.modules.analyze import analyze
+from valuator.modules.waterfall_architecture.analyze import analyze
 
 # Configure logging
 logging.basicConfig(

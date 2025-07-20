@@ -6,8 +6,8 @@ import logging
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import gpt_41_mini
 from valuator.utils.basic_utils import parse_json_from_llm_output
-from valuator.modules.financial_analysis import analyze_as_finance
-from valuator.modules.ceo_analysis import analyze_as_ceo
+from valuator.modules.waterfall_architecture.financial_analysis import analyze_as_finance
+from valuator.modules.waterfall_architecture.ceo_analysis import analyze_as_ceo
 import yfinance as yf
 
 # Configure logging

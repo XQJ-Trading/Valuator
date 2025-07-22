@@ -7,13 +7,13 @@ import pandas as pd
 import logging
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
-from valuator.modules.analysis_utils import (
+from valuator.modules.waterfall_architecture.analysis_utils import (
     fetch_company_data,
     extract_segments_in_company,
     extract_balance_sheet,
     format_balance_sheet_markdown,
 )
-from valuator.modules.business_analysis import analyze_as_business
+from valuator.modules.waterfall_architecture.business_analysis import analyze_as_business
 from valuator.utils.llm_zoo import pplx
 from valuator.utils.llm_utils import SystemMessage, HumanMessage
 from valuator.utils.basic_utils import parse_json_from_llm_output

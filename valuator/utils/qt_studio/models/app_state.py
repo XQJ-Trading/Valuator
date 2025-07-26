@@ -40,6 +40,7 @@ class AppState(QObject):
     functions_changed = pyqtSignal()
     logs_changed = pyqtSignal()
     output_changed = pyqtSignal(str)  # 출력 변경 시그널
+    cache_changed = pyqtSignal()  # cache 변경 시그널 추가
 
     @classmethod
     def get_instance(cls):
@@ -243,3 +244,23 @@ class AppState(QObject):
         doc_ref = db.collection("log-v1").document()
         doc_ref.set({"content": logs})
         return doc_ref.id
+
+    def get_all_cache(self) -> dict:
+        """현재 cache의 모든 key-value 쌍을 dict로 반환합니다."""
+        from valuator.utils.datalake import cache
+        # cache._data는 private이므로, dict로 복사해서 반환
+        return dict(cache._data)
+
+    def clear_cache(self):
+        """cache를 비웁니다."""
+        from valuator.utils.datalake import cache
+        cache._data.clear()
+        self.cache_changed.emit()
+
+    def add_test_cache_data(self):
+        """테스트용 캐시 데이터를 추가합니다."""
+        from valuator.utils.datalake import cache
+        cache.set("test.key1", "This is test cache data 1")
+        cache.set("test.key2", "This is test cache data 2")
+        cache.set("fillout.create_form.AAPL", "Sample DCF form data")
+        self.cache_changed.emit()

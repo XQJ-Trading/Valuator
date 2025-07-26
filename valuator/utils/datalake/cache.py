@@ -25,6 +25,15 @@ class Cache:
     def set(self, key: str, value: str) -> None:
         self._validate_key(key)
         self._data[key] = value
+        # AppState에 캐시 변경 알림 (AppState가 초기화된 경우에만)
+        try:
+            from valuator.utils.qt_studio.models.app_state import AppState
+            app_state = AppState.get_instance()
+            if app_state:
+                app_state.cache_changed.emit()
+        except:
+            # AppState가 아직 초기화되지 않았거나 import 오류인 경우 무시
+            pass
 
     def get(self, key: str, default: str = "") -> str:
         self._validate_key(key)

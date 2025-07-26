@@ -137,7 +137,7 @@ class CacheListView(QWidget):
         for i in reversed(range(self.layout.count())):
             item = self.layout.itemAt(i)
             widget = item.widget() if item else None
-            if widget and not isinstance(widget, QLabel):
+            if widget:
                 widget.setParent(None)
             elif widget is None and i != self.layout.count() - 1:
                 self.layout.takeAt(i)

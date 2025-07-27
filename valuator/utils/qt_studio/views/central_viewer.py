@@ -64,12 +64,16 @@ class FunctionTestView(QWidget):
         for i in range(self.layout().count()):
             item = self.layout().itemAt(i)
             if item.widget():
-                if isinstance(item.widget(), QLabel):
-                    item.widget().setStyleSheet(f"font-size: {label_size}px;")
-                elif isinstance(item.widget(), QTextEdit):
-                    item.widget().setStyleSheet(f"font-size: {text_size}px;")
-                elif isinstance(item.widget(), QPushButton):
-                    item.widget().setStyleSheet(f"font-size: {button_size}px;")
+                try:
+                    if isinstance(item.widget(), QLabel):
+                        item.widget().setStyleSheet(f"font-size: {label_size}px;")
+                    elif isinstance(item.widget(), QTextEdit):
+                        item.widget().setStyleSheet(f"font-size: {text_size}px;")
+                    elif isinstance(item.widget(), QPushButton):
+                        item.widget().setStyleSheet(f"font-size: {button_size}px;")
+                except RuntimeError:
+                    # 객체가 삭제된 경우 무시
+                    continue
 
 
 class CentralView(QWidget):
@@ -78,17 +82,38 @@ class CentralView(QWidget):
     def __init__(self, viewmodel, parent=None):
         super().__init__(parent)
         self._viewmodel = viewmodel
+        self._font_manager = FontManager.get_instance()
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         # Initial placeholder
         self.placeholder = QLabel("Select a function from the left sidebar to begin.")
-        self.placeholder.setStyleSheet("font-size: 16px; color: #888;")
         self.layout.addWidget(self.placeholder)
 
         # Connections
         self._viewmodel.central_view_changed.connect(self.update_view)
+        
+        # 폰트 크기 변경 시그널 연결
+        self._font_manager.font_scale_changed.connect(self._update_fonts)
+        
+        # 초기 폰트 크기 적용
+        self._update_fonts()
+
+    def _update_fonts(self):
+        """모든 위젯의 폰트 크기를 업데이트합니다."""
+        label_size = self._font_manager.get_font_size("label")
+        
+        # placeholder 라벨 폰트 크기 업데이트 (안전성 확인)
+        if hasattr(self, 'placeholder') and self.placeholder is not None:
+            try:
+                self.placeholder.setStyleSheet(f"font-size: {label_size}px; color: #888;")
+            except RuntimeError:
+                # 객체가 삭제된 경우 시그널 연결 해제
+                try:
+                    self._font_manager.font_scale_changed.disconnect(self._update_fonts)
+                except:
+                    pass
 
     def update_view(self, function):
         # Clear current view
@@ -96,6 +121,9 @@ class CentralView(QWidget):
             child = self.layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+
+        # placeholder를 None으로 설정하여 삭제된 객체임을 표시
+        self.placeholder = None
 
         # Add new function test view
         test_view = FunctionTestView(self._viewmodel, function)

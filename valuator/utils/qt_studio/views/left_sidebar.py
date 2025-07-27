@@ -69,6 +69,7 @@ class LeftSidebarView(QWidget):
     def __init__(self, viewmodel, parent=None):
         super().__init__(parent)
         self._viewmodel = viewmodel
+        self._font_manager = FontManager.get_instance()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -102,5 +103,23 @@ class LeftSidebarView(QWidget):
         )
         self._viewmodel.function_list_updated.connect(self.func_view.update_functions)
 
+        # 폰트 크기 변경 시그널 연결
+        self._font_manager.font_scale_changed.connect(self._update_fonts)
+
         # Initial state
         self.stacked_widget.setCurrentWidget(self.func_view)
+        
+        # 초기 폰트 크기 적용
+        self._update_fonts()
+
+    def _update_fonts(self):
+        """모든 위젯의 폰트 크기를 업데이트합니다."""
+        button_size = self._font_manager.get_font_size("button")
+        label_size = self._font_manager.get_font_size("label")
+        
+        # 메뉴 버튼들 폰트 크기 업데이트
+        self.func_button.setStyleSheet(f"font-size: {button_size}px;")
+        self.utils_button.setStyleSheet(f"font-size: {button_size}px;")
+        
+        # utils_view 라벨 폰트 크기 업데이트
+        self.utils_view.setStyleSheet(f"font-size: {label_size}px;")

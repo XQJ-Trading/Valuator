@@ -22,25 +22,44 @@ class TextWindow(QWidget):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setGeometry(100, 100, 800, 600)  # 창 위치와 크기 설정
+        self._font_manager = FontManager.get_instance()
 
         layout = QVBoxLayout(self)
-        text_edit = QTextEdit()
-        text_edit.setPlainText(content)
-        text_edit.setReadOnly(True)
-        # BlockWidget과 유사한 스타일 적용
-        text_edit.setStyleSheet(
-            """
-            QTextEdit {
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlainText(content)
+        self.text_edit.setReadOnly(True)
+        
+        # 폰트 크기 변경 시그널 연결
+        self._font_manager.font_scale_changed.connect(self._update_fonts)
+        
+        # 초기 폰트 크기 적용
+        self._update_fonts()
+        
+        layout.addWidget(self.text_edit)
+        self.setLayout(layout)
+        
+    def closeEvent(self, event):
+        """창이 닫힐 때 시그널 연결을 해제합니다."""
+        try:
+            self._font_manager.font_scale_changed.disconnect(self._update_fonts)
+        except:
+            pass  # 이미 연결이 해제된 경우 무시
+        super().closeEvent(event)
+        
+    def _update_fonts(self):
+        """텍스트 에디터의 폰트 크기를 업데이트합니다."""
+        text_size = self._font_manager.get_font_size("text")
+        self.text_edit.setStyleSheet(
+            f"""
+            QTextEdit {{
                 background-color: #252525;
                 color: #D3D3D3;
                 border: none;
-                font-size: 14px;
+                font-size: {text_size}px;
                 padding: 8px;
-            }
+            }}
         """
         )
-        layout.addWidget(text_edit)
-        self.setLayout(layout)
 
 
 DARK_MODE_TABLE_STYLE = """<style>
@@ -87,12 +106,15 @@ class BlockWidget(QFrame):
         self._current_render_mode = "raw"  # 현재 렌더링 모드
         self.extra_windows = []  # 열린 새 창들의 참조를 저장할 리스트
         self._font_manager = FontManager.get_instance()
+        self._title_color = None  # title 색상을 저장할 변수
 
         self.setFrameShape(QFrame.StyledPanel)
         self._update_stylesheet()
 
         # 폰트 크기 변경 시그널 연결
         self._font_manager.font_scale_changed.connect(self._update_stylesheet)
+        self._font_manager.font_scale_changed.connect(self._render_content)
+        self._font_manager.font_scale_changed.connect(self._update_title_style_from_signal)
 
         # Main layout
         layout = QVBoxLayout(self)
@@ -105,12 +127,12 @@ class BlockWidget(QFrame):
 
         # 레벨에 따라 제목 색상 동적 변경
         if level == "ERROR":
-            title_color = "#E57373"  # Soft Red
+            self._title_color = "#E57373"  # Soft Red
         elif level == "SUCCESS":
-            title_color = "#81C784"  # Soft Green
+            self._title_color = "#81C784"  # Soft Green
         else:
-            title_color = "#EAEAEA"  # Default
-        self._update_title_style(title_color)
+            self._title_color = "#EAEAEA"  # Default
+        self._update_title_style(self._title_color)
 
         title_row.addWidget(self.title_label)
         # title_row.addStretch() # 이 라인을 제거하여 제목이 남는 공간을 채우도록 함
@@ -160,8 +182,25 @@ class BlockWidget(QFrame):
                 super().__init__()
                 self.setWindowTitle(title)
                 self.setGeometry(100, 100, 900, 700)
-                widget = FullTextBlockWidget(title, text, level)
-                self.setCentralWidget(widget)
+                self.widget = FullTextBlockWidget(title, text, level)
+                self.setCentralWidget(self.widget)
+                
+                # 폰트 크기 변경 시그널을 새 창에도 연결
+                self._font_manager = FontManager.get_instance()
+                self._font_manager.font_scale_changed.connect(self._update_fonts)
+                
+            def closeEvent(self, event):
+                """창이 닫힐 때 시그널 연결을 해제합니다."""
+                try:
+                    self._font_manager.font_scale_changed.disconnect(self._update_fonts)
+                except:
+                    pass  # 이미 연결이 해제된 경우 무시
+                super().closeEvent(event)
+                
+            def _update_fonts(self):
+                """새 창의 폰트 크기를 업데이트합니다."""
+                if hasattr(self, 'widget'):
+                    self.widget._update_stylesheet()
 
         new_window = FullTextWindow(
             f"Full View: {self.title_label.text()}",
@@ -307,6 +346,11 @@ class BlockWidget(QFrame):
         self.title_label.setStyleSheet(
             f"font-weight: bold; font-size: {title_size}px; color: {color};"
         )
+    
+    def _update_title_style_from_signal(self):
+        """폰트 크기 변경 시그널에 의해 호출되는 title 스타일 업데이트 메서드입니다."""
+        if self._title_color:
+            self._update_title_style(self._title_color)
 
     def _update_normal_text_style(self):
         """일반 텍스트 스타일을 업데이트합니다."""
@@ -410,3 +454,8 @@ class FullTextBlockWidget(BlockWidget):
     def __init__(self, title: str, text: str, level: str = "INFO", parent=None):
         super().__init__(title, text, level, parent)
         self.new_window_btn.setDisabled(True)
+        
+        # 폰트 크기 변경 시그널을 명시적으로 연결 (안전성을 위해)
+        self._font_manager.font_scale_changed.connect(self._update_stylesheet)
+        self._font_manager.font_scale_changed.connect(self._render_content)
+        self._font_manager.font_scale_changed.connect(self._update_title_style_from_signal)

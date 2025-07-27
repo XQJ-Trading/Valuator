@@ -48,6 +48,7 @@ class MainViewModel(QObject):
     function_execution_result = pyqtSignal(str)
     font_scale_changed = pyqtSignal(float)  # 폰트 크기 변경 시그널
     upload_finished = pyqtSignal(str)  # Firestore document id or error message
+    cache_list_updated = pyqtSignal(dict)  # cache 목록 변경 시그널
 
     def __init__(self, model: AppState):
         super().__init__()
@@ -63,6 +64,7 @@ class MainViewModel(QObject):
         self._model.font_manager.font_scale_changed.connect(
             self.font_scale_changed.emit
         )  # 폰트 크기 변경 시그널 연결
+        self._model.cache_changed.connect(self.update_cache_list)  # cache 변경 시그널 연결
 
     def load_initial_data(self):
         """초기 데이터 로드를 트리거합니다."""
@@ -85,6 +87,17 @@ class MainViewModel(QObject):
             f"DEBUG: ViewModel: log_list_updated signal emitted with {log_count} logs."
         )
         self.log_list_updated.emit(logs)
+
+    def update_cache_list(self):
+        cache_items = self._model.get_all_cache()
+        self.cache_list_updated.emit(cache_items)
+
+    def clear_cache_requested(self):
+        self._model.clear_cache()
+
+    def add_test_cache_data_requested(self):
+        """테스트용 캐시 데이터 추가 요청을 받아 Model에 전달합니다."""
+        self._model.add_test_cache_data()
 
     def select_function(self, func):
         """사용자가 function list에서 함수를 선택했을 때 호출됩니다."""

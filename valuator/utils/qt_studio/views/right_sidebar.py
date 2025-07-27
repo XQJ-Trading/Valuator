@@ -96,9 +96,83 @@ class LogListView(QWidget):
         )
 
 
-class RightSidebarView(QWidget):
-    """우측 사이드바 전체 (Sector C)"""
+class CacheListView(QWidget):
+    """cache 목록을 BlockWidget으로 표시하는 뷰"""
+    def __init__(self, viewmodel, parent=None):
+        super().__init__(parent)
+        self._viewmodel = viewmodel
 
+        # Main Layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Scroll Area
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
+        self.container = QWidget()
+        self.layout = QVBoxLayout(self.container)
+        self.layout.addStretch()
+        self.scroll_area.setWidget(self.container)
+        main_layout.addWidget(self.scroll_area)
+
+        # Button Area
+        button_layout = QHBoxLayout()
+        self.clear_button = QPushButton("Clear")
+        self.test_button = QPushButton("Add Test Data")
+        button_layout.addStretch()  # 버튼을 오른쪽으로 정렬
+        button_layout.addWidget(self.test_button)
+        button_layout.addWidget(self.clear_button)
+        main_layout.addLayout(button_layout)
+
+        # Connections
+        self.clear_button.clicked.connect(self._viewmodel.clear_cache_requested)
+        self.test_button.clicked.connect(self._viewmodel.add_test_cache_data_requested)
+        self._viewmodel.cache_list_updated.connect(self.update_cache)
+
+    def update_cache(self, cache_items):
+        # cache_items: dict
+        # Clear existing widgets except the last stretch
+        for i in reversed(range(self.layout.count())):
+            item = self.layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget:
+                widget.setParent(None)
+            elif widget is None and i != self.layout.count() - 1:
+                self.layout.takeAt(i)
+        
+        # Add new cache items
+        if cache_items:
+            for key, value in cache_items.items():
+                block = BlockWidget(str(key), str(value), level="INFO")
+                self.layout.insertWidget(self.layout.count() - 1, block)
+        else:
+            # 캐시가 비어있을 때 안내 메시지 표시
+            empty_label = QLabel("Cache is empty. Use functions to populate cache data.")
+            empty_label.setStyleSheet("color: #888; font-style: italic; padding: 10px;")
+            empty_label.setAlignment(Qt.AlignCenter)
+            self.layout.insertWidget(self.layout.count() - 1, empty_label)
+        
+        # stretch가 마지막에 없으면 추가
+        if (
+            self.layout.count() == 0
+            or self.layout.itemAt(self.layout.count() - 1).widget() is not None
+        ):
+            self.layout.addStretch()
+        # 추가 후 스크롤을 맨 아래로
+        QTimer.singleShot(
+            100,
+            lambda: self.scroll_area.verticalScrollBar().setValue(
+                self.scroll_area.verticalScrollBar().maximum()
+            ),
+        )
+
+
+class RightSidebarView(QWidget):
+    """
+    우측 사이드바 전체 (Sector C)
+    """
     def __init__(self, viewmodel, parent=None):
         super().__init__(parent)
         self._viewmodel = viewmodel
@@ -117,13 +191,9 @@ class RightSidebarView(QWidget):
         # --- Sector C2: Stacked Viewer ---
         self.stacked_widget = QStackedWidget()
         self.log_view = LogListView(self._viewmodel)
-
-        # Placeholder for cache view
-        self.cache_view_placeholder = QLabel("Cache View (Not Implemented)")
-        self.cache_view_placeholder.setWordWrap(True)
-
+        self.cache_view = CacheListView(self._viewmodel)
         self.stacked_widget.addWidget(self.log_view)
-        self.stacked_widget.addWidget(self.cache_view_placeholder)
+        self.stacked_widget.addWidget(self.cache_view)
         layout.addWidget(self.stacked_widget)
 
         # --- Connections ---
@@ -131,9 +201,12 @@ class RightSidebarView(QWidget):
             lambda: self.stacked_widget.setCurrentWidget(self.log_view)
         )
         self.cache_button.clicked.connect(
-            lambda: self.stacked_widget.setCurrentWidget(self.cache_view_placeholder)
+            lambda: self.stacked_widget.setCurrentWidget(self.cache_view)
         )
         self._viewmodel.log_list_updated.connect(self.log_view.update_logs)
+        self._viewmodel.cache_list_updated.connect(self.cache_view.update_cache)
 
         # Initial state
         self.stacked_widget.setCurrentWidget(self.log_view)
+        # 앱 시작 시 cache 목록 초기화
+        self._viewmodel.update_cache_list()

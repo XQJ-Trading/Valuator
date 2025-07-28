@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QComboBox,
 )
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 from valuator.utils.qt_studio.models.font_manager import FontManager
 import markdown
 
@@ -189,6 +189,12 @@ class BlockWidget(QFrame):
                 self._font_manager = FontManager.get_instance()
                 self._font_manager.font_scale_changed.connect(self._update_fonts)
                 
+                # 확대/축소 단축키 설정
+                self._setup_zoom_shortcuts()
+                
+                # 창이 포커스를 받을 수 있도록 설정
+                self.setFocusPolicy(Qt.StrongFocus)
+                
             def closeEvent(self, event):
                 """창이 닫힐 때 시그널 연결을 해제합니다."""
                 try:
@@ -197,10 +203,57 @@ class BlockWidget(QFrame):
                     pass  # 이미 연결이 해제된 경우 무시
                 super().closeEvent(event)
                 
+            def keyPressEvent(self, event):
+                """키 이벤트를 처리합니다."""
+                # Ctrl + W로 창 닫기
+                if event.key() == Qt.Key_W and event.modifiers() == Qt.ControlModifier:
+                    self.close()
+                    return
+                super().keyPressEvent(event)
+                
             def _update_fonts(self):
                 """새 창의 폰트 크기를 업데이트합니다."""
                 if hasattr(self, 'widget'):
                     self.widget._update_stylesheet()
+                    
+            def _setup_zoom_shortcuts(self):
+                """확대/축소 단축키를 설정합니다."""
+                from PyQt5.QtWidgets import QShortcut
+                from PyQt5.QtGui import QKeySequence
+                
+                # Ctrl + '+' : 확대
+                zoom_in_shortcut = QShortcut(QKeySequence("Ctrl++"), self)
+                zoom_in_shortcut.activated.connect(self._zoom_in)
+                
+                # Ctrl + '=' : 확대 (일반적인 브라우저/에디터 단축키)
+                zoom_in_shortcut2 = QShortcut(QKeySequence("Ctrl+="), self)
+                zoom_in_shortcut2.activated.connect(self._zoom_in)
+                
+                # Ctrl + '-' : 축소
+                zoom_out_shortcut = QShortcut(QKeySequence("Ctrl+-"), self)
+                zoom_out_shortcut.activated.connect(self._zoom_out)
+                
+                # Ctrl + 0 : 기본 크기로 복원
+                zoom_reset_shortcut = QShortcut(QKeySequence("Ctrl+0"), self)
+                zoom_reset_shortcut.activated.connect(self._zoom_reset)
+                
+                # Ctrl + W : 창 닫기
+                close_shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+                close_shortcut.activated.connect(self.close)
+                # 단축키가 다른 위젯에 의해 가로채어지지 않도록 설정
+                close_shortcut.setContext(Qt.WindowShortcut)
+                
+            def _zoom_in(self):
+                """폰트 크기를 확대합니다."""
+                self._font_manager.increase_font_size()
+                
+            def _zoom_out(self):
+                """폰트 크기를 축소합니다."""
+                self._font_manager.decrease_font_size()
+                
+            def _zoom_reset(self):
+                """폰트 크기를 기본값으로 복원합니다."""
+                self._font_manager.reset_font_size()
 
         new_window = FullTextWindow(
             f"Full View: {self.title_label.text()}",

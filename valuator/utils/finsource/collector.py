@@ -3,6 +3,8 @@ import requests
 
 import yfinance as yf
 
+from valuator.utils.llm_utils import retry
+
 
 def parse_and_clean_markdown_table(text) -> str:
     if text.isspace() or all(c == "\t" for c in text):
@@ -12,6 +14,7 @@ def parse_and_clean_markdown_table(text) -> str:
         return re.sub(pattern, "", text)
 
 
+@retry(tries=3)
 def fetch_using_readerLLM(corp: str, url: str):
     """
     Jina Reader LLM를 사용하여 10-K 보고서 HTML을 markdown 형식으로 가져옵니다.

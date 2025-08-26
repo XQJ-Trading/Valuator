@@ -2,28 +2,26 @@
 Financial analysis module for company financial data analysis.
 """
 
-from io import StringIO
 import pandas as pd
-import logging
 
+from valuator.utils.llm_utils import retry
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.modules.waterfall_architecture.analysis_utils import (
+    setup_logging,
     fetch_company_data,
     extract_segments_in_company,
     extract_balance_sheet,
     format_balance_sheet_markdown,
 )
-from valuator.modules.waterfall_architecture.business_analysis import analyze_as_business
+from valuator.modules.waterfall_architecture.business_analysis import (
+    analyze_as_business,
+)
 from valuator.utils.llm_zoo import pplx
-from valuator.utils.llm_utils import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from valuator.utils.basic_utils import parse_json_from_llm_output
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-)
-logger = logging.getLogger(__name__)
+# Setup logging
+logger = setup_logging()
 
 
 @append_to_methods()
@@ -72,7 +70,6 @@ def analyze_as_finance(corp: str) -> str:
                     redefined_segments["segment"] == segment, "operating_income"
                 ] = revenue * (estimated_opm / 100)
             except (KeyError, ValueError) as e:
-                # CLI 로그로 변경
                 logger.warning(
                     f"Could not update operating income for segment {segment}: {str(e)}"
                 )
@@ -106,6 +103,30 @@ def analyze_as_finance(corp: str) -> str:
     balance_sheet_table_md = format_balance_sheet_markdown(balance_sheet_json_str)
 
     # Create business analysis report
+    business_report = create_business_report(corp, business_reports)
+
+    # Combine both reports
+    combined_report = f"""{financial_data}
+
+{balance_sheet_table_md} 
+---
+
+{business_report}"""
+
+    return combined_report
+
+
+def create_business_report(corp: str, business_reports: dict) -> str:
+    """
+    Create business analysis report from segment analyses.
+
+    Args:
+        corp: Company name
+        business_reports: Dictionary of business analysis reports
+
+    Returns:
+        Formatted business report string
+    """
     business_report = f"""# Business Analysis Report for {corp}
 
 ## Business Segment Analysis
@@ -126,21 +147,13 @@ def analyze_as_finance(corp: str) -> str:
 {analysis.get('segment_analysis', {}).get('description', 'No segment analysis available')}
 """
         except Exception as e:
-            # CLI 로그로 변경
             logger.warning(f"Error processing analysis for segment {segment}: {str(e)}")
             raise
 
-    # Combine both reports
-    combined_report = f"""{financial_data}
-
-{balance_sheet_table_md} 
----
-
-{business_report}"""
-
-    return combined_report
+    return business_report
 
 
+@retry(tries=3)
 def redefine_segments_product_centric(
     corp: str, segments_df: pd.DataFrame, summary: str
 ) -> pd.DataFrame:
@@ -224,6 +237,5 @@ Please redefine these segments using product-centric classification while preser
         return redefined_segments
 
     except Exception as e:
-        # CLI 로그로 변경
         logger.warning(f"Could not redefine segments for {corp}: {str(e)}")
         raise

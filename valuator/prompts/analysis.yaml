@@ -1,0 +1,162 @@
+financial_analysis: |
+  [Goal]
+  Analyze the provided reports to extract segment-wise growth rates and operating margins.
+  Focus on historical data and future projections mentioned in the reports.
+
+  [Source Material]
+  CEO Report:
+  {ceo_report}
+
+  Financial Report:
+  {finance_report}
+
+  [Output Format]
+  {
+      "segments": [
+          {
+              "name": "Segment Name",
+              "growth_rate": "Annual growth rate as percentage (e.g., '15.5')",
+              "operating_margin": "Operating margin as percentage (e.g., '25.3')"
+          },
+          ...
+      ]
+  }
+
+  [Rules]
+  - Extract growth rates from both historical data and future projections
+  - If multiple growth rates are mentioned, use the most conservative estimate
+  - Operating margins should be based on historical data
+  - All percentages should be numbers without the % symbol
+  - If data is not available, use reasonable industry averages
+  - Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
+
+segment_extraction: |
+  [Goal]
+  Extract the current segment revenue data from the provided report.
+
+  [Source Material]
+  {finance_report}
+
+  [Output Format]
+  {
+      "segments": [
+          {
+              "name": "Segment Name",
+              "revenue": "Current revenue value"
+          },
+          ...
+      ]
+  }
+
+  [Rules]
+  - All monetary values should be numbers without currency symbols
+  - Use the most recent available data
+  - If exact values are not available, use reasonable estimates
+  - Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
+
+company_summary: |
+  ## Role
+  You are acting as an expert financial analyst specializing in segment performance analysis. Your task is to break down revenue and profitability metrics across different business segments from financial statements.
+
+  ## Main Task
+  - You analyze annual financial statements from the provided source material.
+  - The analysis should cover both company-wide performance and segment-specific metrics.
+  - When data appears inconsistent or incomplete, note this in your analysis.
+
+  ## Specific Tasks
+  1. **Company-wide Financial Overview**:
+      - Extract key metrics from the income statement: total revenue, operating income, and operating margin (%)
+      - From the balance sheet, collect:
+          * Total Assets
+          * Key Asset Components (extract up to 5 most significant, e.g., Cash & Cash Equivalents, Accounts Receivable, Inventories, PP&E, Goodwill)
+          * Total Liabilities
+          * Key Liability Components (extract up to 5 most significant, e.g., Accounts Payable, Accrued Expenses, Short-Term Debt, Long-Term Debt, Deferred Revenue)
+          * Total Stockholders' Equity
+          * Key Equity Components (extract up to 3-4 most significant, e.g., Common Stock, Retained Earnings, Accumulated Other Comprehensive Income)
+
+  2. **Segment Analysis**:
+      - Identify all business segments mentioned in the source material
+      - For each segment, extract:
+      * Revenue
+      * Operating income
+      * Operating margin (%)
+      * Percentage of total company revenue
+      * Year-over-year growth rates (if data is available)
+
+  ## Output Requirements
+  - Begin with a brief executive summary highlighting key findings (1-2 paragraphs)
+  - Present the company-wide financial overview table
+  - Present segment performance tables with comparative metrics
+  - Organize all data into clearly formatted markdown tables.
+  - Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
+
+  ## Source Material
+  Please analyze the following financial data:
+  {source_chunk}
+
+segment_jsonl_extraction: |
+  [Goal]
+  - You are a financial analyst. Extract segment-wise revenue and operating income for {corp} of {year} from the provided source material.
+  {summary}
+
+  [Source]
+  - If the 10-K is unavailable or lacks detail, fallback to the latest 10-Q, earnings release, or investor presentation.
+  - Always use actual data from official filings.
+  - Do not invent or hallucinate segments.
+
+  [Output Format]
+  {"segment": "Segment Name", "revenue": number, "operating_income": number, "growth_rate": number}
+  {"segment": "Segment Name 2", "revenue": number, "operating_income": number, "growth_rate": number}
+  ...
+
+  [Rules]
+  - Only output one JSON Lines block.
+  - Do not add any explanation.
+  - Numbers must be in Million USD (1M$ units).
+  - If operating income is missing, set it to null but still report actual segments.
+  - Never make up segments or revenue figures.
+  - Output must be valid for `pd.read_json(data, lines=True)`.
+
+balance_sheet_extraction: |
+  [Goal]
+  From the provided financial summary text, extract the company-wide balance sheet information.
+  This includes Total Assets and its key components, Total Liabilities and its key components, and Total Stockholders' Equity and its key components.
+  Present this data as a single JSON object.
+
+  [Source Material]
+  {summary}
+
+  [Output JSON Structure]
+  {
+    "balance_sheet": {
+      "assets": {
+        "total": "Total Assets Value (string)",
+        "components": [
+          {"item": "Asset Component Name (string)", "value": "Amount (string)"},
+          ...
+        ]
+      },
+      "liabilities": {
+        "total": "Total Liabilities Value (string)",
+        "components": [
+          {"item": "Liability Component Name (string)", "value": "Amount (string)"},
+          ...
+        ]
+      },
+      "equity": {
+        "total": "Total Stockholders' Equity Value (string)",
+        "components": [
+          {"item": "Equity Component Name (string)", "value": "Amount (string)"},
+          ...
+        ]
+      }
+    }
+  }
+
+  [Rules]
+  - Only output one JSON object.
+  - Do not add any explanation before or after the JSON.
+  - Ensure all monetary values in the JSON are strings.
+  - If specific components are not found in the source, you can omit them from the 'components' list or use an empty list.
+  - If a total (e.g., Total Assets) is not found, use "N/A" as its value.
+  - Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).

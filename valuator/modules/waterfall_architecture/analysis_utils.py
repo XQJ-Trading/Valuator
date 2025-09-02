@@ -4,6 +4,7 @@ Common utilities for financial analysis modules.
 
 import logging
 from io import StringIO
+from typing import Union
 
 import pandas as pd
 
@@ -12,6 +13,7 @@ from valuator.utils.basic_utils import parse_json_from_llm_output
 from valuator.utils.llm_zoo import gpt_41_nano, gpt_41_mini
 from valuator.utils.finsource.collector import fetch_using_readerLLM
 from valuator.utils.finsource.sec_collector import get_10k_html_link
+from valuator.utils.prompt_manager import get_prompt
 
 # Configure logging
 logging.basicConfig(
@@ -19,6 +21,79 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def setup_logging():
+    """Configure logging for all modules in waterfall_architecture."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    )
+    return logging.getLogger(__name__)
+
+
+def format_currency_millions(value: Union[int, float, str]) -> float:
+    """
+    Convert currency value to millions of USD.
+
+    Args:
+        value: Currency value (can be in various formats)
+
+    Returns:
+        Value in millions of USD
+    """
+    if isinstance(value, str):
+        # Remove currency symbols and commas
+        value = value.replace("$", "").replace(",", "").replace("%", "")
+        try:
+            value = float(value)
+        except ValueError:
+            return 0.0
+
+    # Convert to millions if the value is likely in thousands or units
+    if value > 1_000_000_000:  # Likely in units
+        return value / 1_000_000
+    elif value > 1_000_000:  # Likely in thousands
+        return value / 1_000
+    else:
+        return value
+
+
+def create_llm_prompt_template(template_type: str, **kwargs) -> str:
+    """Load LLM prompt templates from YAML via prompt manager."""
+    return get_prompt("analysis", template_type, **kwargs)
+
+
+def format_markdown_table(headers: list, rows: list, title: str = "") -> str:
+    """
+    Create a formatted markdown table.
+
+    Args:
+        headers: List of column headers
+        rows: List of row data
+        title: Optional table title
+
+    Returns:
+        Formatted markdown table string
+    """
+    if not headers or not rows:
+        return ""
+
+    table_parts = []
+    if title:
+        table_parts.append(f"## {title}\n")
+
+    # Header row
+    table_parts.append("| " + " | ".join(headers) + " |")
+
+    # Separator row
+    table_parts.append("|" + "|".join(["------" for _ in headers]) + "|")
+
+    # Data rows
+    for row in rows:
+        table_parts.append("| " + " | ".join(str(cell) for cell in row) + " |")
+
+    return "\n".join(table_parts)
 
 
 def fetch_company_data(corp: str) -> str:
@@ -43,45 +118,7 @@ def fetch_company_data(corp: str) -> str:
         logger.info(f"step: {s} / {len(source)}")
         src = "".join(source[s:e])
         chunk_summary = gpt_41_nano.invoke(
-            f"""## Role
-You are acting as an expert financial analyst specializing in segment performance analysis. Your task is to break down revenue and profitability metrics across different business segments from financial statements.
-
-## Main Task
-- You analyze annual financial statements from the provided source material.
-- The analysis should cover both company-wide performance and segment-specific metrics.
-- When data appears inconsistent or incomplete, note this in your analysis.
-
-## Specific Tasks
-1. **Company-wide Financial Overview**:
-    - Extract key metrics from the income statement: total revenue, operating income, and operating margin (%)
-    - From the balance sheet, collect:
-        * Total Assets
-        * Key Asset Components (extract up to 5 most significant, e.g., Cash & Cash Equivalents, Accounts Receivable, Inventories, PP&E, Goodwill)
-        * Total Liabilities
-        * Key Liability Components (extract up to 5 most significant, e.g., Accounts Payable, Accrued Expenses, Short-Term Debt, Long-Term Debt, Deferred Revenue)
-        * Total Stockholders' Equity
-        * Key Equity Components (extract up to 3-4 most significant, e.g., Common Stock, Retained Earnings, Accumulated Other Comprehensive Income)
-
-2. **Segment Analysis**:
-    - Identify all business segments mentioned in the source material
-    - For each segment, extract:
-    * Revenue
-    * Operating income
-    * Operating margin (%)
-    * Percentage of total company revenue
-    * Year-over-year growth rates (if data is available)
-
-## Output Requirements
-- Begin with a brief executive summary highlighting key findings (1-2 paragraphs)
-- Present the company-wide financial overview table
-- Present segment performance tables with comparative metrics
-- Organize all data into clearly formatted markdown tables.
-- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
-
-## Source Material
-Please analyze the following financial data:
-{src}
-"""
+            create_llm_prompt_template("company_summary", source_chunk=src)
         ).content
         summary += str(chunk_summary)
 
@@ -104,28 +141,13 @@ def extract_segments_in_company(
         JSON string with segment data
     """
     segments = gpt_41_mini.invoke(
-        f"""[Goal]
-- You are a financial analyst. Extract segment-wise revenue and operating income for {corp} of {year} from the provided source material.
-{summary}
-
-[Source]
-- If the 10-K is unavailable or lacks detail, fallback to the latest 10-Q, earnings release, or investor presentation.
-- **Always use actual data from official filings.**
-- **Do not invent or hallucinate segments.**
-
-[Output Format]
-{{"segment": "Segment Name", "revenue": number, "operating_income": number, "growth_rate": number}}
-{{"segment": "Segment Name 2", "revenue": number, "operating_income": number, "growth_rate": number}}
-...
-
-[Rules]
-- Only output one JSON Lines block.
-- Do not add any explanation.
-- Numbers must be in Million USD (1M$ units).
-- If operating income is missing, set it to null but still report actual segments.
-- Never make up segments or revenue figures.
-- Output must be valid for `pd.read_json(data, lines=True)`.
-"""
+        get_prompt(
+            "analysis",
+            "segment_jsonl_extraction",
+            corp=corp,
+            summary=summary,
+            year=year,
+        )
     ).content
 
     logger.info(f"Segments JSON: {segments}")
@@ -144,49 +166,7 @@ def extract_balance_sheet(summary: str) -> str:
         JSON string with balance sheet data
     """
     balance_sheet_json_str = gpt_41_mini.invoke(
-        f"""[Goal]
-From the provided financial summary text, extract the company-wide balance sheet information.
-This includes Total Assets and its key components, Total Liabilities and its key components, and Total Stockholders' Equity and its key components.
-Present this data as a single JSON object.
-
-[Source Material]
-{summary}
-
-[Output JSON Structure]
-{{
-  "balance_sheet": {{
-    "assets": {{
-      "total": "Total Assets Value (string)",
-      "components": [
-        {{"item": "Asset Component Name (string)", "value": "Amount (string)"}},
-        ...
-      ]
-    }},
-    "liabilities": {{
-      "total": "Total Liabilities Value (string)",
-      "components": [
-        {{"item": "Liability Component Name (string)", "value": "Amount (string)"}},
-        ...
-      ]
-    }},
-    "equity": {{
-      "total": "Total Stockholders\\' Equity Value (string)",
-      "components": [
-        {{"item": "Equity Component Name (string)", "value": "Amount (string)"}},
-        ...
-      ]
-    }}
-  }}
-}}
-
-[Rules]
-- Only output one JSON object.
-- Do not add any explanation before or after the JSON.
-- Ensure all monetary values in the JSON are strings.
-- If specific components are not found in the source, you can omit them from the 'components' list or use an empty list.
-- If a total (e.g., Total Assets) is not found, use "N/A" as its value.
-- Explicitly state in the output that all monetary values are in millions of US dollars (1M$ units).
-"""
+        get_prompt("analysis", "balance_sheet_extraction", summary=summary)
     ).content
 
     return str(balance_sheet_json_str)

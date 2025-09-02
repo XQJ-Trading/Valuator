@@ -3,21 +3,19 @@ Business analysis module for industry and competitive analysis.
 """
 
 import json
-import logging
 from typing import Dict, Optional, Any
 
 from valuator.utils.qt_studio.core.decorators import append_to_methods
 from valuator.utils.llm_zoo import pplx, gpt_41_nano
+from langchain_core.messages import SystemMessage, HumanMessage
 from valuator.utils.basic_utils import parse_json_from_llm_output
-from valuator.utils.llm_utils import parse_text, SystemMessage, HumanMessage
-from valuator.utils.qt_studio.models.app_state import AppState
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+from valuator.utils.llm_utils import parse_text
+from valuator.modules.waterfall_architecture.analysis_utils import (
+    setup_logging,
 )
-logger = logging.getLogger(__name__)
+
+# Setup logging
+logger = setup_logging()
 
 
 @append_to_methods()
@@ -120,7 +118,6 @@ SEC-given business_segment : {segment if segment else "Overall Business"}"""
                     "estimated_opm": estimated_opm,
                 }
             except (ValueError, Exception) as e:
-                # CLI 로그로 변경
                 logger.warning(f"Could not extract OPM for segment {segment}: {str(e)}")
                 raise
 

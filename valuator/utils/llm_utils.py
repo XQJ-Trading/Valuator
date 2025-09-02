@@ -8,7 +8,8 @@ import traceback
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from valuator.utils.llm_zoo import *
+from valuator.utils.llm_zoo import gpt_41_nano, gpt_41_mini
+from valuator.utils.prompt_manager import get_prompt
 
 # Configure logging
 logging.basicConfig(
@@ -19,12 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 def parse_text(text: str, key_and_description: dict[str, str]) -> dict[str, str]:
+    system = get_prompt("utils", "parse_text_system")
     result_json = gpt_41_nano.invoke(
         f"""
-Based on these texts & guide, make it as a json formatted string. 
-* If there's no value of some keys, just fill out default value without deepthinking.
-* DO NOT print the header or footer explanation.
-* MUST include code block (```json ```)
+{system}
 <guide>
 ```json
 {key_and_description}
@@ -61,14 +60,7 @@ Based on these texts & guide, make it as a json formatted string.
 
 
 def translate(text: str, /, mode="invoke") -> str:
-    s_msg = SystemMessage(
-        """
-    You are a professional translator in finance domain. 
-    Given English text, you should translate it into Korean text.
-    Text meaning must not be contaminated and changed.
-    Format and blank lines should be strictly unchanged.
-    """
-    )
+    s_msg = SystemMessage(get_prompt("utils", "translate_system"))
     h_msg = HumanMessage(text)
     result = gpt_41_mini.invoke([s_msg, h_msg]).content
     return result

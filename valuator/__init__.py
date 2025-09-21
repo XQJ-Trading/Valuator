@@ -1,3 +1,0 @@
-"""
-Valuator package initialization
-"""

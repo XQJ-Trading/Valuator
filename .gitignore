@@ -10,7 +10,6 @@ credentials/
 *.key
 *.pem
 *.p12
-*.json
 
 # Python
 __pycache__/

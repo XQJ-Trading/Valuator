@@ -1,5 +1,0 @@
----
-description: if you run python or install pip package
-alwaysApply: false
----
-use venv

@@ -58,7 +58,7 @@ ehthumbs.db
 Thumbs.db
 
 # Logs
-logs/
+logs/react_sessions/*.json
 *.log
 
 # Temporary files

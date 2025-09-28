@@ -19,6 +19,20 @@
           class="query-input"
           @keydown.ctrl.enter="stream"
         ></textarea>
+        
+        <!-- Rule 입력 섹션 -->
+        <div class="rule-section">
+          <label class="rule-label">
+            <span class="rule-icon">📋</span>
+            규칙/제약사항 (선택사항)
+          </label>
+          <textarea 
+            v-model="rule" 
+            placeholder="추가적인 규칙이나 제약사항을 입력하세요..."
+            class="rule-input"
+            @keydown.ctrl.enter="stream"
+          ></textarea>
+        </div>
         <div class="input-controls">
           <label class="react-toggle">
             <input type="checkbox" v-model="useReact" />
@@ -107,6 +121,7 @@ interface Message {
 }
 
 const query = ref('')
+const rule = ref('')
 const useReact = ref(true)
 const status = ref('준비완료')
 const loading = ref(false)
@@ -116,7 +131,16 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
 
 function clearAll() {
   messages.value = []
+  query.value = ''
+  rule.value = ''
   status.value = '준비완료'
+}
+
+function buildQueryWithRule() {
+  if (!rule.value.trim()) {
+    return query.value
+  }
+  return `${query.value}<rule>${rule.value}</rule>`
 }
 
 
@@ -217,16 +241,18 @@ async function send() {
   status.value = '전송중...'
   
   try {
+    const queryWithRule = buildQueryWithRule()
     const res = await fetch(`${API_BASE}/api/v1/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: query.value, use_react: useReact.value }),
+      body: JSON.stringify({ query: queryWithRule, use_react: useReact.value }),
     })
     const json = await res.json()
     
     addMessage('final_answer', json.response || '응답을 받지 못했습니다.')
     status.value = '완료'
     query.value = ''
+    rule.value = ''
   } catch (e: any) {
     status.value = '오류 발생'
     addMessage('error', `전송 오류: ${String(e)}`)
@@ -243,8 +269,9 @@ async function stream() {
   let currentTokenMessage: Message | null = null
   
   try {
+    const queryWithRule = buildQueryWithRule()
     const url = new URL(`${API_BASE}/api/v1/chat/stream`)
-    url.searchParams.set('query', query.value)
+    url.searchParams.set('query', queryWithRule)
     url.searchParams.set('use_react', useReact.value ? 'true' : 'false')
 
     const es = new EventSource(url.toString())
@@ -290,6 +317,7 @@ async function stream() {
     es.addEventListener('end', () => {
       status.value = '완료'
       query.value = ''
+      rule.value = ''
       if (!closed) { es.close(); closed = true }
       loading.value = false
     })
@@ -444,6 +472,59 @@ async function stream() {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+  background: #ffffff;
+}
+
+/* Rule 입력 섹션 */
+.rule-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.rule-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.rule-icon {
+  font-size: 1.1rem;
+}
+
+.rule-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 1rem;
+  border: 2px solid #d1d5db;
+  border-radius: var(--border-radius);
+  background: #ffffff;
+  color: #111827;
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+  transition: var(--transition);
+  font-family: inherit;
+  box-sizing: border-box;
+  margin: 0;
+  display: block;
+  font-weight: 400;
+}
+
+.rule-input::placeholder {
+  color: #9ca3af;
+  font-weight: 400;
+  opacity: 1;
+}
+
+.rule-input:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15);
   background: #ffffff;
 }
 

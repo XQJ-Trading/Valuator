@@ -643,35 +643,6 @@ The analysis reached the maximum number of steps, but I can provide this summary
         
         state.set_final_answer(summary)
     
-    def _build_context_messages(self, state: ReActState) -> List[Dict[str, str]]:
-        """Build context messages from recent steps"""
-        messages = []
-        
-        # Add recent steps as context
-        from ai_agent.utils.config import config
-        recent_steps = state.steps[-config.react_context_steps:]  # Last N steps for context
-        
-        for step in recent_steps:
-            if step.step_type == ReActStepType.THOUGHT:
-                messages.append({
-                    "role": "assistant",
-                    "content": f"Thought: {step.content}"
-                })
-            elif step.step_type == ReActStepType.ACTION:
-                action_msg = f"Action: {step.content}"
-                if step.tool_name:
-                    action_msg += f"\nTool: {step.tool_name}"
-                messages.append({
-                    "role": "assistant", 
-                    "content": action_msg
-                })
-            elif step.step_type == ReActStepType.OBSERVATION:
-                messages.append({
-                    "role": "user",
-                    "content": f"Observation: {step.content}"
-                })
-        
-        return messages
     
     def _parse_tool_from_action(self, action_content: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """Parse tool name and input from action content - supports Python code blocks, JSON, YAML, and legacy formats"""

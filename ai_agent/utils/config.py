@@ -4,18 +4,22 @@ import os
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
-try:
-    from pydantic_settings import BaseSettings
-    from pydantic import Field
-except ImportError:
-    from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
     """Configuration class for AI Agent"""
     
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
+    
     # Google Gemini API Configuration
-    google_api_key: str = Field(description="Google API key", alias="GOOGLE_API_KEY")
+    google_api_key: Optional[str] = Field(default=None, description="Google API key", alias="GOOGLE_API_KEY")
     
     # Perplexity API Configuration
     perplexity_api_key: Optional[str] = Field(default=None, alias="PPLX_API_KEY")
@@ -34,7 +38,6 @@ class Config(BaseSettings):
     # ReAct Engine Configuration
     react_max_retries: int = Field(default=3, alias="REACT_MAX_RETRIES")
     react_max_thought_cycles: int = Field(default=5, alias="REACT_MAX_THOUGHT_CYCLES")
-    react_context_steps: int = Field(default=6, alias="REACT_CONTEXT_STEPS")
     
     # Tool Configuration
     code_execution_timeout: int = Field(default=30, alias="CODE_EXECUTION_TIMEOUT")
@@ -48,12 +51,6 @@ class Config(BaseSettings):
     mongodb_uri: Optional[str] = Field(default=None, alias="MONGODB_URI")
     mongodb_database: str = Field(default="ai_agent", alias="MONGODB_DATABASE")
     mongodb_collection: str = Field(default="react_sessions", alias="MONGODB_COLLECTION")
-    
-    class ConfigSettings:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        extra = "ignore"  # 추가 필드 무시
 
     @classmethod
     def load_from_file(cls, env_file: Optional[str] = None) -> "Config":

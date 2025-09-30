@@ -5,7 +5,7 @@
       <div class="header-content">
         <h1 class="app-title">
           <span class="title-icon">🤖</span>
-          AI Agent (ReAct)
+          AI Agent
         </h1>
       </div>
     </header>
@@ -34,11 +34,6 @@
           ></textarea>
         </div>
         <div class="input-controls">
-          <label class="react-toggle">
-            <input type="checkbox" v-model="useReact" />
-            <span class="toggle-slider"></span>
-            <span class="toggle-label">ReAct 모드 (단계별 사고과정)</span>
-          </label>
           <div class="action-buttons">
             <button @click="send" :disabled="loading" class="btn btn-primary">
               <span v-if="loading" class="loading-spinner"></span>
@@ -46,7 +41,7 @@
             </button>
             <button @click="stream" :disabled="loading" class="btn btn-secondary">
               <span v-if="loading" class="loading-spinner"></span>
-              {{ loading ? '스트리밍중...' : '스트림' }}
+              {{ loading ? '실시간 응답' : '실시간 응답' }}
             </button>
             <button @click="clearAll" class="btn btn-outline">지우기</button>
           </div>
@@ -122,7 +117,6 @@ interface Message {
 
 const query = ref('')
 const rule = ref('')
-const useReact = ref(true)
 const status = ref('준비완료')
 const loading = ref(false)
 const messages = ref<Message[]>([])
@@ -245,7 +239,7 @@ async function send() {
     const res = await fetch(`${API_BASE}/api/v1/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: queryWithRule, use_react: useReact.value }),
+      body: JSON.stringify({ query: queryWithRule }),
     })
     const json = await res.json()
     
@@ -272,7 +266,6 @@ async function stream() {
     const queryWithRule = buildQueryWithRule()
     const url = new URL(`${API_BASE}/api/v1/chat/stream`)
     url.searchParams.set('query', queryWithRule)
-    url.searchParams.set('use_react', useReact.value ? 'true' : 'false')
 
     const es = new EventSource(url.toString())
     let closed = false
@@ -539,101 +532,6 @@ async function stream() {
   width: 100%;
   box-sizing: border-box;
   min-height: 3rem;
-}
-
-/* ReAct 토글 */
-.react-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  cursor: pointer;
-  min-height: 3rem;
-}
-
-.react-toggle input[type="checkbox"] {
-  display: none;
-}
-
-.toggle-slider {
-  position: relative;
-  width: 3rem;
-  height: 1.5rem;
-  background: #cbd5e1;
-  border: 2px solid #e2e8f0;
-  border-radius: 1rem;
-  transition: var(--transition);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 1.25rem;
-  height: 1.25rem;
-  background: white;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  transition: var(--transition);
-}
-
-.react-toggle input:checked + .toggle-slider {
-  background: var(--primary-color);
-  border-color: var(--primary-color);
-}
-
-.react-toggle input:checked + .toggle-slider::before {
-  transform: translateX(1.5rem);
-  background: white;
-}
-
-.toggle-slider:hover {
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.react-toggle input:checked + .toggle-slider:hover {
-  background: #1d4ed8;
-}
-
-.toggle-label {
-  font-weight: 600;
-  font-size: 1rem;
-  color: #6b7280;
-  transition: var(--transition);
-  user-select: none;
-  line-height: 1.5;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.react-toggle input:checked + .toggle-slider + .toggle-label {
-  color: #1d4ed8;
-  font-weight: 700;
-}
-
-
-/* 토글 레이블 상태 표시 */
-.toggle-label::after {
-  content: ' (비활성)';
-  font-size: 0.8em;
-  font-weight: 500;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-  margin-left: 0.5rem;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-
-.react-toggle input:checked + .toggle-slider + .toggle-label::after {
-  content: ' (활성)';
-  color: #059669;
-  background: rgba(5, 150, 105, 0.1);
-  vertical-align: middle;
 }
 
 
@@ -1325,5 +1223,3 @@ async function stream() {
   }
 }
 </style>
-
-

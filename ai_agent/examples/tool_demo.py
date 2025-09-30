@@ -3,8 +3,7 @@
 import asyncio
 from typing import List, Dict, Any
 
-from ..agent.core import GeminiAgent
-from ..tools.base import ToolRegistry
+from ..agent.react_agent import AIAgent
 from ..utils.config import config
 from ..utils.logger import logger
 
@@ -15,24 +14,23 @@ class ToolDemo:
     def __init__(self):
         """Initialize tool demo"""
         self.agent = None
-        self.tool_registry = ToolRegistry()
     
     async def initialize(self):
         """Initialize the agent with tools"""
         try:
-            self.agent = GeminiAgent()
+            self.agent = AIAgent()
             
-            # Register tools
-            # Tools can be registered here
-            
+            # Agent already comes with tools built-in
             # Custom system prompt for tool demo
             demo_prompt = """You are a helpful AI assistant with access to various tools.
-You can search the web and perform various tasks.
+You can search the web, execute code, and perform file operations.
 
-Available tools:
-- web_search: Search the web (requires API key)
+Available tools include:
+- perplexity_search: Search the web for information
+- code_executor: Execute Python code
+- file_system: Read and write files
 
-When a user asks you to use a tool, you should use the appropriate tool and provide the results."""
+When a user asks you to use tools, you will automatically determine which tools to use and provide comprehensive results."""
             
             # Set custom prompt
             self.agent.set_system_prompt(demo_prompt)
@@ -82,7 +80,11 @@ When a user asks you to use a tool, you should use the appropriate tool and prov
     
     async def show_available_tools(self):
         """Show available tools"""
-        tools = self.tool_registry.list_tools()
+        if not self.agent:
+            print("\n❌ Agent not initialized")
+            return
+            
+        tools = self.agent.get_available_tools()
         
         print("\n🔧 Available Tools:")
         if tools:

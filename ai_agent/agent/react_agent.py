@@ -1,45 +1,43 @@
-"""ReAct-enabled AI Agent"""
+"""AI Agent with integrated ReAct capabilities"""
 
 import asyncio
-from typing import Dict, Any, Optional, List, AsyncGenerator
+from typing import Dict, Any, Optional, List, AsyncGenerator, Callable
+from datetime import datetime
 
-from .core import GeminiAgent
+from ..models.gemini import GeminiModel, GeminiResponse
 from ..react.engine import ReActEngine
 from ..tools.base import ToolRegistry
 from ..tools.react_tool import (
     PerplexitySearchTool, CodeExecutorTool, FileSystemTool
 )
+from ..utils.config import config
 from ..utils.logger import logger
 
 
-class ReActGeminiAgent(GeminiAgent):
-    """Gemini Agent enhanced with ReAct capabilities"""
+class AIAgent:
+    """Main AI Agent class with integrated ReAct capabilities"""
     
     def __init__(
         self,
         model_name: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        enable_react: bool = True
+        system_prompt: Optional[str] = None
     ):
         """
-        Initialize ReAct-enabled Gemini Agent
+        Initialize AI Agent with ReAct capabilities
         
         Args:
             model_name: Name of the Gemini model to use
             system_prompt: System prompt for the agent
-            enable_react: Whether to enable ReAct capabilities
         """
-        from ..utils.config import config
-        
-        super().__init__(model_name, system_prompt)
-        
-        self.enable_react = enable_react
+        self.model_name = model_name or config.agent_model
+        self.system_prompt = system_prompt or self._get_default_system_prompt()
+        self.model = GeminiModel(self.model_name)
         
         # Initialize ReAct components
-        if self.enable_react:
-            self._initialize_react_components()
+        self._initialize_react_components()
         
-        logger.info(f"Initialized ReAct Gemini Agent (ReAct: {'enabled' if enable_react else 'disabled'})")
+        logger.info(f"Initialized AI Agent with ReAct capabilities: {config.agent_name} v{config.agent_version}")
+        logger.debug(f"Using model: {self.model_name}")
     
     def _initialize_react_components(self):
         """Initialize ReAct-specific components"""
@@ -51,7 +49,6 @@ class ReActGeminiAgent(GeminiAgent):
         self.tool_registry.register(CodeExecutorTool())
         self.tool_registry.register(FileSystemTool())
         
-        
         # Initialize ReAct engine
         self.react_engine = ReActEngine(
             model=self.model,
@@ -61,71 +58,47 @@ class ReActGeminiAgent(GeminiAgent):
         logger.info(f"ReAct components initialized with {len(self.tool_registry.tools)} tools")
     
     def _get_default_system_prompt(self) -> str:
-        """Get enhanced system prompt for ReAct capabilities"""
-        base_prompt = super()._get_default_system_prompt()
-        
-        if not hasattr(self, 'enable_react') or not self.enable_react:
-            return base_prompt
-        
-        react_prompt = """
+        """Get default system prompt with ReAct capabilities"""
+        return """You are a helpful AI assistant powered by Google's Gemini model with ReAct (Reasoning + Acting) capabilities. 
+You are designed to be helpful, harmless, and honest. You can engage in conversations, 
+answer questions, help with tasks, and provide information on a wide variety of topics.
 
-You are enhanced with ReAct (Reasoning + Acting) capabilities, which means you can:
+You are enhanced with ReAct capabilities, which means you can:
 
 1. **Think step by step** - Break down complex problems into manageable parts
 2. **Use tools actively** - Execute calculations, search information, run code, and access files
 3. **Learn from experience** - Build on past solving patterns and successful approaches
 4. **Adapt your approach** - Modify your strategy based on intermediate results
 
-When faced with complex problems, you will:
+When faced with problems, you will:
 - **Analyze** the situation thoroughly (Thought)
 - **Take specific actions** using available tools (Action)  
 - **Observe and evaluate** the results (Observation)
 - **Continue iterating** until you reach a complete solution
 
-This makes you capable of solving problems that require multiple steps, external information, or computational work."""
-
-        return base_prompt + react_prompt
+Key guidelines:
+- Be concise but comprehensive in your responses
+- If you're unsure about something, say so rather than guessing
+- Be respectful and professional in all interactions
+- Use clear and easy-to-understand language
+- When appropriate, provide examples or explanations to help users understand concepts better"""
     
-    async def solve_with_react(
+    async def solve(
         self, 
         query: str, 
-        context: Optional[Dict[str, Any]] = None,
-        force_react: bool = False
+        context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Solve a problem using ReAct approach
+        Solve a problem using ReAct approach (main interface)
         
         Args:
             query: Problem to solve
             context: Additional context information
-            force_react: Force ReAct even for simple queries
             
         Returns:
             Dictionary with solution results and metadata
         """
-        if not self.enable_react:
-            # Fall back to regular chat
-            response = await self.chat(query)
-            return {
-                "mode": "chat",
-                "response": response,
-                "react_state": None,
-                "reasoning_steps": 0
-            }
-        
-        # Check if ReAct is needed
-        if not force_react and not self._should_use_react(query):
-            # Use regular chat for simple queries
-            response = await self.chat(query)
-            return {
-                "mode": "chat", 
-                "response": response,
-                "react_state": None,
-                "reasoning_steps": 0
-            }
-        
-        # Use ReAct for complex problems
-        logger.info(f"Using ReAct to solve: {query[:100]}...")
+        logger.info(f"Solving with ReAct: {query[:100]}...")
         
         # Solve using ReAct
         react_state = await self.react_engine.solve(query, context or {})
@@ -137,7 +110,6 @@ This makes you capable of solving problems that require multiple steps, external
             response = f"I encountered difficulties solving this problem. {react_state.error or 'The process was incomplete.'}"
         
         return {
-            "mode": "react",
             "response": response,
             "react_state": react_state,
             "reasoning_steps": len(react_state.steps),
@@ -145,151 +117,119 @@ This makes you capable of solving problems that require multiple steps, external
             "success": react_state.is_completed and not react_state.error
         }
 
-    async def solve_with_react_stream(
+    async def solve_stream(
         self,
         query: str,
         context: Optional[Dict[str, Any]] = None,
-        force_react: bool = True,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream ReAct solution events.
 
         Yields dict events where 'type' can be 'start' | 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'end'.
         """
-        if not self.enable_react:
-            # Fall back to plain streaming chat
-            async for chunk in self.chat_stream(query):
-                yield {"type": "token", "content": chunk}
-            yield {"type": "end"}
-            return
-
-        # If auto-detection says it's simple and not forced, stream plain chat
-        if not force_react and not self._should_use_react(query):
-            async for chunk in self.chat_stream(query):
-                yield {"type": "token", "content": chunk}
-            yield {"type": "end"}
-            return
-
         async for event in self.react_engine.solve_stream(query, context or {}):
             yield event
     
-    async def chat_enhanced(
+    async def chat(
         self, 
         message: str, 
-        use_react: Optional[bool] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> str:
         """
-        Enhanced chat that automatically decides between regular chat and ReAct
+        Chat interface that uses ReAct for problem solving
         
         Args:
             message: User message
-            use_react: Force ReAct usage (None = auto-decide)
             metadata: Additional metadata
             
         Returns:
             Agent response
         """
-        # Auto-decide or use specified mode
-        should_use_react = use_react if use_react is not None else self._should_use_react(message)
-        
-        if should_use_react and self.enable_react:
-            result = await self.solve_with_react(message, metadata)
+        try:
+            # Use ReAct engine for all interactions
+            result = await self.solve(message, metadata)
             return result["response"]
-        else:
-            # Use regular chat
-            return await self.chat(message, metadata)
+        except Exception as e:
+            logger.error(f"Error in chat: {e}")
+            error_msg = "I apologize, but I encountered an error while processing your request. Please try again."
+            return error_msg
     
-    def _should_use_react(self, query: str) -> bool:
-        """Determine if ReAct should be used for this query"""
-        # Keywords that suggest complex problem-solving
-        react_keywords = [
-            # Calculation and analysis
-            "calculate", "compute", "solve", "analyze", "compare", "evaluate",
-            # Research and information gathering
-            "research", "find out", "investigate", "look up", "search for",
-            # Code and technical tasks
-            "code", "program", "script", "function", "algorithm", "debug",
-            # Multi-step processes
-            "step by step", "plan", "strategy", "approach", "process",
-            # File operations
-            "file", "save", "read", "write", "create document",
-            # Complex reasoning
-            "explain why", "how does", "what if", "pros and cons"
-        ]
+    async def chat_stream(
+        self, 
+        message: str, 
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Chat interface with streaming using ReAct
         
-        query_lower = query.lower()
-        
-        # Check for multiple conditions that suggest complexity
-        complexity_indicators = 0
-        
-        # Keyword matching
-        if any(keyword in query_lower for keyword in react_keywords):
-            complexity_indicators += 1
-        
-        # Question complexity (multiple questions)
-        if query_lower.count("?") > 1:
-            complexity_indicators += 1
-        
-        # Length and complexity
-        if len(query.split()) > 15:
-            complexity_indicators += 1
-        
-        # Numbers suggesting calculations
-        import re
-        if re.search(r'\d+', query):
-            complexity_indicators += 1
-        
-        # Multiple tasks (indicated by "and", "then", "also")
-        multi_task_words = ["and then", "also", "additionally", "furthermore", "next"]
-        if any(word in query_lower for word in multi_task_words):
-            complexity_indicators += 1
-        
-        # Use ReAct if we have threshold or more complexity indicators
-        from ai_agent.utils.config import config
-        return complexity_indicators >= config.react_complexity_threshold
+        Args:
+            message: User message
+            metadata: Additional metadata
+            
+        Yields:
+            Response chunks as they are generated
+        """
+        try:
+            # Stream through ReAct engine
+            async for event in self.solve_stream(message, metadata):
+                if event["type"] == "final_answer":
+                    yield event["content"]
+                # For compatibility, we can also yield intermediate steps as text
+                elif event["type"] in ["thought", "action", "observation"]:
+                    yield f"[{event['type'].upper()}] {event['content']}\n\n"
+        except Exception as e:
+            logger.error(f"Error in chat_stream: {e}")
+            error_msg = "I apologize, but I encountered an error while processing your request. Please try again."
+            yield error_msg
     
     def register_tool(self, tool):
-        """Register a new tool for ReAct"""
-        if self.enable_react and hasattr(self, 'tool_registry'):
+        """Register a new tool"""
+        if hasattr(self, 'tool_registry'):
             self.tool_registry.register(tool)
             logger.info(f"Registered tool: {tool.name}")
         else:
-            logger.warning("ReAct not enabled or tool registry not available")
+            logger.warning("Tool registry not available")
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools"""
-        if self.enable_react and hasattr(self, 'tool_registry'):
+        if hasattr(self, 'tool_registry'):
             return self.tool_registry.list_tools()
         return []
     
+    def set_system_prompt(self, prompt: str):
+        """Update the system prompt"""
+        self.system_prompt = prompt
+        logger.info("Updated system prompt")
     
-    def get_enhanced_status(self) -> Dict[str, Any]:
-        """Get enhanced agent status including ReAct info"""
-        base_status = self.get_status()
-        
-        if self.enable_react:
-            base_status.update({
-                "react_enabled": True,
-                "available_tools": len(self.tool_registry.tools) if hasattr(self, 'tool_registry') else 0
-            })
-        else:
-            base_status["react_enabled"] = False
-        
-        return base_status
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get model information"""
+        model_info = self.model.get_model_info()
+        model_info.update({
+            "agent_name": config.agent_name,
+            "agent_version": config.agent_version,
+            "system_prompt_length": len(self.system_prompt)
+        })
+        return model_info
+
+    def is_ready(self) -> bool:
+        """Check if agent is ready to process requests"""
+        return (
+            self.model is not None and 
+            self.system_prompt is not None and
+            hasattr(self, 'react_engine') and
+            self.react_engine is not None
+        )
     
-    async def demonstrate_react(self, problem: str = None) -> Dict[str, Any]:
-        """Demonstrate ReAct capabilities with a sample problem"""
-        if not self.enable_react:
-            return {"error": "ReAct not enabled"}
-        
-        demo_problem = problem or "Calculate the compound interest on $1000 at 5% annual rate for 3 years and explain what this means for an investor"
-        
-        print(f"🧠 Demonstrating ReAct with problem: {demo_problem}")
-        
-        result = await self.solve_with_react(demo_problem, force_react=True)
-        
+    def get_status(self) -> Dict[str, Any]:
+        """Get agent status"""
         return {
-            "demo_problem": demo_problem,
-            "result": result,
-            "demonstration": "ReAct process completed - check the reasoning steps above"
+            "ready": self.is_ready(),
+            "model_info": self.get_model_info(),
+            "react_enabled": True,
+            "available_tools": len(self.tool_registry.tools) if hasattr(self, 'tool_registry') else 0,
+            "timestamp": datetime.now().isoformat()
         }
+    
+
+
+# Alias for backward compatibility
+ReActGeminiAgent = AIAgent

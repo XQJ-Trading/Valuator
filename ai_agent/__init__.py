@@ -1,12 +1,12 @@
 """
 AI Agent Package
-LangChain과 Gemini 2.5 Pro를 활용한 AI Agent 구현
+ReAct를 활용한 통합 AI Agent 구현
 """
 
-__version__ = "1.0.0"
+__version__ = "1.5.0"
 __author__ = "AI Agent Team"
 
-from .agent import GeminiAgent
+from .agent.react_agent import AIAgent
 from .models import GeminiModel
 
-__all__ = ["GeminiAgent", "GeminiModel"]
+__all__ = ["AIAgent", "GeminiModel"]

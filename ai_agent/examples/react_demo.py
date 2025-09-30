@@ -1,63 +1,38 @@
-"""ReAct demonstration examples"""
+"""AI Agent demonstration examples"""
 
 import asyncio
 from typing import Optional
 
-from ..agent.core import GeminiAgent
-from ..models.gemini import GeminiModel
-from ..tools.base import ToolRegistry
-from ..tools.react_tool import (
-    PerplexitySearchTool, CodeExecutorTool, FileSystemTool
-)
-from ..react.engine import ReActEngine
+from ..agent.react_agent import AIAgent
 from ..utils.config import config
 from ..utils.logger import logger
 from ..utils.react_logger import view_session_log, list_all_sessions
 
 
-class ReActDemo:
-    """Demonstration of ReAct capabilities"""
+class AIAgentDemo:
+    """Demonstration of AI Agent capabilities"""
     
     def __init__(self):
-        """Initialize ReAct demo"""
-        from ..agent.react_agent import ReActGeminiAgent
-        self.agent = ReActGeminiAgent()
-        self.model = None
-        self.tool_registry = None
-        self.react_engine = None
+        """Initialize AI Agent demo"""
+        self.agent = AIAgent()
         
     async def initialize(self) -> bool:
-        """Initialize the ReAct demo"""
+        """Initialize the demo (agent is already ready)"""
         try:
-            print("🔧 Initializing ReAct Demo...")
+            print("🔧 Initializing AI Agent Demo...")
             
-            # Initialize model
-            self.model = GeminiModel()
-            print("✅ Gemini model initialized")
-            
-            # Initialize tool registry and register tools
-            self.tool_registry = ToolRegistry()
-            
-            # Register basic tools
-            self.tool_registry.register(PerplexitySearchTool())
-            self.tool_registry.register(CodeExecutorTool())
-            self.tool_registry.register(FileSystemTool())
-            
-            print(f"✅ Registered {len(self.tool_registry.tools)} tools")
-            
-            
-            # Initialize ReAct engine (uses config values by default)
-            self.react_engine = ReActEngine(
-                model=self.model,
-                tool_registry=self.tool_registry
-            )
-            print("✅ ReAct engine initialized")
-            
-            return True
+            # Agent is automatically initialized with ReAct capabilities
+            if self.agent.is_ready():
+                print("✅ AI Agent initialized")
+                print(f"✅ {len(self.agent.get_available_tools())} tools available")
+                return True
+            else:
+                print("❌ Agent not ready")
+                return False
             
         except Exception as e:
             print(f"❌ Initialization failed: {e}")
-            logger.error(f"ReAct demo initialization error: {e}")
+            logger.error(f"AI Agent demo initialization error: {e}")
             return False
     
     async def run_interactive_demo(self):
@@ -160,9 +135,10 @@ class ReActDemo:
         print("🧠 REACT REASONING PROCESS")
         print("="*80)
         
-        # Solve using ReAct
+        # Solve using AI Agent
         start_time = asyncio.get_event_loop().time()
-        state = await self.react_engine.solve(query)
+        result = await self.agent.solve(query)
+        state = result["react_state"]
         end_time = asyncio.get_event_loop().time()
         
         # Display the reasoning process
@@ -278,7 +254,7 @@ class ReActDemo:
 
 async def main():
     """Main demo function"""
-    demo = ReActDemo()
+    demo = AIAgentDemo()
     
     if not await demo.initialize():
         return

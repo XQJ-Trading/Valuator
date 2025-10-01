@@ -50,6 +50,12 @@ class Config(BaseSettings):
     log_level: str = Field("INFO", env="LOG_LEVEL")
     log_file: Optional[str] = Field(None, env="LOG_FILE")
     
+    # MongoDB Configuration
+    mongodb_enabled: bool = Field(False, env="MONGODB_ENABLED")
+    mongodb_uri: Optional[str] = Field(None, env="MONGODB_URI")
+    mongodb_database: str = Field("ai_agent", env="MONGODB_DATABASE")
+    mongodb_collection: str = Field("react_sessions", env="MONGODB_COLLECTION")
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -6,6 +6,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+
+from .config import config
 from .logger import logger
 
 
@@ -17,6 +25,45 @@ class ReActLogger:
         self.logs_dir = Path(logs_dir)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.current_session = None
+        
+        # Initialize MongoDB connection if enabled
+        self.mongodb_client = None
+        self.mongodb_db = None
+        self.mongodb_collection = None
+        self._init_mongodb()
+    
+    def _init_mongodb(self):
+        """Initialize MongoDB connection"""
+        if not config.mongodb_enabled or not config.mongodb_uri:
+            logger.debug("MongoDB logging disabled or URI not configured")
+            return
+        
+        if not MONGODB_AVAILABLE:
+            logger.warning("MongoDB logging enabled but pymongo not installed")
+            return
+        
+        try:
+            self.mongodb_client = MongoClient(
+                config.mongodb_uri,
+                serverSelectionTimeoutMS=5000,  # 5 second timeout
+                connectTimeoutMS=5000,
+                socketTimeoutMS=5000
+            )
+            
+            # Test connection
+            self.mongodb_client.admin.command('ping')
+            
+            self.mongodb_db = self.mongodb_client[config.mongodb_database]
+            self.mongodb_collection = self.mongodb_db[config.mongodb_collection]
+            
+            logger.info(f"MongoDB connection established: {config.mongodb_database}.{config.mongodb_collection}")
+            
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            logger.warning(f"Failed to connect to MongoDB: {e}")
+            self.mongodb_client = None
+        except Exception as e:
+            logger.error(f"Unexpected error initializing MongoDB: {e}")
+            self.mongodb_client = None
         
     def start_session(self, query: str) -> str:
         """Start a new ReAct session"""
@@ -107,7 +154,7 @@ class ReActLogger:
         # Remove start_time (not JSON serializable)
         del self.current_session["start_time"]
         
-        # Save to file
+        # Save to JSON file
         filename = f"{self.current_session['session_id']}.json"
         filepath = self.logs_dir / filename
         
@@ -115,13 +162,38 @@ class ReActLogger:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(self.current_session, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"Saved ReAct session to: {filepath}")
+            logger.info(f"Saved ReAct session to JSON file: {filepath}")
             
         except Exception as e:
-            logger.error(f"Failed to save ReAct session: {e}")
+            logger.error(f"Failed to save ReAct session to JSON file: {e}")
+        
+        # Save to MongoDB (if enabled and available)
+        self._save_to_mongodb()
         
         # Clear current session
         self.current_session = None
+    
+    def _save_to_mongodb(self):
+        """Save current session to MongoDB"""
+        if not self.mongodb_collection or not self.current_session:
+            return
+        
+        try:
+            # Create a copy for MongoDB (without circular references)
+            mongodb_doc = self.current_session.copy()
+            
+            # Add MongoDB-specific fields
+            mongodb_doc["created_at"] = datetime.now()
+            mongodb_doc["source"] = "react_logger"
+            
+            # Insert document
+            result = self.mongodb_collection.insert_one(mongodb_doc)
+            
+            logger.info(f"Saved ReAct session to MongoDB: {result.inserted_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save ReAct session to MongoDB: {e}")
+            # Don't raise - we want JSON saving to continue working even if MongoDB fails
     
     def get_recent_sessions(self, limit: int = 10) -> list:
         """Get list of recent session files"""

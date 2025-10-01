@@ -7,10 +7,10 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ai_agent.agent.react_agent import ReActGeminiAgent
+from ai_agent.agent.react_agent import AIAgent
 
 
-app = FastAPI(title="AI Agent Server", version="0.1.0")
+app = FastAPI(title="AI Agent Server", version="1.5.0")
 
 # CORS for local frontend dev (adjust origins as needed)
 app.add_middleware(
@@ -24,7 +24,6 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     query: str
-    use_react: bool | None = None
 
 
 @app.on_event("startup")
@@ -40,15 +39,8 @@ async def health():
 
 @app.post("/api/v1/chat")
 async def chat(request: ChatRequest):
-    agent = ReActGeminiAgent()
-    if request.use_react is None:
-        reply = await agent.chat_enhanced(request.query)
-    else:
-        if request.use_react:
-            result = await agent.solve_with_react(request.query, force_react=True)
-            reply = result.get("response", "")
-        else:
-            reply = await agent.chat(request.query)
+    agent = AIAgent()
+    reply = await agent.chat(request.query)
     return {"response": reply}
 
 
@@ -59,15 +51,9 @@ async def chat_stream(request: ChatRequest):
             # Initial handshake event helps clients show immediate activity
             yield "event: start\n" + "data: {}\n\n"
 
-            agent = ReActGeminiAgent()
-
-            if request.use_react:
-                async for event in agent.solve_with_react_stream(request.query, force_react=True):
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            else:
-                async for chunk in agent.chat_stream(request.query):
-                    data = {"type": "token", "content": chunk}
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+            agent = AIAgent()
+            async for event in agent.solve_stream(request.query):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
             yield "event: end\n" + "data: {}\n\n"
 
@@ -87,19 +73,14 @@ async def chat_stream(request: ChatRequest):
 
 
 @app.get("/api/v1/chat/stream")
-async def chat_stream_get(query: str, use_react: bool = False):
+async def chat_stream_get(query: str):
     async def sse() -> AsyncGenerator[str, None]:
         try:
             yield "event: start\n" + "data: {}\n\n"
 
-            agent = ReActGeminiAgent()
-            if use_react:
-                async for event in agent.solve_with_react_stream(query, force_react=True):
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            else:
-                async for chunk in agent.chat_stream(query):
-                    data = {"type": "token", "content": chunk}
-                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+            agent = AIAgent()
+            async for event in agent.solve_stream(query):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
             yield "event: end\n" + "data: {}\n\n"
         except Exception as e:
@@ -115,5 +96,3 @@ async def chat_stream_get(query: str, use_react: bool = False):
             "Connection": "keep-alive",
         },
     )
-
-

@@ -1,5 +1,5 @@
 """Agent package for AI Agent"""
 
-from .core import GeminiAgent
+from .react_agent import AIAgent, ReActGeminiAgent
 
-__all__ = ["GeminiAgent"]
+__all__ = ["AIAgent", "ReActGeminiAgent"]

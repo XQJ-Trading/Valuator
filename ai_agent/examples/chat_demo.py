@@ -3,13 +3,13 @@
 import asyncio
 from typing import Optional
 
-from ..agent.core import GeminiAgent
+from ..agent.react_agent import AIAgent
 from ..utils.config import config
 from ..utils.logger import logger
 
 
 class ChatDemo:
-    """Interactive chat demo for Gemini Agent"""
+    """Interactive chat demo for AI Agent"""
     
     def __init__(self):
         """Initialize chat demo"""
@@ -18,7 +18,7 @@ class ChatDemo:
     async def initialize(self):
         """Initialize the agent"""
         try:
-            self.agent = GeminiAgent()
+            self.agent = AIAgent()
             
             # Custom system prompt for demo
             demo_prompt = """You are a helpful AI assistant in a demo environment. 
@@ -107,6 +107,10 @@ Please be friendly and helpful while showcasing your abilities."""
     
     async def _show_status(self):
         """Show agent status"""
+        if not self.agent:
+            print("\n❌ Agent not initialized")
+            return
+            
         status = self.agent.get_status()
         
         print("\n📊 Agent Status:")

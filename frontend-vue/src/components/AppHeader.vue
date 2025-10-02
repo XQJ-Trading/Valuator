@@ -5,9 +5,59 @@
         <span class="title-icon">🤖</span>
         AI Agent
       </h1>
+      
+      <nav class="nav-menu">
+        <button @click="handleHistory" class="nav-btn">
+          <span class="nav-icon">📚</span>
+          History
+        </button>
+        <button @click="handleNewSession" class="nav-btn">
+          <span class="nav-icon">✨</span>
+          New Session
+        </button>
+      </nav>
+    </div>
+    
+    <!-- Coming Soon Modal -->
+    <div v-if="showComingSoon" class="modal-overlay" @click="closeModal">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>🚧 Coming Soon</h3>
+          <button @click="closeModal" class="modal-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <p>History 기능은 곧 출시될 예정입니다!</p>
+          <p>기대해 주세요 🎉</p>
+        </div>
+      </div>
     </div>
   </header>
 </template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+
+interface Emits {
+  (e: 'history'): void
+  (e: 'newSession'): void
+}
+
+const emit = defineEmits<Emits>()
+const showComingSoon = ref(false)
+
+function closeModal() {
+  showComingSoon.value = false
+}
+
+function handleHistory() {
+  showComingSoon.value = true
+  emit('history')
+}
+
+function handleNewSession() {
+  emit('newSession')
+}
+</script>
 
 <style scoped>
 /* 헤더 */
@@ -50,14 +100,159 @@
   50% { opacity: 0.7; }
 }
 
+/* 내비게이션 메뉴 */
+.nav-menu {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: linear-gradient(135deg, var(--primary-color) 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  border-radius: var(--border-radius);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  font-size: 0.9rem;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.nav-btn:hover {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+}
+
+.nav-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+}
+
+.nav-icon {
+  font-size: 1rem;
+}
+
+/* 모달 스타일 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.modal-content {
+  background: var(--bg-primary);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-lg);
+  max-width: 400px;
+  width: 90%;
+  animation: slideIn 0.3s ease-out;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.25rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: var(--transition);
+}
+
+.modal-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.modal-body p {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.modal-body p:last-child {
+  margin-bottom: 0;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { 
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* 반응형 디자인 */
 @media (max-width: 768px) {
   .header-content {
     padding: 0 1rem;
+    flex-wrap: wrap;
+    gap: 1rem;
   }
   
   .app-title {
     font-size: 1.5rem;
+  }
+  
+  .nav-menu {
+    gap: 0.75rem;
+  }
+  
+  .nav-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .nav-menu {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .nav-btn {
+    flex: 1;
+    justify-content: center;
   }
 }
 </style>

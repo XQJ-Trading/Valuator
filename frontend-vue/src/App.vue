@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <!-- Header -->
-    <AppHeader />
+    <AppHeader @history="handleHistory" @newSession="handleNewSession" />
 
     <!-- Input Section -->
     <InputSection 
@@ -38,6 +38,16 @@ const {
   send,
   stream
 } = useChat()
+
+function handleHistory() {
+  // History 기능은 AppHeader에서 처리됨 (Coming Soon 모달)
+  console.log('History clicked')
+}
+
+function handleNewSession() {
+  clearAll()
+  console.log('New session started')
+}
 </script>
 
 <style>

@@ -90,9 +90,17 @@ export function useChat() {
               }
               messages.value.push(currentTokenMessage)
             }
+          } else if (data.type === 'start') {
+            currentTokenMessage = null
+            addMessage('start', data.query || '시작', {
+              query: data.query
+            })
+          } else if (data.type === 'end') {
+            currentTokenMessage = null
+            addMessage('end', '완료', {})
           } else {
             currentTokenMessage = null
-            addMessage(data.type, data.content, {
+            addMessage(data.type, data.content || '', {
               tool: data.tool,
               tool_input: data.tool_input,
               tool_output: data.tool_output,

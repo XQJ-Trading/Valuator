@@ -1,5 +1,5 @@
 export interface Message {
-  type: 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'token'
+  type: 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'token' | 'start' | 'end'
   content: string
   metadata?: MessageMetadata
   timestamp: Date

@@ -339,6 +339,42 @@ function formatJson(data: any): string {
   line-height: 1.7;
 }
 
+/* 시작 메시지 */
+.message-start {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1) 0%, rgba(14, 165, 233, 0.05) 100%);
+  border-color: #0ea5e9;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+.message-start .message-header {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0ea5e9;
+}
+
+.message-start .message-text {
+  color: #0ea5e9;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+/* 종료 메시지 */
+.message-end {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%);
+  border-color: #22c55e;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
+}
+
+.message-end .message-header {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.message-end .message-text {
+  color: #22c55e;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
 /* 코드 스타일 */
 .message-code pre {
   margin: 0;

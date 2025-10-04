@@ -7,7 +7,9 @@ export function getMessageIcon(type: MessageType): string {
     observation: '👁️',
     final_answer: '🎯',
     error: '❌',
-    token: '💬'
+    token: '💬',
+    start: '🚀',
+    end: '✅'
   }
   return icons[type] || '💬'
 }
@@ -19,7 +21,9 @@ export function getMessageTitle(type: MessageType): string {
     observation: '실행 결과',
     final_answer: '최종 답변',
     error: '오류',
-    token: '응답'
+    token: '응답',
+    start: '처리 시작',
+    end: '처리 완료'
   }
   return titles[type] || '메시지'
 }

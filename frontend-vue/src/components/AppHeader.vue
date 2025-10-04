@@ -1,58 +1,33 @@
 <template>
   <header class="app-header">
     <div class="header-content">
-      <h1 class="app-title">
-        <span class="title-icon">🤖</span>
-        AI Agent
-      </h1>
+      <router-link to="/" class="app-title-link">
+        <h1 class="app-title">
+          <span class="title-icon">🤖</span>
+          AI Agent
+        </h1>
+      </router-link>
       
       <nav class="nav-menu">
-        <button @click="handleHistory" class="nav-btn">
+        <router-link to="/history" class="nav-btn">
           <span class="nav-icon">📚</span>
           History
-        </button>
+        </router-link>
         <button @click="handleNewSession" class="nav-btn">
           <span class="nav-icon">✨</span>
           New Session
         </button>
       </nav>
     </div>
-    
-    <!-- Coming Soon Modal -->
-    <div v-if="showComingSoon" class="modal-overlay" @click="closeModal">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>🚧 Coming Soon</h3>
-          <button @click="closeModal" class="modal-close">✕</button>
-        </div>
-        <div class="modal-body">
-          <p>History 기능은 곧 출시될 예정입니다!</p>
-          <p>기대해 주세요 🎉</p>
-        </div>
-      </div>
-    </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-
 interface Emits {
-  (e: 'history'): void
   (e: 'newSession'): void
 }
 
 const emit = defineEmits<Emits>()
-const showComingSoon = ref(false)
-
-function closeModal() {
-  showComingSoon.value = false
-}
-
-function handleHistory() {
-  showComingSoon.value = true
-  emit('history')
-}
 
 function handleNewSession() {
   emit('newSession')
@@ -80,6 +55,11 @@ function handleNewSession() {
   align-items: center;
 }
 
+.app-title-link {
+  text-decoration: none;
+  color: inherit;
+}
+
 .app-title {
   margin: 0;
   font-size: 1.75rem;
@@ -88,6 +68,11 @@ function handleNewSession() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  transition: var(--transition);
+}
+
+.app-title-link:hover .app-title {
+  opacity: 0.8;
 }
 
 .title-icon {

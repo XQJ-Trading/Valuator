@@ -14,6 +14,7 @@ export interface MessageMetadata {
   error?: string
   message?: string
   tool_result?: ToolResult
+  query?: string
 }
 
 export interface ToolResult {

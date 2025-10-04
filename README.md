@@ -55,9 +55,19 @@ npm run dev
 
 ### 🔌 API (요약)
 
+**Chat API:**
 - `POST /api/v1/chat` → { query: string, use_react?: bool }
 - `POST /api/v1/chat/stream` → SSE 스트리밍
 - `GET  /api/v1/chat/stream?query=...&use_react=bool` → SSE 스트리밍
+
+**History API:**
+- `GET /api/v1/history?limit=10&offset=0` → 세션 목록
+- `GET /api/v1/history/{session_id}` → 세션 상세
+- `GET /api/v1/history/{session_id}/stream` → 세션 재생 (SSE)
+- `GET /api/v1/history/search?q=검색어` → 세션 검색
+- `DELETE /api/v1/history/{session_id}` → 세션 삭제
+
+> 전략 패턴으로 파일 IO ↔ MongoDB 전환 가능 (`.env`에서 `MONGODB_ENABLED` 설정)
 
 ### 💡 사용 예시 (비동기)
 

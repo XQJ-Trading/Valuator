@@ -62,9 +62,8 @@ defineEmits<Emits>()
 <style scoped>
 /* 입력 섹션 */
 .input-section {
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 1.5rem 1.5rem;
+  width: 100%;
+  padding: 1.5rem 0;
 }
 
 .input-container {

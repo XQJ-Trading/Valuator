@@ -14,7 +14,43 @@
       <div class="message-code" v-else-if="message.type === 'action' || message.type === 'observation'">
         <div v-if="message.metadata?.tool" class="tool-badge">{{ message.metadata.tool }}</div>
         <div v-if="message.metadata?.error" class="error-badge">오류: {{ message.metadata.error }}</div>
-        <pre><code>{{ message.content }}</code></pre>
+        
+        <!-- Tool Result 정보 표시 -->
+        <div v-if="message.metadata?.tool_result" class="tool-result-info">
+          <div class="tool-status" :class="{'success': message.metadata.tool_result.success, 'failure': !message.metadata.tool_result.success}"
+               @click="toggleToolDetails">
+            <span class="status-icon">{{ message.metadata.tool_result.success ? '✅' : '❌' }}</span>
+            <span class="status-text">{{ message.metadata.tool_result.success ? '실행 성공' : '실행 실패' }}</span>
+            <span class="toggle-icon">{{ showToolDetails ? '▼' : '▶' }}</span>
+          </div>
+          
+          <div v-if="showToolDetails" class="tool-details">
+            <div v-if="message.metadata.tool_input" class="tool-section">
+              <div class="section-title">📥 입력 파라미터:</div>
+              <pre class="tool-data"><code>{{ formatJson(message.metadata.tool_input) }}</code></pre>
+            </div>
+            
+            <div v-if="message.metadata.tool_result.result" class="tool-section">
+              <div class="section-title">📤 실행 결과:</div>
+              <pre class="tool-data"><code>{{ formatJson(message.metadata.tool_result.result) }}</code></pre>
+            </div>
+            
+            <div v-if="message.metadata.tool_result.error" class="tool-section">
+              <div class="section-title">❌ 오류 내용:</div>
+              <div class="error-text">{{ message.metadata.tool_result.error }}</div>
+            </div>
+            
+            <div v-if="message.metadata.tool_result.metadata && Object.keys(message.metadata.tool_result.metadata).length > 0" class="tool-section">
+              <div class="section-title">ℹ️ 메타데이터:</div>
+              <pre class="tool-data"><code>{{ formatJson(message.metadata.tool_result.metadata) }}</code></pre>
+            </div>
+          </div>
+        </div>
+        
+        <div class="observation-content">
+          <div class="section-title">👁️ 관찰 결과:</div>
+          <pre><code>{{ message.content }}</code></pre>
+        </div>
       </div>
       <div class="message-error" v-else-if="message.type === 'error'">
         {{ message.content }}
@@ -30,6 +66,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { Message } from '../types/Message'
 import { getMessageIcon, getMessageTitle, formatTime, copyMessage } from '../utils/messageUtils'
 import { renderMarkdown } from '../utils/markdownUtils'
@@ -39,6 +76,31 @@ interface Props {
 }
 
 defineProps<Props>()
+
+// 접기/펼치기 상태
+const showToolDetails = ref(false)
+
+// 접기/펼치기 토글 함수
+function toggleToolDetails() {
+  showToolDetails.value = !showToolDetails.value
+}
+
+// JSON을 포맷팅하는 함수
+function formatJson(data: any): string {
+  if (data === null || data === undefined) {
+    return String(data)
+  }
+  
+  if (typeof data === 'string') {
+    return data
+  }
+  
+  try {
+    return JSON.stringify(data, null, 2)
+  } catch (error) {
+    return String(data)
+  }
+}
 </script>
 
 <style scoped>
@@ -277,6 +339,42 @@ defineProps<Props>()
   line-height: 1.7;
 }
 
+/* 시작 메시지 */
+.message-start {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1) 0%, rgba(14, 165, 233, 0.05) 100%);
+  border-color: #0ea5e9;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+}
+
+.message-start .message-header {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0ea5e9;
+}
+
+.message-start .message-text {
+  color: #0ea5e9;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+/* 종료 메시지 */
+.message-end {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%);
+  border-color: #22c55e;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
+}
+
+.message-end .message-header {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.message-end .message-text {
+  color: #22c55e;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
 /* 코드 스타일 */
 .message-code pre {
   margin: 0;
@@ -375,5 +473,138 @@ defineProps<Props>()
   border-radius: 4px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.9em;
+}
+
+/* Tool Result 스타일 */
+.tool-result-info {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.tool-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  user-select: none;
+}
+
+.tool-status:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.tool-status.success {
+  background: rgba(34, 197, 94, 0.1);
+  color: #059669;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.tool-status.success:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.tool-status.failure {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.tool-status.failure:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.status-icon {
+  font-size: 1.1rem;
+}
+
+.status-text {
+  font-weight: 600;
+  flex: 1;
+}
+
+.toggle-icon {
+  font-size: 0.9rem;
+  transition: transform 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.tool-details {
+  margin-top: 0.5rem;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tool-section {
+  margin: 0.75rem 0;
+}
+
+.section-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tool-data {
+  margin: 0;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-data code {
+  color: var(--text-primary);
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.error-text {
+  padding: 0.75rem;
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.observation-content {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.observation-content .section-title {
+  color: var(--success-color);
 }
 </style>

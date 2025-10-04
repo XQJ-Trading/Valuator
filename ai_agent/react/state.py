@@ -26,6 +26,7 @@ class ReActStep:
     tool_input: Optional[Dict[str, Any]] = None
     tool_output: Optional[Any] = None
     error: Optional[str] = None
+    tool_result: Optional[Any] = None  # Complete ToolResult object
 
 
 class ReActState(BaseModel):
@@ -57,26 +58,27 @@ class ReActState(BaseModel):
         )
         self.add_step(step)
     
-    def add_action(self, content: str, tool_name: str, tool_input: Dict[str, Any], 
+    def add_action(self, content: str, tool_name: Optional[str] = None, tool_input: Optional[Dict[str, Any]] = None, 
                    metadata: Optional[Dict[str, Any]] = None):
         """Add an action step"""
         step = ReActStep(
             step_type=ReActStepType.ACTION,
             content=content,
             tool_name=tool_name,
-            tool_input=tool_input,
+            tool_input=tool_input or {},
             metadata=metadata or {}
         )
         self.add_step(step)
     
     def add_observation(self, content: str, tool_output: Any = None, error: Optional[str] = None,
-                       metadata: Optional[Dict[str, Any]] = None):
+                       tool_result: Any = None, metadata: Optional[Dict[str, Any]] = None):
         """Add an observation step"""
         step = ReActStep(
             step_type=ReActStepType.OBSERVATION,
             content=content,
             tool_output=tool_output,
             error=error,
+            tool_result=tool_result,
             metadata=metadata or {}
         )
         self.add_step(step)

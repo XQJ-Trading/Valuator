@@ -200,11 +200,35 @@ class ReActEngine:
                 elif next_step_type == ReActStepType.OBSERVATION:
                     await self._observation_step(state)
                     last = state.get_last_step()
+                    
+                    # ToolResult를 딕셔너리로 변환
+                    tool_result_dict = None
+                    if hasattr(last, 'tool_result') and last.tool_result:
+                        try:
+                            if hasattr(last.tool_result, 'dict'):
+                                # Pydantic 모델인 경우
+                                tool_result_dict = last.tool_result.dict()
+                            elif hasattr(last.tool_result, '__dict__'):
+                                # 일반 객체인 경우
+                                tool_result_dict = {
+                                    'success': getattr(last.tool_result, 'success', None),
+                                    'result': getattr(last.tool_result, 'result', None),
+                                    'error': getattr(last.tool_result, 'error', None),
+                                    'metadata': getattr(last.tool_result, 'metadata', None),
+                                }
+                            else:
+                                tool_result_dict = str(last.tool_result)
+                            logger.info(f"[DEBUG] tool_result converted: {type(last.tool_result)} -> {tool_result_dict}")
+                        except Exception as e:
+                            logger.error(f"[DEBUG] tool_result conversion failed: {e}")
+                            tool_result_dict = {"error": f"Serialization failed: {str(e)}"}
+                    
                     yield {
                         "type": "observation",
                         "content": last.content,
                         "tool_output": last.tool_output,
                         "error": last.error,
+                        "tool_result": tool_result_dict,
                     }
                 elif next_step_type == ReActStepType.FINAL_ANSWER:
                     await self._final_answer_step(state)
@@ -578,7 +602,8 @@ class ReActEngine:
         state.add_observation(
             content=observation_content,
             tool_output=tool_result.result if tool_result else None,
-            error=error
+            error=error,
+            tool_result=tool_result
         )
         
         # Log cache metrics if available
@@ -587,12 +612,12 @@ class ReActEngine:
         
         # Log step with API query
         if self.enable_logging:
-            api_query = self._format_messages_for_log(self.api_session.history)
+            api_query = self._format_messages_for_log(self.api_session.history) if self.api_session else ""
             react_logger.log_step(
                 "observation", 
                 observation_content,
                 tool_output=tool_result.result if tool_result else None,
-                error=error,
+                error=error or "",
                 api_query=api_query,
                 api_response=response.content
             )

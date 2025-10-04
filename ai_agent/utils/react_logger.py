@@ -1,70 +1,56 @@
-"""Simple ReAct session logging"""
+"""Simple ReAct session logging with Repository pattern"""
 
-import json
-import os
+import asyncio
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Any, Optional
-
-try:
-    from pymongo import MongoClient
-    from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
-    MONGODB_AVAILABLE = True
-except ImportError:
-    MONGODB_AVAILABLE = False
 
 from .config import config
 from .logger import logger
 
 
 class ReActLogger:
-    """Simple logger for ReAct sessions"""
+    """Simple logger for ReAct sessions using Repository pattern"""
     
-    def __init__(self, logs_dir: str = "logs/react_sessions"):
-        """Initialize ReAct logger"""
-        self.logs_dir = Path(logs_dir)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, repository=None):
+        """
+        Initialize ReAct logger with a repository
+        
+        Args:
+            repository: SessionRepository instance for data persistence
+                       If None, will be lazily initialized based on config
+        """
+        self._repository = repository
         self.current_session = None
         
-        # Initialize MongoDB connection if enabled
-        self.mongodb_client = None
-        self.mongodb_db = None
-        self.mongodb_collection = None
-        self._init_mongodb()
+        logger.info("Initialized ReActLogger with Repository pattern")
     
-    def _init_mongodb(self):
-        """Initialize MongoDB connection"""
-        if not config.mongodb_enabled or not config.mongodb_uri:
-            logger.debug("MongoDB logging disabled or URI not configured")
-            return
+    @property
+    def repository(self):
+        """Lazy initialization of repository based on config"""
+        if self._repository is None:
+            self._repository = self._create_repository_from_config()
+        return self._repository
+    
+    def _create_repository_from_config(self):
+        """Create repository based on configuration"""
+        from ..repositories import FileSessionRepository, MongoSessionRepository
         
-        if not MONGODB_AVAILABLE:
-            logger.warning("MongoDB logging enabled but pymongo not installed")
-            return
-        
-        try:
-            self.mongodb_client = MongoClient(
-                config.mongodb_uri,
-                serverSelectionTimeoutMS=5000,  # 5 second timeout
-                connectTimeoutMS=5000,
-                socketTimeoutMS=5000
-            )
-            
-            # Test connection
-            self.mongodb_client.admin.command('ping')
-            
-            self.mongodb_db = self.mongodb_client[config.mongodb_database]
-            self.mongodb_collection = self.mongodb_db[config.mongodb_collection]
-            
-            logger.info(f"MongoDB connection established: {config.mongodb_database}.{config.mongodb_collection}")
-            
-        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-            logger.warning(f"Failed to connect to MongoDB: {e}")
-            self.mongodb_client = None
-        except Exception as e:
-            logger.error(f"Unexpected error initializing MongoDB: {e}")
-            self.mongodb_client = None
-        
+        if config.mongodb_enabled and config.mongodb_uri:
+            try:
+                logger.info("Initializing MongoDB repository for session logging")
+                return MongoSessionRepository(
+                    mongodb_uri=config.mongodb_uri,
+                    database=config.mongodb_database,
+                    collection=config.mongodb_collection
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize MongoDB repository: {e}")
+                logger.info("Falling back to file repository")
+                return FileSessionRepository("logs/react_sessions")
+        else:
+            logger.info("Initializing file repository for session logging")
+            return FileSessionRepository("logs/react_sessions")
+    
     def start_session(self, query: str) -> str:
         """Start a new ReAct session"""
         timestamp = datetime.now()
@@ -84,9 +70,17 @@ class ReActLogger:
         logger.info(f"Started ReAct session: {session_id}")
         return session_id
     
-    def log_step(self, step_type: str, content: str, tool_name: str = None, 
-                 tool_input: Dict = None, tool_output: Any = None, error: str = None,
-                 api_query: str = None, api_response: str = None):
+    def log_step(
+        self, 
+        step_type: str, 
+        content: str, 
+        tool_name: Optional[str] = None, 
+        tool_input: Optional[Dict] = None, 
+        tool_output: Any = None, 
+        error: Optional[str] = None,
+        api_query: Optional[str] = None, 
+        api_response: Optional[str] = None
+    ):
         """Log a ReAct step"""
         if not self.current_session:
             return
@@ -106,7 +100,7 @@ class ReActLogger:
         if error:
             step["error"] = error
         if api_query:
-            step["api_query"] = self._truncate_api_query(api_query)  # Truncate to first 300 + last 600 chars
+            step["api_query"] = self._truncate_api_query(api_query)
         if api_response:
             step["api_response"] = api_response[:1000]  # Limit response size
             
@@ -136,8 +130,8 @@ class ReActLogger:
         # Combine with ellipsis indicating truncation
         return f"{first_part}\n\n... [생략된 문자 수: {skipped_chars}자] ...\n\n{last_part}"
     
-    def end_session(self, final_answer: str = None, success: bool = True):
-        """End the current ReAct session and save to file"""
+    def end_session(self, final_answer: Optional[str] = None, success: bool = True):
+        """End the current ReAct session and save using repository"""
         if not self.current_session:
             return
         
@@ -152,87 +146,65 @@ class ReActLogger:
         self.current_session["end_time"] = end_time.isoformat()
         
         # Remove start_time (not JSON serializable)
-        del self.current_session["start_time"]
+        session_to_save = self.current_session.copy()
+        del session_to_save["start_time"]
         
-        # Save to JSON file
-        filename = f"{self.current_session['session_id']}.json"
-        filepath = self.logs_dir / filename
-        
+        # Save using repository (async operation, run in event loop)
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(self.current_session, f, indent=2, ensure_ascii=False)
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If event loop is running, schedule the coroutine
+                asyncio.create_task(self.repository.save_session(session_to_save))
+            else:
+                # If no event loop is running, run it synchronously
+                loop.run_until_complete(self.repository.save_session(session_to_save))
             
-            logger.info(f"Saved ReAct session to JSON file: {filepath}")
+            logger.info(f"Saved ReAct session: {session_to_save['session_id']}")
             
         except Exception as e:
-            logger.error(f"Failed to save ReAct session to JSON file: {e}")
-        
-        # Save to MongoDB (if enabled and available)
-        self._save_to_mongodb()
+            logger.error(f"Failed to save ReAct session: {e}")
         
         # Clear current session
         self.current_session = None
     
-    def _save_to_mongodb(self):
-        """Save current session to MongoDB"""
-        if not self.mongodb_collection or not self.current_session:
-            return
-        
+    async def get_recent_sessions(self, limit: int = 10) -> list:
+        """Get list of recent sessions using repository"""
         try:
-            # Create a copy for MongoDB (without circular references)
-            mongodb_doc = self.current_session.copy()
-            
-            # Add MongoDB-specific fields
-            mongodb_doc["created_at"] = datetime.now()
-            mongodb_doc["source"] = "react_logger"
-            
-            # Insert document
-            result = self.mongodb_collection.insert_one(mongodb_doc)
-            
-            logger.info(f"Saved ReAct session to MongoDB: {result.inserted_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to save ReAct session to MongoDB: {e}")
-            # Don't raise - we want JSON saving to continue working even if MongoDB fails
-    
-    def get_recent_sessions(self, limit: int = 10) -> list:
-        """Get list of recent session files"""
-        try:
-            files = list(self.logs_dir.glob("*.json"))
-            files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            return [f.name for f in files[:limit]]
+            sessions = await self.repository.list_sessions(limit=limit, offset=0)
+            return [session.get("session_id", "unknown") for session in sessions]
         except Exception as e:
             logger.error(f"Failed to get recent sessions: {e}")
             return []
     
-    def load_session(self, session_file: str) -> Optional[Dict[str, Any]]:
-        """Load a specific session"""
+    async def load_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Load a specific session using repository"""
         try:
-            filepath = self.logs_dir / session_file
-            with open(filepath, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            return await self.repository.get_session(session_id)
         except Exception as e:
-            logger.error(f"Failed to load session {session_file}: {e}")
+            logger.error(f"Failed to load session {session_id}: {e}")
             return None
 
 
-def view_session_log(session_file: str = None, logs_dir: str = "logs/react_sessions"):
-    """Simple function to view a ReAct session log"""
-    logger_instance = ReActLogger(logs_dir)
+# View functions for backward compatibility
+async def view_session_log_async(session_id: str = None, repository=None):
+    """Async function to view a ReAct session log"""
+    if repository is None:
+        from ..repositories import FileSessionRepository
+        repository = FileSessionRepository("logs/react_sessions")
     
-    if not session_file:
+    if not session_id:
         # Show recent sessions
-        recent = logger_instance.get_recent_sessions(5)
+        sessions = await repository.list_sessions(limit=5, offset=0)
         print("\n📋 Recent ReAct Sessions:")
         print("-" * 50)
-        for i, filename in enumerate(recent, 1):
-            print(f"{i}. {filename}")
+        for i, session in enumerate(sessions, 1):
+            print(f"{i}. {session.get('session_id', 'Unknown')}")
         
-        if recent:
+        if sessions:
             try:
                 choice = input("\nEnter session number to view (or press Enter to exit): ").strip()
-                if choice.isdigit():
-                    session_file = recent[int(choice) - 1]
+                if choice.isdigit() and 1 <= int(choice) <= len(sessions):
+                    session_id = sessions[int(choice) - 1].get("session_id")
                 else:
                     return
             except (ValueError, IndexError):
@@ -240,9 +212,9 @@ def view_session_log(session_file: str = None, logs_dir: str = "logs/react_sessi
                 return
     
     # Load and display session
-    session = logger_instance.load_session(session_file)
+    session = await repository.get_session(session_id)
     if not session:
-        print(f"❌ Could not load session: {session_file}")
+        print(f"❌ Could not load session: {session_id}")
         return
     
     # Display session
@@ -261,24 +233,16 @@ def view_session_log(session_file: str = None, logs_dir: str = "logs/react_sessi
         
         if step_type == 'thought':
             print(f"\n💭 Thought {i}: {content}")
-            if step.get('api_query'):
-                print(f"   📤 API Query: {step['api_query'][:200]}{'...' if len(step['api_query']) > 200 else ''}")
         elif step_type == 'action':
             print(f"\n⚡ Action {i}: {content}")
             if step.get('tool'):
                 print(f"   🛠️  Tool: {step['tool']}")
-            if step.get('api_query'):
-                print(f"   📤 API Query: {step['api_query'][:200]}{'...' if len(step['api_query']) > 200 else ''}")
         elif step_type == 'observation':
             print(f"\n👁️  Observation {i}: {content}")
             if step.get('error'):
                 print(f"   ❌ Error: {step['error']}")
-            if step.get('api_query'):
-                print(f"   📤 API Query: {step['api_query'][:200]}{'...' if len(step['api_query']) > 200 else ''}")
         elif step_type == 'final_answer':
             print(f"\n🎯 Final Answer: {content}")
-            if step.get('api_query'):
-                print(f"   📤 API Query: {step['api_query'][:200]}{'...' if len(step['api_query']) > 200 else ''}")
     
     if session.get('final_answer'):
         print(f"\n🎯 Final Answer: {session['final_answer']}")
@@ -286,10 +250,20 @@ def view_session_log(session_file: str = None, logs_dir: str = "logs/react_sessi
     print("\n" + "=" * 80)
 
 
-def list_all_sessions(logs_dir: str = "logs/react_sessions"):
-    """List all saved ReAct sessions"""
-    logger_instance = ReActLogger(logs_dir)
-    sessions = logger_instance.get_recent_sessions(50)  # Get more sessions
+def view_session_log(session_id: str = None, logs_dir: str = "logs/react_sessions"):
+    """Synchronous wrapper for view_session_log_async"""
+    from ..repositories import FileSessionRepository
+    repository = FileSessionRepository(logs_dir)
+    asyncio.run(view_session_log_async(session_id, repository))
+
+
+async def list_all_sessions_async(repository=None):
+    """Async function to list all saved ReAct sessions"""
+    if repository is None:
+        from ..repositories import FileSessionRepository
+        repository = FileSessionRepository("logs/react_sessions")
+    
+    sessions = await repository.list_sessions(limit=50, offset=0)
     
     if not sessions:
         print("📭 No ReAct sessions found.")
@@ -298,17 +272,20 @@ def list_all_sessions(logs_dir: str = "logs/react_sessions"):
     print(f"\n📚 All ReAct Sessions ({len(sessions)} total):")
     print("-" * 80)
     
-    for i, filename in enumerate(sessions, 1):
-        # Extract date from filename
-        try:
-            date_part = filename.split('_')[0]
-            time_part = filename.split('_')[1]
-            formatted_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
-            formatted_time = f"{time_part[:2]}:{time_part[2:4]}:{time_part[4:6]}"
-            print(f"{i:2d}. {formatted_date} {formatted_time} - {filename}")
-        except:
-            print(f"{i:2d}. {filename}")
+    for i, session in enumerate(sessions, 1):
+        session_id = session.get('session_id', 'Unknown')
+        timestamp = session.get('timestamp', 'Unknown')
+        query = session.get('query', 'No query')[:50]
+        print(f"{i:2d}. [{timestamp}] {session_id}")
+        print(f"     Query: {query}...")
 
 
-# Global logger instance
+def list_all_sessions(logs_dir: str = "logs/react_sessions"):
+    """Synchronous wrapper for list_all_sessions_async"""
+    from ..repositories import FileSessionRepository
+    repository = FileSessionRepository(logs_dir)
+    asyncio.run(list_all_sessions_async(repository))
+
+
+# Global logger instance (with lazy repository initialization)
 react_logger = ReActLogger()

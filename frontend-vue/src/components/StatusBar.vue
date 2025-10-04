@@ -38,9 +38,8 @@ const statusIcon = computed(() => {
 <style scoped>
 /* 상태 바 */
 .status-bar {
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
+  width: 100%;
+  padding: 0;
   margin-bottom: 0.75rem;
 }
 

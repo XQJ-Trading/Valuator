@@ -28,14 +28,18 @@ class HistoryAdapter:
             "query": session.get("query", "")
         })
         
-        # Convert steps to stream events
+        # Convert steps to stream events (skip final_answer type as it will be added separately)
         steps = session.get("steps", [])
         for step in steps:
+            # Skip final_answer steps as they'll be added from session.final_answer
+            if step.get("type") == "final_answer":
+                continue
+            
             event = HistoryAdapter._step_to_event(step)
             if event:
                 events.append(event)
         
-        # Final answer event
+        # Final answer event (use session's final_answer for consistency)
         final_answer = session.get("final_answer")
         if final_answer:
             events.append({

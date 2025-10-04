@@ -161,14 +161,17 @@ class MyNewTool(BaseTool):
 
     def get_schema(self) -> Dict[str, Any]:
         return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    # 파라미터 정의
-                },
-                "required": ["필수_파라미터"]
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        # 파라미터 정의
+                    },
+                    "required": ["필수_파라미터"]
+                }
             }
         }
 ```
@@ -192,23 +195,94 @@ class MyNewTool(ReActBaseTool):
         pass
 ```
 
-### 3단계: 도구 등록
+### 3단계: ToolRegistry에 등록
 
-새로운 도구를 사용하려면 `tools/__init__.py`에 등록하세요:
+**주요 등록 방법: AIAgent에 등록**
+
+새로운 도구를 AI 에이전트에서 사용하려면 `ai_agent/agent/react_agent.py`의 `_initialize_react_components()` 메서드에서 ToolRegistry에 등록해야 합니다:
+
+```python
+# ai_agent/agent/react_agent.py
+from ..tools.my_tool import MyNewTool
+
+def _initialize_react_components(self):
+    """Initialize ReAct-specific components"""
+    # Initialize tool registry
+    self.tool_registry = ToolRegistry()
+
+    # Register default tools
+    self.tool_registry.register(PerplexitySearchTool())
+    self.tool_registry.register(CodeExecutorTool())
+    self.tool_registry.register(FileSystemTool())
+    self.tool_registry.register(YFinanceBalanceSheetTool())
+    self.tool_registry.register(MyNewTool())  # ← 새 도구 추가
+```
+
+**대안 방법: 런타임에 등록**
+
+이미 생성된 에이전트 인스턴스에 도구를 동적으로 추가할 수도 있습니다:
+
+```python
+from ai_agent.agent import AIAgent
+from ai_agent.tools.my_tool import MyNewTool
+
+# 에이전트 초기화
+agent = AIAgent()
+
+# 새 도구 등록
+my_tool = MyNewTool()
+agent.register_tool(my_tool)
+```
+
+### 4단계: 모듈 익스포트 (선택사항)
+
+도구를 다른 곳에서도 사용하려면 `tools/__init__.py`에 추가하세요:
 
 ```python
 from .my_tool import MyNewTool
 
-__all__ = ["BaseTool", "ToolResult", "WebSearchTool", "MyNewTool"]
+__all__ = ["BaseTool", "ToolResult", "ToolRegistry", "WebSearchTool", "MyNewTool"]
 ```
 
-### 4단계: 도구 사용
+### 5단계: 도구 사용 확인
 
 ```python
-from .tools import MyNewTool
+from ai_agent.agent import AIAgent
 
-tool = MyNewTool()
-result = await tool.execute(param1="value1", param2="value2")
+# 에이전트 초기화 (도구가 자동으로 등록됨)
+agent = AIAgent()
+
+# 등록된 도구 확인
+tools = agent.get_available_tools()
+print(f"등록된 도구 수: {len(tools)}")
+
+# 채팅을 통해 도구 사용
+response = await agent.chat("새로운 도구를 사용해서 작업해줘")
+```
+
+### ToolRegistry 개념
+
+**ToolRegistry**는 에이전트가 사용할 수 있는 모든 도구를 중앙에서 관리하는 레지스트리입니다:
+
+- **도구 등록**: `registry.register(tool)` 
+- **도구 실행**: `registry.execute_tool(name, **kwargs)`
+- **도구 목록**: `registry.list_tools()`
+- **도구 검색**: `registry.get_tool(name)`
+
+```python
+from ai_agent.tools.base import ToolRegistry
+
+# 레지스트리 생성
+registry = ToolRegistry()
+
+# 도구 등록
+registry.register(MyNewTool())
+
+# 등록된 도구 확인
+print(f"등록된 도구: {list(registry.tools.keys())}")
+
+# 도구 실행
+result = await registry.execute_tool("my_tool", param1="value")
 ```
 
 ## 베스트 프랙티스

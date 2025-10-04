@@ -94,8 +94,11 @@ export function useChat() {
             currentTokenMessage = null
             addMessage(data.type, data.content, {
               tool: data.tool,
+              tool_input: data.tool_input,
+              tool_output: data.tool_output,
               error: data.error,
-              message: data.message
+              message: data.message,
+              tool_result: data.tool_result
             })
           }
           

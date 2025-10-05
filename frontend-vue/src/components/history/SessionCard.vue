@@ -1,5 +1,5 @@
 <template>
-  <div class="session-card" :class="{ 'session-success': session.success, 'session-failed': !session.success }">
+  <div class="session-card" :class="{ 'session-success': session.success, 'session-failed': !session.success }" @click="handleCardClick">
     <div class="session-header">
       <div class="session-meta">
         <span class="session-status">
@@ -9,10 +9,7 @@
         <span class="session-duration">⏱️ {{ session.duration }}s</span>
       </div>
       <div class="session-actions">
-        <button @click="$emit('replay', session.session_id)" class="btn-replay" title="재생">
-          ▶️
-        </button>
-        <button @click="$emit('delete', session.session_id)" class="btn-delete" title="삭제">
+        <button @click="handleDeleteClick" class="btn-delete" title="삭제">
           🗑️
         </button>
       </div>
@@ -50,8 +47,8 @@ interface Emits {
   (e: 'delete', sessionId: string): void
 }
 
-defineProps<Props>()
-defineEmits<Emits>()
+const props = defineProps<Props>()
+const $emit = defineEmits<Emits>()
 
 function formatTime(timestamp: string): string {
   try {
@@ -87,6 +84,16 @@ function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   return text.substring(0, maxLength) + '...'
 }
+
+function handleCardClick() {
+  $emit('replay', props.session.session_id)
+}
+
+function handleDeleteClick(event: Event) {
+  event.stopPropagation() // 카드 클릭 이벤트 전파 중지
+  $emit('delete', props.session.session_id)
+}
+
 </script>
 
 <style scoped>
@@ -139,7 +146,6 @@ function truncate(text: string, maxLength: number): string {
   gap: 0.5rem;
 }
 
-.btn-replay,
 .btn-delete {
   background: none;
   border: none;
@@ -149,11 +155,6 @@ function truncate(text: string, maxLength: number): string {
   border-radius: 4px;
   transition: var(--transition);
   opacity: 0.7;
-}
-
-.btn-replay:hover {
-  opacity: 1;
-  background: rgba(37, 99, 235, 0.1);
 }
 
 .btn-delete:hover {

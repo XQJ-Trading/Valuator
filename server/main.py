@@ -5,13 +5,19 @@ from typing import AsyncGenerator, Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ai_agent.agent.react_agent import AIAgent
 from ai_agent.repositories import FileSessionRepository, MongoSessionRepository
 from ai_agent.utils.config import config
 from server.adapters import HistoryAdapter
 
+
+# Supported Gemini models
+SUPPORTED_MODELS = [
+    "gemini-flash-latest",
+    "gemini-pro-latest"
+]
 
 app = FastAPI(title="AI Agent Server", version="1.5.0")
 
@@ -47,6 +53,17 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     query: str
+    model: Optional[str] = None
+    
+    @field_validator('model')
+    @classmethod
+    def validate_model(cls, v):
+        if v is not None and v not in SUPPORTED_MODELS:
+            raise ValueError(
+                f"Unsupported model: {v}. "
+                f"Supported models are: {', '.join(SUPPORTED_MODELS)}"
+            )
+        return v
 
 
 @app.on_event("startup")
@@ -63,7 +80,7 @@ async def health():
 
 @app.post("/api/v1/chat")
 async def chat(request: ChatRequest):
-    agent = AIAgent()
+    agent = AIAgent(model_name=request.model)
     reply = await agent.chat(request.query)
     return {"response": reply}
 
@@ -75,7 +92,7 @@ async def chat_stream(request: ChatRequest):
             # Initial handshake event helps clients show immediate activity
             yield "event: start\n" + "data: {}\n\n"
 
-            agent = AIAgent()
+            agent = AIAgent(model_name=request.model)
             async for event in agent.solve_stream(request.query):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -269,13 +286,41 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
 
 
+@app.get("/api/v1/models")
+async def get_supported_models():
+    """
+    Get list of supported models
+    
+    Returns:
+        List of supported model names
+    """
+    return {
+        "models": SUPPORTED_MODELS,
+        "default": config.agent_model
+    }
+
+
 @app.get("/api/v1/chat/stream")
-async def chat_stream_get(query: str):
+async def chat_stream_get(query: str, model: Optional[str] = None):
+    """
+    GET endpoint for chat stream (for compatibility)
+    
+    Args:
+        query: User query
+        model: Optional model name (must be one of supported models)
+    """
+    # Validate model if provided
+    if model is not None and model not in SUPPORTED_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model: {model}. Supported models are: {', '.join(SUPPORTED_MODELS)}"
+        )
+    
     async def sse() -> AsyncGenerator[str, None]:
         try:
             yield "event: start\n" + "data: {}\n\n"
 
-            agent = AIAgent()
+            agent = AIAgent(model_name=model)
             async for event in agent.solve_stream(query):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 

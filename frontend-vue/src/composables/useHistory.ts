@@ -147,33 +147,6 @@ export function useHistory() {
     }
   }
 
-  /**
-   * 세션 검색
-   */
-  async function searchSessions(query: string, limit: number = 20) {
-    loading.value = true
-    error.value = null
-
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/v1/history/search?q=${encodeURIComponent(query)}&limit=${limit}`
-      )
-      
-      if (!res.ok) {
-        throw new Error(`Failed to search sessions: ${res.statusText}`)
-      }
-
-      const data = await res.json()
-      sessions.value = data.sessions || []
-      return data
-    } catch (e: any) {
-      error.value = e.message
-      console.error('Error searching sessions:', e)
-      return null
-    } finally {
-      loading.value = false
-    }
-  }
 
   /**
    * 세션 삭제
@@ -212,7 +185,6 @@ export function useHistory() {
     fetchSessions,
     fetchSessionDetail,
     replaySession,
-    searchSessions,
     deleteSession
   }
 }

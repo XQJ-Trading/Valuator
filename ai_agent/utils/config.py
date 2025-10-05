@@ -2,9 +2,9 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +27,14 @@ class Config(BaseSettings):
     # Agent Configuration
     agent_name: str = Field(default="AIAgent", alias="AGENT_NAME")
     agent_version: str = Field(default="2.0.0", alias="AGENT_VERSION")
-    agent_model: str = Field(default="gemini-2.0-flash-exp", alias="AGENT_MODEL")
+    agent_model: str = Field(default="gemini-flash-latest", alias="AGENT_MODEL")
+    
+    # Supported Models Configuration (as string, parsed to list)
+    supported_models_str: str = Field(
+        default="gemini-flash-latest,gemini-pro-latest",
+        alias="SUPPORTED_MODELS",
+        description="Comma-separated list of supported model names"
+    )
     
     # Model Configuration
     temperature: float = Field(default=0.7, alias="TEMPERATURE")
@@ -51,6 +58,29 @@ class Config(BaseSettings):
     mongodb_uri: Optional[str] = Field(default=None, alias="MONGODB_URI")
     mongodb_database: str = Field(default="ai_agent", alias="MONGODB_DATABASE")
     mongodb_collection: str = Field(default="react_sessions", alias="MONGODB_COLLECTION")
+    
+    @property
+    def supported_models(self) -> List[str]:
+        """Parse supported models from comma-separated string"""
+        if not self.supported_models_str or self.supported_models_str.strip() == "":
+            return ["gemini-flash-latest", "gemini-pro-latest"]
+        
+        # Clean up the string and split by comma
+        models_str = self.supported_models_str.strip().strip('[]').strip('"').strip("'")
+        if not models_str:
+            return ["gemini-flash-latest", "gemini-pro-latest"]
+        
+        # Split by comma and clean up each item
+        models = [model.strip().strip('"').strip("'") for model in models_str.split(',')]
+        return [model for model in models if model]
+    
+    @field_validator('agent_model')
+    @classmethod
+    def validate_agent_model(cls, v, info):
+        """Ensure agent_model is in supported_models"""
+        # Note: This validator runs before supported_models is processed,
+        # so we'll do this validation in validate_config method instead
+        return v
 
     @classmethod
     def load_from_file(cls, env_file: Optional[str] = None) -> "Config":
@@ -69,6 +99,13 @@ class Config(BaseSettings):
         """Validate configuration"""
         if not self.google_api_key or self.google_api_key == "your_google_api_key_here":
             raise ValueError("Google API key is required. Please set GOOGLE_API_KEY in your environment.")
+        
+        # Validate that agent_model is in supported_models
+        if self.agent_model not in self.supported_models:
+            raise ValueError(
+                f"Default agent model '{self.agent_model}' is not in supported models: {self.supported_models}. "
+                f"Please update AGENT_MODEL or add it to SUPPORTED_MODELS."
+            )
         
         return True
 

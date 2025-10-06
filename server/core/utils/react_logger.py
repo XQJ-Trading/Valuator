@@ -33,7 +33,7 @@ class ReActLogger:
     
     def _create_repository_from_config(self):
         """Create repository based on configuration"""
-        from ..repositories import FileSessionRepository, MongoSessionRepository
+        from server.repositories import FileSessionRepository, MongoSessionRepository
         
         if config.mongodb_enabled and config.mongodb_uri:
             try:
@@ -100,35 +100,13 @@ class ReActLogger:
         if error:
             step["error"] = error
         if api_query:
-            step["api_query"] = self._truncate_api_query(api_query)
+            step["api_query"] = api_query
         if api_response:
-            step["api_response"] = api_response[:1000]  # Limit response size
+            step["api_response"] = api_response  # Store full API response raw data
             
         self.current_session["steps"].append(step)
         logger.debug(f"Logged {step_type} step: {content[:50]}...")
-    
-    def _truncate_api_query(self, api_query: str) -> str:
-        """Truncate API query to first 300 chars + last 600 chars"""
-        if not api_query:
-            return ""
-        
-        total_chars = len(api_query)
-        
-        # If the query is short enough, return as is
-        if total_chars <= 900:  # 300 + 600
-            return api_query
-        
-        # Get first 300 chars
-        first_part = api_query[:300]
-        
-        # Get last 600 chars
-        last_part = api_query[-600:]
-        
-        # Calculate how many characters are being skipped
-        skipped_chars = total_chars - 900
-        
-        # Combine with ellipsis indicating truncation
-        return f"{first_part}\n\n... [생략된 문자 수: {skipped_chars}자] ...\n\n{last_part}"
+
     
     def end_session(self, final_answer: Optional[str] = None, success: bool = True):
         """End the current ReAct session and save using repository"""
@@ -189,7 +167,7 @@ class ReActLogger:
 async def view_session_log_async(session_id: str = None, repository=None):
     """Async function to view a ReAct session log"""
     if repository is None:
-        from ..repositories import FileSessionRepository
+        from server.repositories import FileSessionRepository
         repository = FileSessionRepository("logs/react_sessions")
     
     if not session_id:
@@ -252,7 +230,7 @@ async def view_session_log_async(session_id: str = None, repository=None):
 
 def view_session_log(session_id: str = None, logs_dir: str = "logs/react_sessions"):
     """Synchronous wrapper for view_session_log_async"""
-    from ..repositories import FileSessionRepository
+    from server.repositories import FileSessionRepository
     repository = FileSessionRepository(logs_dir)
     asyncio.run(view_session_log_async(session_id, repository))
 
@@ -260,7 +238,7 @@ def view_session_log(session_id: str = None, logs_dir: str = "logs/react_session
 async def list_all_sessions_async(repository=None):
     """Async function to list all saved ReAct sessions"""
     if repository is None:
-        from ..repositories import FileSessionRepository
+        from server.repositories import FileSessionRepository
         repository = FileSessionRepository("logs/react_sessions")
     
     sessions = await repository.list_sessions(limit=50, offset=0)
@@ -282,7 +260,7 @@ async def list_all_sessions_async(repository=None):
 
 def list_all_sessions(logs_dir: str = "logs/react_sessions"):
     """Synchronous wrapper for list_all_sessions_async"""
-    from ..repositories import FileSessionRepository
+    from server.repositories import FileSessionRepository
     repository = FileSessionRepository(logs_dir)
     asyncio.run(list_all_sessions_async(repository))
 

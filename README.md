@@ -1,91 +1,109 @@
-# AI Agent (Gemini + ReAct)
+# Valuator - AI-Powered React Agent Platform
 
-LangChain과 Google Gemini를 사용한 경량 AI Agent. ReAct 루프, 스트리밍, FastAPI 서버, Vue 프런트엔드를 포함합니다.
+AI 에이전트를 활용한 실시간 분석 및 문제 해결 플랫폼입니다.
 
-### 📁 디렉토리 구조 (Valuator/)
+## 🏗️ 프로젝트 구조
 
 ```
 Valuator/
-├── ai_agent/
-│   ├── agent/           # core.py, react_agent.py
-│   ├── models/          # gemini.py
-│   ├── react/           # engine.py, prompts.py, state.py
-│   ├── tools/           # base.py, react_tool.py, web_search.py
-│   ├── utils/           # config.py, logger.py, react_logger.py
-│   └── examples/        # chat_demo.py, tool_demo.py, react_demo.py
-├── server/
-│   └── main.py          # FastAPI 엔드포인트
-├── frontend-vue/        # Vue 3 + Vite 앱
-├── requirements.txt
-├── README.md
-└── logs/                # 실행 로그 (선택)
+├── server/                     # 백엔드 서버
+│   ├── core/                   # AI Agent 핵심 도메인 로직
+│   │   ├── agent/              # AI 에이전트 구현
+│   │   ├── models/             # LLM 모델 연동
+│   │   ├── react/              # ReAct 엔진
+│   │   ├── tools/              # 도구 구현
+│   │   └── utils/              # 유틸리티
+│   ├── repositories/           # 데이터 저장소 패턴
+│   ├── adapters/              # 외부 시스템 어댑터
+│   └── main.py                # FastAPI 서버 진입점
+├── client/                    # 프론트엔드 (Vue.js)
+│   ├── src/                   
+│   │   ├── components/        # Vue 컴포넌트
+│   │   ├── pages/             # 페이지 컴포넌트
+│   │   └── composables/       # Vue Composables
+│   └── package.json
+└── logs/                      # 로그 및 세션 데이터
 ```
 
-### 🛠 설치
+## 🚀 시작하기
 
-```bash
-cd Valuator
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-```
+### 백엔드 설정
 
-`.env` 파일(Valuator/.env)에 최소 다음 값을 설정하세요:
+1. **의존성 설치**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```bash
-GOOGLE_API_KEY=your_google_api_key
-# 선택: LANGCHAIN_TRACING_V2=true, LANGCHAIN_PROJECT=ai-agent-project, LOG_LEVEL=INFO
-```
+2. **환경 변수 설정**
+   ```bash
+   cp .env.example .env
+   # .env 파일에서 API 키 설정
+   ```
 
-기본 모델은 `gemini-2.0-flash-exp` 입니다 (`ai_agent/utils/config.py`).
+3. **서버 실행**
+   ```bash
+   python3 -m uvicorn server.main:app --reload --port 8001
+   ```
 
-### ▶ 실행
+### 프론트엔드 설정
 
-- Backend (FastAPI)
-```bash
-uvicorn server.main:app --reload
-```
-- Health: `GET http://127.0.0.1:8000/health`
+1. **의존성 설치**
+   ```bash
+   cd client
+   npm install
+   ```
 
-- Frontend (Vue)
-```bash
-cd frontend-vue
-npm install
-npm run dev
-```
+2. **개발 서버 실행**
+   ```bash
+   npm run dev
+   ```
 
-### 🔌 API (요약)
+## 📋 기능
 
-**Chat API:**
-- `POST /api/v1/chat` → { query: string, use_react?: bool }
-- `POST /api/v1/chat/stream` → SSE 스트리밍
-- `GET  /api/v1/chat/stream?query=...&use_react=bool` → SSE 스트리밍
+- **ReAct Engine**: Reasoning + Acting 패턴으로 문제 해결
+- **다양한 도구**: 웹 검색, 코드 실행, 파일 시스템, 금융 데이터 분석
+- **실시간 스트리밍**: WebSocket을 통한 실시간 응답
+- **세션 관리**: 대화 기록 저장 및 조회
+- **모델 선택**: 다양한 AI 모델 지원
 
-**History API:**
-- `GET /api/v1/history?limit=10&offset=0` → 세션 목록
-- `GET /api/v1/history/{session_id}` → 세션 상세
-- `GET /api/v1/history/{session_id}/stream` → 세션 재생 (SSE)
-- `GET /api/v1/history/search?q=검색어` → 세션 검색
-- `DELETE /api/v1/history/{session_id}` → 세션 삭제
+## 🛠️ 아키텍처
 
-> 전략 패턴으로 파일 IO ↔ MongoDB 전환 가능 (`.env`에서 `MONGODB_ENABLED` 설정)
+### 백엔드 아키텍처
 
-### 💡 사용 예시 (비동기)
+- **server/core**: AI Agent의 핵심 비즈니스 로직
+  - 도메인 모델 (Agent, Tools, Models)
+  - ReAct 엔진 구현
+  - LLM 연동 및 도구 관리
+  
+- **server/repositories**: 데이터 저장소 패턴
+  - 파일 기반 저장소
+  - MongoDB 저장소 (선택사항)
+  
+- **server/adapters**: 외부 시스템 연동
+  - 히스토리 관리
+  - API 어댑터
 
-```python
-import asyncio
-from ai_agent.agent.react_agent import ReActGeminiAgent
+### 프론트엔드 아키텍처
 
-async def main():
-    agent = ReActGeminiAgent()
-    print(await agent.chat_enhanced("안녕하세요?"))
+- **Vue 3 + Composition API**
+- **실시간 채팅 인터페이스**
+- **히스토리 관리**
+- **반응형 디자인**
 
-asyncio.run(main())
-```
+## 🔧 개발 가이드
 
-### 참고
-- 필수 키: `GOOGLE_API_KEY`
-- 프런트 CORS: 5173/3000 허용 (`server/main.py`)
-- 제공 도구: `react_tool`, `web_search` (계산기/메모리 모듈은 포함되지 않음)
+### 새로운 도구 추가
 
-### 라이선스
-MIT
+1. `server/core/tools/` 에 새 도구 클래스 생성
+2. `BaseTool` 클래스 상속
+3. `AIAgent`에 도구 등록
+
+### 새로운 모델 추가
+
+1. `server/core/models/` 에 새 모델 클래스 생성
+2. `BaseModel` 인터페이스 구현
+3. 설정에서 모델 선택 가능
+
+## 📝 라이센스
+
+이 프로젝트는 MIT 라이센스 하에 있습니다.

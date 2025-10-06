@@ -224,6 +224,7 @@ class YFinanceBalanceSheetTool(BaseTool):
                     "total_liabilities": total_liabilities,
                     "total_equity": total_equity,
                 },
+                error=None,
                 metadata={
                     "source": "yfinance",
                     "assets_row": assets_row_used,
@@ -234,7 +235,12 @@ class YFinanceBalanceSheetTool(BaseTool):
                 },
             )
         except Exception as e:
-            return ToolResult(success=False, result=None, error=str(e))
+            return ToolResult(
+                success=False, 
+                result=None, 
+                error=str(e),
+                metadata={}
+            )
 
     def get_schema(self) -> Dict[str, Any]:
         return {

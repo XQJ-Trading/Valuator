@@ -59,6 +59,8 @@ Thumbs.db
 
 # Logs
 logs/react_sessions/*.json
+logs/server_history/*.json
+logs/low_level_query/*.json
 *.log
 
 # Temporary files

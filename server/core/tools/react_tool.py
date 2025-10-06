@@ -190,7 +190,7 @@ class CodeExecutorTool(ReActBaseTool):
         self, code: str, timeout: int = None, language: str = None
     ) -> ToolResult:
         """Execute Python code safely"""
-        from ai_agent.utils.config import config
+        from ..utils.config import config
 
         # Use config timeout if not provided
         if timeout is None:

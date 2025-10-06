@@ -141,9 +141,16 @@ async function handleReplay(sessionId: string) {
       sessionId,
       (event) => {
         // 이벤트를 Message 형식으로 변환
+        let content = event.content || ''
+        
+        // start 이벤트의 경우 query를 content로 사용
+        if (event.type === 'start' && event.query) {
+          content = event.query
+        }
+        
         const message: Message = {
           type: event.type,
-          content: event.content || '',
+          content: content,
           metadata: {
             tool: event.tool,
             tool_input: event.tool_input,

@@ -98,35 +98,60 @@ function handleDeleteClick(event: Event) {
 
 <style scoped>
 .session-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  padding: 1rem;
-  margin-bottom: 0.75rem;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
   transition: var(--transition);
+  border: 2px solid;
+  margin-bottom: 1rem;
   cursor: pointer;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+  border-color: var(--primary-color);
 }
 
 .session-card:hover {
-  border-color: var(--primary-color);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
-  transform: translateY(-1px);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
 }
 
 .session-success {
-  border-left: 3px solid #10b981;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%);
+  border-color: #22c55e;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
+}
+
+.session-success:hover {
+  box-shadow: 0 8px 25px rgba(34, 197, 94, 0.3);
 }
 
 .session-failed {
-  border-left: 3px solid #ef4444;
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.1) 0%, rgba(220, 38, 38, 0.05) 100%);
+  border-color: var(--error-color);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
+}
+
+.session-failed:hover {
+  box-shadow: 0 8px 25px rgba(220, 38, 38, 0.3);
 }
 
 /* 헤더 */
 .session-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.session-success .session-header {
+  background: rgba(34, 197, 94, 0.1);
+  color: #059669;
+}
+
+.session-failed .session-header {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--error-color);
 }
 
 .session-meta {
@@ -134,11 +159,21 @@ function handleDeleteClick(event: Event) {
   align-items: center;
   gap: 0.75rem;
   font-size: 0.85rem;
-  color: var(--text-secondary);
+  flex: 1;
 }
 
 .session-status {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
+}
+
+.session-time {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.session-duration {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .session-actions {
@@ -147,71 +182,143 @@ function handleDeleteClick(event: Event) {
 }
 
 .btn-delete {
-  background: none;
-  border: none;
-  font-size: 1.1rem;
+  background: linear-gradient(135deg, var(--primary-color) 0%, #1d4ed8 100%);
+  color: white;
+  border: 1px solid var(--primary-color);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
   cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 4px;
   transition: var(--transition);
-  opacity: 0.7;
+  font-size: 0.85rem;
+  font-weight: 500;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-delete::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.3s ease;
 }
 
 .btn-delete:hover {
-  opacity: 1;
-  background: rgba(239, 68, 68, 0.1);
+  transform: scale(1.05) translateY(-1px);
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  border-color: #dc2626;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+.btn-delete:hover::before {
+  left: 100%;
+}
+
+.btn-delete:active {
+  transform: scale(0.98);
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.2);
 }
 
 /* 본문 */
 .session-body {
-  margin-bottom: 0.75rem;
+  padding: 1.25rem;
 }
 
 .session-query,
 .session-answer {
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  margin-bottom: 0.75rem;
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
 .session-query {
   color: var(--text-primary);
+  font-weight: 500;
 }
 
 .session-answer {
   color: var(--text-secondary);
+  line-height: 1.7;
 }
 
 .session-query strong,
 .session-answer strong {
   color: var(--primary-color);
-  margin-right: 0.25rem;
+  margin-right: 0.5rem;
+  font-weight: 600;
+}
+
+.session-success .session-query strong,
+.session-success .session-answer strong {
+  color: #059669;
+}
+
+.session-failed .session-query strong,
+.session-failed .session-answer strong {
+  color: var(--error-color);
 }
 
 /* 푸터 */
 .session-footer {
-  padding-top: 0.5rem;
+  padding: 0.75rem 1.25rem;
   border-top: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.session-success .session-footer {
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.session-failed .session-footer {
+  background: rgba(220, 38, 38, 0.05);
 }
 
 .session-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  font-size: 0.8rem;
+  gap: 1rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.5rem;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+}
+
+.session-success .stat-item {
+  background: rgba(34, 197, 94, 0.1);
+  color: #059669;
+}
+
+.session-failed .stat-item {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--error-color);
 }
 
 /* 반응형 */
 @media (max-width: 768px) {
-  .session-card {
-    padding: 0.75rem;
+  .session-header {
+    padding: 0.75rem 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  
+  .session-body {
+    padding: 1rem;
+  }
+  
+  .session-footer {
+    padding: 0.75rem 1rem;
   }
   
   .session-meta {
@@ -221,7 +328,15 @@ function handleDeleteClick(event: Event) {
   
   .session-query,
   .session-answer {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+  }
+  
+  .session-stats {
+    gap: 0.5rem;
+  }
+  
+  .stat-item {
+    font-size: 0.8rem;
   }
 }
 </style>

@@ -34,7 +34,7 @@ class ReActEngine:
             max_retries: Maximum retries for failed actions (uses config if None)
             enable_logging: Whether to enable session logging
         """
-        from ai_agent.utils.config import config
+        from ..utils.config import config
         
         self.model = model
         self.tool_registry = tool_registry
@@ -289,7 +289,7 @@ class ReActEngine:
         observation_steps = len(state.get_steps_by_type(ReActStepType.OBSERVATION))
         
         # Prevent infinite loops - max cycles from config
-        from ai_agent.utils.config import config
+        from ..utils.config import config
         if thought_steps >= config.react_max_thought_cycles:
             return True
         
@@ -490,7 +490,7 @@ class ReActEngine:
         
         # Log step with API query
         if self.enable_logging:
-            api_query = self._format_messages_for_log(self.api_session.history)
+            api_query = thought_prompt
             react_logger.log_step(
                 "thought", 
                 thought_content,
@@ -538,7 +538,7 @@ class ReActEngine:
         
         # Log step with API query
         if self.enable_logging:
-            api_query = self._format_messages_for_log(self.api_session.history)
+            api_query = action_prompt
             react_logger.log_step(
                 "action", 
                 action_content, 
@@ -612,7 +612,7 @@ class ReActEngine:
         
         # Log step with API query
         if self.enable_logging:
-            api_query = self._format_messages_for_log(self.api_session.history) if self.api_session else ""
+            api_query = observation_prompt
             react_logger.log_step(
                 "observation", 
                 observation_content,
@@ -646,7 +646,7 @@ class ReActEngine:
         
         # Log step with API query
         if self.enable_logging:
-            api_query = self._format_messages_for_log(self.api_session.history)
+            api_query = final_prompt
             react_logger.log_step(
                 "final_answer", 
                 final_answer,

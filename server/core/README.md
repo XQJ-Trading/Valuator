@@ -1,4 +1,4 @@
-# AI Agent - Gemini 2.5 Pro
+# AI Agent - Gemini
 
 LangChain과 Google의 Gemini 2.5 Pro를 활용한 AI Agent 구현입니다.
 
@@ -14,29 +14,35 @@ LangChain과 Google의 Gemini 2.5 Pro를 활용한 AI Agent 구현입니다.
 ## 📁 프로젝트 구조
 
 ```
-ai-agent/
-├── __init__.py
-├── agent/
+server/core/
+├── __init__.py                 # 초기화 파일
+├── agent/                      # AI 에이전트 구현
 │   ├── __init__.py
-│   └── core.py              # 핵심 Agent 클래스
-├── models/
+│   └── react_agent.py          # ReAct 에이전트 구현
+├── examples/                   # 예제 및 데모 코드
 │   ├── __init__.py
-│   └── gemini.py            # Gemini 모델 통합
-├── memory/
+│   ├── chat_demo.py            # 채팅 데모
+│   ├── react_demo.py           # ReAct 데모
+│   └── tool_demo.py            # 도구 데모
+├── models/                     # LLM 모델 연동
 │   ├── __init__.py
-│   └── conversation.py      # 대화 메모리 관리
-├── tools/
+│   └── gemini.py               # Gemini 모델 구현
+├── react/                      # ReAct 엔진
 │   ├── __init__.py
-│   ├── base.py              # 기본 도구 클래스
-│   └── web_search.py        # 웹 검색 도구
-├── utils/
+│   ├── engine.py               # ReAct 엔진 구현
+│   ├── prompts.py              # 프롬프트 관리
+│   └── state.py                # 상태 관리
+├── tools/                      # 도구 구현
 │   ├── __init__.py
-│   ├── config.py            # 설정 관리
-│   └── logger.py            # 로깅
-└── examples/
+│   ├── base.py                 # 기본 도구 클래스
+│   ├── react_tool.py           # ReAct 도구 클래스
+│   ├── web_search.py           # 웹 검색 도구
+│   └── yfinance_tool.py        # 금융 데이터 도구
+└── utils/                      # 유틸리티
     ├── __init__.py
-    ├── chat_demo.py         # 채팅 데모
-    └── tool_demo.py         # 도구 데모
+    ├── config.py               # 설정 관리
+    ├── logger.py               # 로깅
+    └── react_logger.py         # ReAct 로깅
 ```
 
 ## 🛠️ 설치 및 설정

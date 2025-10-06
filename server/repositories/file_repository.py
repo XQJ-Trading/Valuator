@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from .base import SessionRepository
-from server.core.utils.logger import logger
+from ..core.utils.logger import logger
 
 
 class FileSessionRepository(SessionRepository):

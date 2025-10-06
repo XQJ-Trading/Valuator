@@ -34,7 +34,7 @@ class ReActEngine:
             max_retries: Maximum retries for failed actions (uses config if None)
             enable_logging: Whether to enable session logging
         """
-        from ai_agent.utils.config import config
+        from ..utils.config import config
         
         self.model = model
         self.tool_registry = tool_registry
@@ -289,7 +289,7 @@ class ReActEngine:
         observation_steps = len(state.get_steps_by_type(ReActStepType.OBSERVATION))
         
         # Prevent infinite loops - max cycles from config
-        from ai_agent.utils.config import config
+        from ..utils.config import config
         if thought_steps >= config.react_max_thought_cycles:
             return True
         

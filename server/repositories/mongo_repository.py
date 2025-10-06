@@ -12,7 +12,7 @@ except ImportError:
     MONGODB_AVAILABLE = False
 
 from .base import SessionRepository
-from server.core.utils.logger import logger
+from ..core.utils.logger import logger
 
 
 class MongoSessionRepository(SessionRepository):

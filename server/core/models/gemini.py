@@ -1,6 +1,9 @@
 """Gemini model integration for AI Agent"""
 
 import asyncio
+import json
+import os
+from datetime import datetime
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -76,7 +79,7 @@ class GeminiChatSession:
             messages=[self.history],
             callbacks=callbacks
         )
-        
+
         # Prefer AIMessage fields if available (LangChain wraps usage there)
         generation = response.generations[0][0]
         message_obj = getattr(generation, 'message', None)
@@ -84,7 +87,7 @@ class GeminiChatSession:
             content = _normalize_content(message_obj.content)
         else:
             content = _normalize_content(getattr(generation, 'text', ""))
-        
+
         # Extract usage from AIMessage.usage_metadata first, then fall back
         usage = None
         if message_obj is not None:
@@ -93,9 +96,34 @@ class GeminiChatSession:
             gen_info = getattr(generation, 'generation_info', None) or {}
             if isinstance(gen_info, dict):
                 usage = gen_info.get('usage_metadata')
-        
+
         # Extract cache metrics from usage metadata
         cache_metrics = self._extract_cache_metrics(usage)
+
+        # 파일로 응답 저장 (테스트 코드)
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"response_{timestamp}.json"
+            filepath = os.path.join("logs", "low_level_query", filename)
+
+            # 응답 데이터 구성
+            response_data = {
+                "timestamp": timestamp,
+                "model": self.model.model,
+                "content": content,
+                "usage": usage,
+                "cache_metrics": cache_metrics,
+                "message_count": len(self.history)
+            }
+
+            # 파일 저장
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(response_data, f, ensure_ascii=False, indent=2)
+
+            logger.debug(f"응답을 파일로 저장했습니다: {filepath}")
+        except Exception as e:
+            logger.warning(f"응답 파일 저장 실패: {e}")
         
         self.history.append(AIMessage(content=content))
         

@@ -100,35 +100,13 @@ class ReActLogger:
         if error:
             step["error"] = error
         if api_query:
-            step["api_query"] = self._truncate_api_query(api_query)
+            step["api_query"] = api_query
         if api_response:
-            step["api_response"] = api_response[:1000]  # Limit response size
+            step["api_response"] = api_response  # Store full API response raw data
             
         self.current_session["steps"].append(step)
         logger.debug(f"Logged {step_type} step: {content[:50]}...")
-    
-    def _truncate_api_query(self, api_query: str) -> str:
-        """Truncate API query to first 300 chars + last 600 chars"""
-        if not api_query:
-            return ""
-        
-        total_chars = len(api_query)
-        
-        # If the query is short enough, return as is
-        if total_chars <= 900:  # 300 + 600
-            return api_query
-        
-        # Get first 300 chars
-        first_part = api_query[:300]
-        
-        # Get last 600 chars
-        last_part = api_query[-600:]
-        
-        # Calculate how many characters are being skipped
-        skipped_chars = total_chars - 900
-        
-        # Combine with ellipsis indicating truncation
-        return f"{first_part}\n\n... [생략된 문자 수: {skipped_chars}자] ...\n\n{last_part}"
+
     
     def end_session(self, final_answer: Optional[str] = None, success: bool = True):
         """End the current ReAct session and save using repository"""

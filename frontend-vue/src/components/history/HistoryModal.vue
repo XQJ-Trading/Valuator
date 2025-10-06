@@ -8,19 +8,6 @@
           <button @click="handleClose" class="btn-close">✕</button>
         </div>
 
-        <!-- 검색 바 -->
-        <div class="search-bar">
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="세션 검색..."
-            @input="handleSearch"
-            class="search-input"
-          />
-          <button v-if="searchQuery" @click="clearSearch" class="btn-clear-search">
-            ✕
-          </button>
-        </div>
 
         <!-- 재생 모드 -->
         <div v-if="replayMode" class="replay-container">
@@ -107,13 +94,11 @@ const {
   loading,
   error,
   fetchSessions,
-  searchSessions,
   replaySession,
   deleteSession
 } = useHistory()
 
 // State
-const searchQuery = ref('')
 const currentOffset = ref(0)
 const replayMode = ref(false)
 const replayMessages = ref<Message[]>([])
@@ -144,21 +129,6 @@ function handleClose() {
     stopReplay()
   }
   emit('close')
-}
-
-function handleSearch() {
-  currentOffset.value = 0
-  if (searchQuery.value.trim()) {
-    searchSessions(searchQuery.value)
-  } else {
-    fetchSessions()
-  }
-}
-
-function clearSearch() {
-  searchQuery.value = ''
-  currentOffset.value = 0
-  fetchSessions()
 }
 
 function loadMore() {
@@ -290,47 +260,6 @@ async function handleDelete(sessionId: string) {
 }
 
 .btn-close:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
-/* 검색 바 */
-.search-bar {
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.search-input {
-  flex: 1;
-  padding: 0.75rem 1rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  color: var(--text-primary);
-  font-size: 0.95rem;
-  transition: var(--transition);
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.btn-clear-search {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  padding: 0.5rem;
-  cursor: pointer;
-  color: var(--text-secondary);
-  transition: var(--transition);
-}
-
-.btn-clear-search:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
 }

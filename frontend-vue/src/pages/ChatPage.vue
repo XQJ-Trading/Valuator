@@ -4,7 +4,9 @@
     <InputSection 
       v-model:query="query"
       v-model:rule="rule"
+      v-model:selectedModel="selectedModel"
       :loading="loading"
+      :availableModels="availableModels"
       @send="send"
       @stream="stream"
       @clear="clearAll"
@@ -30,9 +32,12 @@ const {
   status,
   loading,
   messages,
+  selectedModel,
+  availableModels,
   clearAll,
   send,
-  stream
+  stream,
+  setModel
 } = useChat()
 </script>
 

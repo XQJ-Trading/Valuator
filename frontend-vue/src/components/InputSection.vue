@@ -9,6 +9,23 @@
         @keydown.ctrl.enter="$emit('stream')"
       ></textarea>
       
+      <!-- 모델 선택 섹션 -->
+      <div class="model-section">
+        <label class="model-label">
+          <span class="model-icon">🤖</span>
+          AI 모델 선택
+        </label>
+        <select 
+          :value="selectedModel" 
+          @change="$emit('update:selectedModel', ($event.target as HTMLSelectElement).value)"
+          class="model-select"
+        >
+          <option v-for="model in availableModels" :key="model" :value="model">
+            {{ getModelDisplayName(model) }}
+          </option>
+        </select>
+      </div>
+
       <!-- Rule 입력 섹션 -->
       <div class="rule-section">
         <label class="rule-label">
@@ -45,11 +62,14 @@ interface Props {
   query: string
   rule: string
   loading: boolean
+  selectedModel: string
+  availableModels: string[]
 }
 
 interface Emits {
   (e: 'update:query', value: string): void
   (e: 'update:rule', value: string): void
+  (e: 'update:selectedModel', value: string): void
   (e: 'send'): void
   (e: 'stream'): void
   (e: 'clear'): void
@@ -57,6 +77,15 @@ interface Emits {
 
 defineProps<Props>()
 defineEmits<Emits>()
+
+// 모델 표시 이름 변환 함수
+function getModelDisplayName(model: string): string {
+  const displayNames: Record<string, string> = {
+    'gemini-flash-latest': 'Gemini Flash (빠른 응답)',
+    'gemini-pro-latest': 'Gemini Pro (고성능)'
+  }
+  return displayNames[model] || model
+}
 </script>
 
 <style scoped>
@@ -117,6 +146,66 @@ defineEmits<Emits>()
   border-color: #2563eb;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
   background: #ffffff;
+}
+
+/* 모델 선택 섹션 */
+.model-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.model-icon {
+  font-size: 1.1rem;
+}
+
+.model-select {
+  width: 100%;
+  padding: 1rem;
+  border: 2px solid #d1d5db;
+  border-radius: var(--border-radius);
+  background: #ffffff;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  font-family: inherit;
+  box-sizing: border-box;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 1rem;
+  padding-right: 3rem;
+}
+
+.model-select:hover {
+  border-color: #059669;
+  background-color: #f0fdf4;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.15);
+  background-color: #ffffff;
+}
+
+.model-select option {
+  padding: 0.5rem;
+  background: #ffffff;
+  color: #111827;
 }
 
 /* Rule 입력 섹션 */

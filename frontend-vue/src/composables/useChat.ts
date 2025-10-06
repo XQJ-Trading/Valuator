@@ -7,14 +7,37 @@ export function useChat() {
   const status = ref('준비완료')
   const loading = ref(false)
   const messages = ref<Message[]>([])
+  const selectedModel = ref<string>('')
+  const availableModels = ref<string[]>([])
 
   const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+
+  // 지원 모델 목록 가져오기
+  async function fetchAvailableModels() {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/models`)
+      const data = await res.json()
+      availableModels.value = data.models || []
+      if (!selectedModel.value && data.default) {
+        selectedModel.value = data.default
+      }
+    } catch (error) {
+      console.error('모델 목록을 가져오는데 실패했습니다:', error)
+      // 기본값 설정
+      availableModels.value = ['gemini-flash-latest', 'gemini-pro-latest']
+      selectedModel.value = 'gemini-flash-latest'
+    }
+  }
 
   function clearAll() {
     messages.value = []
     query.value = ''
     rule.value = ''
     status.value = '준비완료'
+  }
+
+  function setModel(model: string) {
+    selectedModel.value = model
   }
 
   function buildQueryWithRule() {
@@ -41,10 +64,15 @@ export function useChat() {
     
     try {
       const queryWithRule = buildQueryWithRule()
+      const requestBody = {
+        query: queryWithRule,
+        ...(selectedModel.value && { model: selectedModel.value })
+      }
+      
       const res = await fetch(`${API_BASE}/api/v1/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: queryWithRule }),
+        body: JSON.stringify(requestBody),
       })
       const json = await res.json()
       
@@ -71,6 +99,9 @@ export function useChat() {
       const queryWithRule = buildQueryWithRule()
       const url = new URL(`${API_BASE}/api/v1/chat/stream`)
       url.searchParams.set('query', queryWithRule)
+      if (selectedModel.value) {
+        url.searchParams.set('model', selectedModel.value)
+      }
 
       const es = new EventSource(url.toString())
       let closed = false
@@ -144,14 +175,21 @@ export function useChat() {
     }
   }
 
+  // 컴포넌트가 마운트될 때 모델 목록을 가져옴
+  fetchAvailableModels()
+
   return {
     query,
     rule,
     status,
     loading,
     messages,
+    selectedModel,
+    availableModels,
     clearAll,
     send,
-    stream
+    stream,
+    setModel,
+    fetchAvailableModels
   }
 }

@@ -13,7 +13,7 @@ from .repositories import FileSessionRepository, MongoSessionRepository
 from .core.utils.config import config
 from .core.utils.logger import logger
 from .adapters import HistoryAdapter
-from .models.response_schemas import ChatResponse, ModelInfo, AgentStatus, ErrorResponse
+
 
 app = FastAPI(title="AI Agent Server", version="1.5.0")
 
@@ -311,18 +311,18 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
 
 
-@app.get("/api/v1/models", response_model=ModelInfo)
+@app.get("/api/v1/models")
 async def get_supported_models():
     """
     Get list of supported models
-    
+
     Returns:
         List of supported model names and default model
     """
-    return ModelInfo(
-        models=config.supported_models,
-        default=config.agent_model
-    )
+    return {
+        "models": config.supported_models,
+        "default": config.agent_model
+    }
 
 
 @app.get("/api/v1/chat/stream")

@@ -64,80 +64,9 @@ ReAct 특화 기능이 추가된 기본 클래스:
 
 ## 사용 가능한 도구들
 
-### 1. PerplexitySearchTool
-
-**목적**: 실시간 웹 검색 및 정보 수집
-
-**주요 기능**:
-- Perplexity AI를 통한 실시간 웹 검색
-- 인용 정보와 출처 제공
-- 다양한 언어 지원
-
-**사용 예시**:
-```python
-tool = PerplexitySearchTool()
-result = await tool.execute(query="Python async programming")
-```
-
-**특징**:
-- `sonar` 모델 사용으로 정확도 높음
-- 자동 인용 정보 추출
-- API 키 기반 인증
-
-### 2. CodeExecutorTool
-
-**목적**: 안전한 Python 코드 실행
-
-**주요 기능**:
-- 코드 실행 및 결과 반환
-- 타임아웃 설정
-- 표준 출력/에러 캡처
-- 안전한 실행 환경
-
-**사용 예시**:
-```python
-tool = CodeExecutorTool()
-result = await tool.execute(code="print('Hello, World!')")
-```
-
-**특징**:
-- `exec()`와 `eval()`을 활용한 동적 코드 실행
-- JSON 이스케이프 처리
-- 안전한 빌트인 환경
-
-### 3. FileSystemTool
-
-**목적**: 파일 시스템 조작
-
-**주요 기능**:
-- 파일 읽기/쓰기
-- 디렉토리 목록 조회
-- 경로 검증 및 디렉토리 생성
-
-**사용 예시**:
-```python
-tool = FileSystemTool()
-result = await tool.execute(operation="read", path="config.txt")
-```
-
-**특징**:
-- UTF-8 인코딩 지원
-- 자동 디렉토리 생성
-- 파일 크기 정보 제공
-
-### 4. WebSearchTool
-
-**목적**: Google Custom Search API를 통한 웹 검색
-
-**주요 기능**:
-- Google Custom Search API 연동
-- 결과 수 제한 및 언어 설정
-- 구조화된 검색 결과 반환
-
-**특징**:
-- Google Custom Search API 필요
-- JSON 형식 결과 반환
-- 검색 시간 및 총 결과 수 정보 제공
+현재 구현된 도구들:
+- **WebSearchTool**: 웹 검색 및 정보 수집
+- **YFinanceTool**: 금융 데이터 수집 및 분석
 
 ## 신규 도구 추가 방법
 
@@ -211,10 +140,8 @@ def _initialize_react_components(self):
     self.tool_registry = ToolRegistry()
 
     # Register default tools
-    self.tool_registry.register(PerplexitySearchTool())
-    self.tool_registry.register(CodeExecutorTool())
-    self.tool_registry.register(FileSystemTool())
-    self.tool_registry.register(YFinanceBalanceSheetTool())
+    self.tool_registry.register(WebSearchTool())
+    self.tool_registry.register(YFinanceTool())
     self.tool_registry.register(MyNewTool())  # ← 새 도구 추가
 ```
 
@@ -241,7 +168,7 @@ agent.register_tool(my_tool)
 ```python
 from .my_tool import MyNewTool
 
-__all__ = ["BaseTool", "ToolResult", "ToolRegistry", "WebSearchTool", "MyNewTool"]
+__all__ = ["BaseTool", "ToolResult", "ToolRegistry", "WebSearchTool", "YFinanceTool", "MyNewTool"]
 ```
 
 ### 5단계: 도구 사용 확인

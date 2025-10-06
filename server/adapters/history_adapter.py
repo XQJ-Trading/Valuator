@@ -20,6 +20,11 @@ class HistoryAdapter:
         if not session:
             return []
         
+        # For new chat sessions, events are already stored in StreamEvent format
+        if "events" in session:
+            return session["events"]
+        
+        # Legacy support: convert old format with "steps" 
         events = []
         
         # Start event
@@ -126,6 +131,9 @@ class HistoryAdapter:
         Returns:
             Summary dictionary with key information
         """
+        # Support both new format (events) and legacy format (steps)
+        event_count = len(session.get("events", session.get("steps", [])))
+        
         return {
             "session_id": session.get("session_id", "unknown"),
             "timestamp": session.get("timestamp", ""),
@@ -133,7 +141,7 @@ class HistoryAdapter:
             "final_answer": session.get("final_answer", "")[:200],  # Truncate for summary
             "success": session.get("success", False),
             "duration": session.get("duration", 0),
-            "step_count": len(session.get("steps", [])),
+            "step_count": event_count,
             "tools_used": HistoryAdapter._extract_tools_used(session)
         }
     
@@ -141,11 +149,22 @@ class HistoryAdapter:
     def _extract_tools_used(session: Dict[str, Any]) -> List[str]:
         """Extract list of unique tools used in session"""
         tools = set()
-        steps = session.get("steps", [])
         
-        for step in steps:
-            if step.get("type") == "action" and step.get("tool"):
-                tools.add(step["tool"])
+        # Check new format first (events)
+        events = session.get("events", [])
+        if events:
+            for event in events:
+                if event.get("type") == "action" and event.get("metadata", {}).get("tool"):
+                    tools.add(event["metadata"]["tool"])
+                # Also check direct tool field for compatibility
+                elif event.get("type") == "action" and event.get("tool"):
+                    tools.add(event["tool"])
+        else:
+            # Legacy format (steps)
+            steps = session.get("steps", [])
+            for step in steps:
+                if step.get("type") == "action" and step.get("tool"):
+                    tools.add(step["tool"])
         
         return list(tools)
     

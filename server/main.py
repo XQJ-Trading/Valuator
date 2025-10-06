@@ -1,35 +1,40 @@
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, List, Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
-from server.core.agent.react_agent import AIAgent
-from server.repositories import FileSessionRepository, MongoSessionRepository
-from server.core.utils.config import config
-from server.adapters import HistoryAdapter
+from .core.agent.react_agent import AIAgent
+from .repositories import FileSessionRepository, MongoSessionRepository
+from .core.utils.config import config
+from .core.utils.logger import logger
+from .adapters import HistoryAdapter
+from .models.response_schemas import ChatResponse, ModelInfo, AgentStatus, ErrorResponse
 
 app = FastAPI(title="AI Agent Server", version="1.5.0")
 
-# Initialize repository based on configuration
-def create_repository():
-    """Create repository instance based on configuration"""
+# Initialize history repository for server (separate from ReactLogger)
+def create_history_repository():
+    """Create history repository instance for server history (separate from ReactLogger)"""
     if config.mongodb_enabled and config.mongodb_uri:
         try:
+            # Use different collection for server history
             return MongoSessionRepository(
                 mongodb_uri=config.mongodb_uri,
                 database=config.mongodb_database,
-                collection=config.mongodb_collection
+                collection=f"{config.mongodb_collection}_server_history"
             )
         except Exception as e:
-            print(f"Failed to initialize MongoDB repository: {e}")
+            print(f"Failed to initialize MongoDB repository for server history: {e}")
             print("Falling back to file repository")
-            return FileSessionRepository("logs/react_sessions")
+            return FileSessionRepository("logs/server_history")
     else:
-        return FileSessionRepository("logs/react_sessions")
+        # Use different directory for server history
+        return FileSessionRepository("logs/server_history")
 
 # Global repository instance
 history_repository = None
@@ -62,8 +67,66 @@ class ChatRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     global history_repository
-    history_repository = create_repository()
+    history_repository = create_history_repository()
     print(f"History repository initialized: {type(history_repository).__name__}")
+
+
+async def save_chat_session(
+    query: str, 
+    events: List[Dict[str, Any]], 
+    model: Optional[str] = None, 
+    success: bool = True
+) -> str:
+    """
+    Save chat session to history repository
+    
+    Args:
+        query: User query
+        events: List of StreamEvent dictionaries
+        model: Model used for the chat
+        success: Whether the chat was successful
+        
+    Returns:
+        session_id: ID of the saved session
+    """
+    if history_repository is None:
+        logger.warning("History repository not available, skipping save")
+        return ""
+    
+    # Generate session ID
+    timestamp = datetime.now()
+    session_id = timestamp.strftime("chat_%Y%m%d_%H%M%S")
+    
+    # Extract final answer from events
+    final_answer = ""
+    for event in events:
+        if event.get("type") == "final_answer":
+            final_answer = event.get("content", "")
+            break
+    
+    # Calculate duration (mock - we don't have start time)
+    duration = len(events) * 0.1  # Approximate
+    
+    # Create session data
+    session_data = {
+        "session_id": session_id,
+        "timestamp": timestamp.isoformat(),
+        "query": query,
+        "events": events,
+        "final_answer": final_answer,
+        "success": success,
+        "duration": duration,
+        "model": model or config.agent_model,
+        "source": "server_chat"
+    }
+    
+    try:
+        saved_session_id = await history_repository.save_session(session_data)
+        logger.info(f"Saved chat session: {saved_session_id}")
+        return saved_session_id
+    except Exception as e:
+        logger.error(f"Failed to save chat session: {e}")
+        return ""
 
 
 @app.get("/health")
@@ -73,9 +136,41 @@ async def health():
 
 @app.post("/api/v1/chat")
 async def chat(request: ChatRequest):
-    agent = AIAgent(model_name=request.model)
-    reply = await agent.chat(request.query)
-    return {"response": reply}
+    """
+    Send a chat message to the AI agent
+    
+    Args:
+        request: Chat request containing query and optional model
+        
+    Returns:
+        List of StreamEvent objects representing the conversation
+    """
+    try:
+        agent = AIAgent(model_name=request.model)
+        
+        # Collect all stream events
+        events = []
+        async for event in agent.solve_stream(request.query):
+            events.append(event)
+        
+        # Save chat session to history
+        await save_chat_session(request.query, events, request.model)
+        
+        return events
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {e}")
+        # Return error as StreamEvent format
+        error_events = [
+            {"type": "start", "content": "", "metadata": {}},
+            {"type": "error", "content": str(e), "metadata": {"model": request.model or config.agent_model}},
+            {"type": "end", "content": "", "metadata": {}}
+        ]
+        # Save error session too
+        try:
+            await save_chat_session(request.query, error_events, request.model, success=False)
+        except Exception:
+            pass  # Don't fail on save error
+        return error_events
 
 
 # History API Endpoints
@@ -216,24 +311,24 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
 
 
-@app.get("/api/v1/models")
+@app.get("/api/v1/models", response_model=ModelInfo)
 async def get_supported_models():
     """
     Get list of supported models
     
     Returns:
-        List of supported model names
+        List of supported model names and default model
     """
-    return {
-        "models": config.supported_models,
-        "default": config.agent_model
-    }
+    return ModelInfo(
+        models=config.supported_models,
+        default=config.agent_model
+    )
 
 
 @app.get("/api/v1/chat/stream")
 async def chat_stream_get(query: str, model: Optional[str] = None):
     """
-    GET endpoint for chat stream (for compatibility)
+    GET endpoint for chat stream (for compatibility) - also saves to history
     
     Args:
         query: User query
@@ -247,18 +342,36 @@ async def chat_stream_get(query: str, model: Optional[str] = None):
         )
     
     async def sse() -> AsyncGenerator[str, None]:
+        events = []  # Collect events for saving
         try:
             yield "event: start\n" + "data: {}\n\n"
 
             agent = AIAgent(model_name=model)
             async for event in agent.solve_stream(query):
+                events.append(event)  # Store for saving
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
             yield "event: end\n" + "data: {}\n\n"
+            
+            # Save session after streaming completes
+            try:
+                await save_chat_session(query, events, model)
+            except Exception as save_error:
+                logger.error(f"Failed to save stream session: {save_error}")
+                
         except Exception as e:
             err = {"type": "error", "message": str(e)}
+            error_event = {"type": "error", "content": str(e), "metadata": {"model": model or config.agent_model}}
+            events.append(error_event)
+            
             yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
             yield "event: end\n" + "data: {}\n\n"
+            
+            # Save error session
+            try:
+                await save_chat_session(query, events, model, success=False)
+            except Exception:
+                pass
 
     return StreamingResponse(
         sse(),

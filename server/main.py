@@ -7,9 +7,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
-from ai_agent.agent.react_agent import AIAgent
-from ai_agent.repositories import FileSessionRepository, MongoSessionRepository
-from ai_agent.utils.config import config
+from server.core.agent.react_agent import AIAgent
+from server.repositories import FileSessionRepository, MongoSessionRepository
+from server.core.utils.config import config
 from server.adapters import HistoryAdapter
 
 app = FastAPI(title="AI Agent Server", version="1.5.0")

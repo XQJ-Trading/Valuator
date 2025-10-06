@@ -53,6 +53,9 @@ class Config(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_file: Optional[str] = Field(default=None, alias="LOG_FILE")
     
+    # Response Logging Configuration
+    enable_response_logging: bool = Field(default=False, alias="ENABLE_RESPONSE_LOGGING")
+    
     # MongoDB Configuration
     mongodb_enabled: bool = Field(default=False, alias="MONGODB_ENABLED")
     mongodb_uri: Optional[str] = Field(default=None, alias="MONGODB_URI")

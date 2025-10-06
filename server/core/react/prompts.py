@@ -40,13 +40,9 @@ You MUST follow these rules for every response.
 
     THOUGHT_PROMPT = """**Original Query:** {original_query}
 
-**Previous Steps:**
-{history}
-
 **Task:**
-1.  Analyze the original query and the history of steps taken so far.
-2.  Formulate a concise plan for your next immediate action.
-3.  Provide ONLY your thought process. Do not include the action itself.
+1.  Analyze the original query and formulate a concise plan for your next immediate action.
+2.  Provide ONLY your thought process. Do not include the action itself.
 
 You have completed {thought_steps}/{max_thought_cycles} thought cycles. Use the remaining cycles effectively.
 
@@ -82,11 +78,8 @@ Based on your last thought, execute ONE tool action.
 
     FINAL_ANSWER_PROMPT = """**Original Query:** {original_query}
 
-**Summary of Work Done:**
-{history}
-
 **Task:**
-Provide the final, comprehensive answer to the original query based on the steps you have taken.
+Provide the final, comprehensive answer to the original query.
 
 **Final Answer:**"""
     
@@ -105,12 +98,10 @@ Provide the final, comprehensive answer to the original query based on the steps
     @classmethod
     def format_thought_prompt(cls, state: ReActState, max_thought_cycles: int) -> str:
         """Format prompt for thought step"""
-        history = cls._format_history(state.steps)
         thought_steps = len(state.get_steps_by_type(ReActStepType.THOUGHT))
-        
+
         return cls.THOUGHT_PROMPT.format(
             original_query=state.original_query,
-            history=history,
             thought_steps=thought_steps,
             max_thought_cycles=max_thought_cycles,
         )
@@ -145,10 +136,7 @@ Provide the final, comprehensive answer to the original query based on the steps
     @classmethod
     def format_final_answer_prompt(cls, state: ReActState) -> str:
         """Format prompt for final answer"""
-        history = cls._format_history(state.steps)
-        
         return cls.FINAL_ANSWER_PROMPT.format(
-            history=history,
             original_query=state.original_query
         )
     
@@ -188,11 +176,12 @@ Provide the final, comprehensive answer to the original query based on the steps
         return "\n".join(formatted)
     
     @classmethod
-    def get_step_prompt(cls, step_type: ReActStepType, state: ReActState, 
-                       tool_result: Any = None, available_tools: List[Dict[str, Any]] = None) -> str:
+    def get_step_prompt(cls, step_type: ReActStepType, state: ReActState,
+                       tool_result: Any = None, available_tools: List[Dict[str, Any]] = None,
+                       max_thought_cycles: int = 10) -> str:
         """Get prompt for specific step type"""
         if step_type == ReActStepType.THOUGHT:
-            return cls.format_thought_prompt(state)
+            return cls.format_thought_prompt(state, max_thought_cycles)
         elif step_type == ReActStepType.ACTION:
             return cls.format_action_prompt(state, available_tools)
         elif step_type == ReActStepType.OBSERVATION:

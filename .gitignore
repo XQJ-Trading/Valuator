@@ -68,8 +68,8 @@ logs/low_level_query/*.json
 *.temp
 
 # Frontend (Vue/Vite)
-frontend-vue/node_modules/
-frontend-vue/dist/
-frontend-vue/.vite/
+client/node_modules/
+client/dist/
+client/.vite/
 **/node_modules/
 *.ipynb

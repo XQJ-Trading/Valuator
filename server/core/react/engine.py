@@ -100,7 +100,9 @@ class ReActEngine:
                 next_step_type = self._determine_next_step(state)
                 logger.debug(f"Next step type: {next_step_type}")
                 
-                if next_step_type == ReActStepType.THOUGHT:
+                if next_step_type == ReActStepType.PLANNING:
+                    await self._planning_step(state)
+                elif next_step_type == ReActStepType.THOUGHT:
                     await self._thought_step(state)
                 elif next_step_type == ReActStepType.ACTION:
                     await self._action_step(state)
@@ -184,7 +186,11 @@ class ReActEngine:
 
                 next_step_type = self._determine_next_step(state)
 
-                if next_step_type == ReActStepType.THOUGHT:
+                if next_step_type == ReActStepType.PLANNING:
+                    await self._planning_step(state)
+                    last = state.get_last_step()
+                    yield {"type": "planning", "content": last.content}
+                elif next_step_type == ReActStepType.THOUGHT:
                     await self._thought_step(state)
                     last = state.get_last_step()
                     yield {"type": "thought", "content": last.content}
@@ -262,11 +268,13 @@ class ReActEngine:
     def _determine_next_step(self, state: ReActState) -> ReActStepType:
         """Determine what type of step should come next"""
         if not state.steps:
-            return ReActStepType.THOUGHT
-        
+            return ReActStepType.PLANNING
+
         last_step = state.get_last_step()
-        
-        if last_step.step_type == ReActStepType.THOUGHT:
+
+        if last_step.step_type == ReActStepType.PLANNING:
+            return ReActStepType.THOUGHT
+        elif last_step.step_type == ReActStepType.THOUGHT:
             return ReActStepType.ACTION
         elif last_step.step_type == ReActStepType.ACTION:
             return ReActStepType.OBSERVATION
@@ -456,48 +464,122 @@ class ReActEngine:
         """Calculate similarity between two texts (simple word overlap)"""
         if not text1 or not text2:
             return 0.0
-        
+
         words1 = set(text1.split())
         words2 = set(text2.split())
-        
+
         if not words1 or not words2:
             return 0.0
-        
+
         intersection = words1.intersection(words2)
         union = words1.union(words2)
-        
+
         return len(intersection) / len(union) if union else 0.0
+
+    def _extract_reinterpreted_query(self, planning_content: str) -> Optional[str]:
+        """Extract reinterpreted query from planning step content"""
+        if not planning_content:
+            return None
+
+        # Look for patterns that indicate a reinterpreted query
+        patterns = [
+            r"reinterpreted query:\s*(.+)",
+            r"enhanced version:\s*(.+)",
+            r"rephrased:\s*(.+)",
+            r"better version:\s*(.+)",
+            r"improved query:\s*(.+)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, planning_content, re.IGNORECASE | re.DOTALL)
+            if match:
+                reinterpreted = match.group(1).strip()
+                # Clean up the extracted text
+                reinterpreted = re.sub(r'["\']', '', reinterpreted)  # Remove quotes
+                reinterpreted = re.sub(r'\s+', ' ', reinterpreted)  # Normalize whitespace
+                return reinterpreted.strip()
+
+        # If no explicit pattern found, try to extract the last meaningful sentence
+        sentences = re.split(r'[.!?]+', planning_content)
+        for sentence in reversed(sentences):
+            sentence = sentence.strip()
+            if len(sentence) > 20 and not sentence.lower().startswith(('i ', 'the ', 'this ', 'it ')):
+                return sentence
+
+        return None
     
+    async def _planning_step(self, state: ReActState):
+        """Execute planning step"""
+        logger.debug("Executing planning step")
+
+        # Create planning prompt
+        planning_prompt = self.prompts.format_planning_prompt(state)
+
+        # Generate response
+        response = await self.api_session.send_message(planning_prompt)
+
+        # Parse and store planning result
+        parsed = self.prompts.parse_response(response.content)
+        planning_content = parsed.get("thought", response.content.strip())  # Use same parser as thought
+
+        # Extract reinterpreted query from planning content
+        reinterpreted_query = self._extract_reinterpreted_query(planning_content)
+
+        state.add_planning(planning_content)
+        if reinterpreted_query:
+            state.set_reinterpreted_query(reinterpreted_query)
+
+        # Log cache metrics if available
+        if response.cache_metrics:
+            self._log_cache_metrics("Planning", response.cache_metrics)
+
+        # Log step with API query
+        if self.enable_logging:
+            api_query = planning_prompt
+            react_logger.log_step(
+                "planning",
+                planning_content,
+                api_query=api_query,
+                api_response=response.content
+            )
+
+        logger.debug(f"Planning: {planning_content[:100]}...")
+        if reinterpreted_query:
+            logger.debug(f"Reinterpreted Query: {reinterpreted_query[:100]}...")
+
     async def _thought_step(self, state: ReActState):
         """Execute thought step"""
         logger.debug("Executing thought step")
-        
-        # Create thought prompt
+
+        # Use reinterpreted query if available, otherwise fall back to original
+        query_to_use = state.reinterpreted_query or state.original_query
+
+        # Create thought prompt with the appropriate query
         thought_prompt = self.prompts.format_thought_prompt(state, self.max_thought_cycles)
-        
+
         # Generate response
         response = await self.api_session.send_message(thought_prompt)
-        
+
         # Parse and store thought
         parsed = self.prompts.parse_response(response.content)
         thought_content = parsed.get("thought", response.content.strip())
-        
+
         state.add_thought(thought_content)
-        
+
         # Log cache metrics if available
         if response.cache_metrics:
             self._log_cache_metrics("Thought", response.cache_metrics)
-        
+
         # Log step with API query
         if self.enable_logging:
             api_query = thought_prompt
             react_logger.log_step(
-                "thought", 
+                "thought",
                 thought_content,
                 api_query=api_query,
                 api_response=response.content
             )
-        
+
         logger.debug(f"Thought: {thought_content[:100]}...")
     
     async def _action_step(self, state: ReActState):

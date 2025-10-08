@@ -9,8 +9,9 @@ from pydantic import BaseModel
 
 class ReActStepType(Enum):
     """Types of ReAct steps"""
+    PLANNING = "planning"
     THOUGHT = "thought"
-    ACTION = "action" 
+    ACTION = "action"
     OBSERVATION = "observation"
     FINAL_ANSWER = "final_answer"
 
@@ -31,8 +32,9 @@ class ReActStep:
 
 class ReActState(BaseModel):
     """State management for ReAct process"""
-    
+
     original_query: str
+    reinterpreted_query: Optional[str] = None
     steps: List[ReActStep] = []
     current_step: int = 0
     max_steps: int = 10
@@ -82,6 +84,19 @@ class ReActState(BaseModel):
             metadata=metadata or {}
         )
         self.add_step(step)
+
+    def add_planning(self, content: str, metadata: Optional[Dict[str, Any]] = None):
+        """Add a planning step"""
+        step = ReActStep(
+            step_type=ReActStepType.PLANNING,
+            content=content,
+            metadata=metadata or {}
+        )
+        self.add_step(step)
+
+    def set_reinterpreted_query(self, reinterpreted_query: str):
+        """Set the reinterpreted query from planning step"""
+        self.reinterpreted_query = reinterpreted_query
     
     def set_final_answer(self, answer: str):
         """Set the final answer and mark as completed"""
@@ -113,10 +128,17 @@ class ReActState(BaseModel):
     
     def format_history(self) -> str:
         """Format the step history for display"""
-        formatted = f"Query: {self.original_query}\n\n"
-        
+        formatted = f"Query: {self.original_query}\n"
+
+        if self.reinterpreted_query:
+            formatted += f"Reinterpreted: {self.reinterpreted_query}\n"
+
+        formatted += "\n"
+
         for i, step in enumerate(self.steps, 1):
-            if step.step_type == ReActStepType.THOUGHT:
+            if step.step_type == ReActStepType.PLANNING:
+                formatted += f"Planning {i}: {step.content}\n\n"
+            elif step.step_type == ReActStepType.THOUGHT:
                 formatted += f"Thought {i}: {step.content}\n\n"
             elif step.step_type == ReActStepType.ACTION:
                 formatted += f"Action {i}: {step.content}\n"
@@ -130,13 +152,14 @@ class ReActState(BaseModel):
                 formatted += "\n"
             elif step.step_type == ReActStepType.FINAL_ANSWER:
                 formatted += f"Final Answer: {step.content}\n"
-        
+
         return formatted
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary"""
         return {
             "original_query": self.original_query,
+            "reinterpreted_query": self.reinterpreted_query,
             "steps": [
                 {
                     "step_type": step.step_type.value,
@@ -163,6 +186,7 @@ class ReActState(BaseModel):
         """Create state from dictionary"""
         state = cls(
             original_query=data["original_query"],
+            reinterpreted_query=data.get("reinterpreted_query"),
             current_step=data.get("current_step", 0),
             max_steps=data.get("max_steps", 10),
             is_completed=data.get("is_completed", False),

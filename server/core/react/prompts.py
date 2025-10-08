@@ -12,10 +12,11 @@ class ReActPrompts:
 Today's Date: {current_date}. Use this for any date-related tasks.
 
 **ReAct Framework:**
-You will proceed in a loop of Thought -> Action -> Observation.
-1.  **Thought**: Analyze the problem, history, and previous observation to form a plan for the next action.
-2.  **Action**: Execute a single, specific action. This MUST be a tool call in the specified JSON format.
-3.  **Observation**: I will provide the result of your action. You will then start the next cycle with a new Thought.
+You will proceed in a structured process: Planning -> Thought -> Action -> Observation.
+1.  **Planning**: Analyze the original query and rephrase it for optimal ReAct processing
+2.  **Thought**: Analyze the problem, history, and previous observation to form a plan for the next action.
+3.  **Action**: Execute a single, specific action. This MUST be a tool call in the specified JSON format.
+4.  **Observation**: I will provide the result of your action. You will then start the next cycle with a new Thought.
 
 **Available Tools:**
 You have access to the following tools. Use them when necessary.
@@ -76,6 +77,22 @@ Based on your last thought, execute ONE tool action.
 
 **Observation:**"""
 
+    PLANNING_PROMPT = """**Original Query:** {original_query}
+
+**Task:**
+1. Analyze the original query and rephrase it according to established rules for optimal ReAct processing
+2. Create an enhanced version that will serve as the foundation for the first thought step
+3. Consider context, clarity, and actionable structure
+
+**Reinterpretation Rules:**
+- Clarify ambiguous requests
+- Add relevant context if needed
+- Structure for better ReAct processing
+- Maintain original intent
+- Make it more specific and actionable
+
+**Reinterpreted Query:**"""
+
     FINAL_ANSWER_PROMPT = """**Original Query:** {original_query}
 
 **Task:**
@@ -134,6 +151,13 @@ Provide the final, comprehensive answer to the original query.
         )
     
     @classmethod
+    def format_planning_prompt(cls, state: ReActState) -> str:
+        """Format prompt for planning step"""
+        return cls.PLANNING_PROMPT.format(
+            original_query=state.original_query
+        )
+
+    @classmethod
     def format_final_answer_prompt(cls, state: ReActState) -> str:
         """Format prompt for final answer"""
         return cls.FINAL_ANSWER_PROMPT.format(
@@ -157,10 +181,12 @@ Provide the final, comprehensive answer to the original query.
         """Format step history"""
         if not steps:
             return "No previous steps."
-        
+
         formatted = []
         for i, step in enumerate(steps, 1):
-            if step.step_type == ReActStepType.THOUGHT:
+            if step.step_type == ReActStepType.PLANNING:
+                formatted.append(f"Planning {i}: {step.content}")
+            elif step.step_type == ReActStepType.THOUGHT:
                 formatted.append(f"Thought {i}: {step.content}")
             elif step.step_type == ReActStepType.ACTION:
                 action_text = f"Action {i}: {step.content}"
@@ -172,7 +198,7 @@ Provide the final, comprehensive answer to the original query.
                 if step.error:
                     obs_text += f" (Error: {step.error})"
                 formatted.append(obs_text)
-        
+
         return "\n".join(formatted)
     
     @classmethod
@@ -180,7 +206,9 @@ Provide the final, comprehensive answer to the original query.
                        tool_result: Any = None, available_tools: List[Dict[str, Any]] = None,
                        max_thought_cycles: int = 10) -> str:
         """Get prompt for specific step type"""
-        if step_type == ReActStepType.THOUGHT:
+        if step_type == ReActStepType.PLANNING:
+            return cls.format_planning_prompt(state)
+        elif step_type == ReActStepType.THOUGHT:
             return cls.format_thought_prompt(state, max_thought_cycles)
         elif step_type == ReActStepType.ACTION:
             return cls.format_action_prompt(state, available_tools)
@@ -228,7 +256,7 @@ Provide the final, comprehensive answer to the original query.
         
         # Remove common prefixes if they exist
         prefixes_to_remove = [
-            "Thought:", "Action:", "Observation:", "Final Answer:",
+            "Planning:", "Thought:", "Action:", "Observation:", "Final Answer:",
             "Your response should start with your analysis of the situation:",
             "Your action:", "Your observation:", "Your final answer:"
         ]

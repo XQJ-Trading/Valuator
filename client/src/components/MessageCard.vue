@@ -7,6 +7,9 @@
       <button @click="copyMessage(message.content)" class="copy-btn" title="복사">📋</button>
     </div>
     <div class="message-content">
+      <div class="message-text" v-if="message.type === 'planning'">
+        <em>"{{ message.content }}"</em>
+      </div>
       <div class="message-text" v-if="message.type === 'thought'">
         <em>"{{ message.content }}"</em>
       </div>
@@ -119,6 +122,10 @@ function formatJson(data: any): string {
   box-shadow: var(--shadow-lg);
 }
 
+.message-planning:hover {
+  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.3);
+}
+
 .message-thought:hover {
   box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
 }
@@ -210,6 +217,37 @@ function formatJson(data: any): string {
 .message-card .message-content {
   padding: 1.25rem;
   border-top: 1px solid var(--border-color);
+}
+
+/* 사고과정 메시지 */
+.message-thought {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+  border-color: var(--primary-color);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.message-thought .message-header {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--primary-color);
+}
+
+/* 계획 메시지 */
+.message-planning {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+  border-color: #8b5cf6;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+}
+
+.message-planning .message-header {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+
+.message-planning .message-text {
+  color: #8b5cf6;
+  font-style: italic;
+  font-size: 1.05rem;
+  line-height: 1.6;
 }
 
 /* 사고과정 메시지 */

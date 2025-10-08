@@ -2,6 +2,7 @@ import asyncio
 import json
 from typing import AsyncGenerator, Optional, List, Dict, Any
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -14,8 +15,6 @@ from .core.utils.config import config
 from .core.utils.logger import logger
 from .adapters import HistoryAdapter
 
-
-app = FastAPI(title="AI Agent Server", version="1.5.0")
 
 # Initialize history repository for server (separate from ReactLogger)
 def create_history_repository():
@@ -38,6 +37,20 @@ def create_history_repository():
 
 # Global repository instance
 history_repository = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global history_repository
+    history_repository = create_history_repository()
+    print(f"History repository initialized: {type(history_repository).__name__}")
+    
+    yield
+    
+    # Shutdown (if needed)
+    # Add any cleanup code here
+
+app = FastAPI(title="AI Agent Server", version="1.5.0", lifespan=lifespan)
 
 # CORS for local frontend dev (adjust origins as needed)
 app.add_middleware(
@@ -62,13 +75,6 @@ class ChatRequest(BaseModel):
                 f"Supported models are: {', '.join(config.supported_models)}"
             )
         return v
-
-
-@app.on_event("startup")
-async def startup_event():
-    global history_repository
-    history_repository = create_history_repository()
-    print(f"History repository initialized: {type(history_repository).__name__}")
 
 
 async def save_chat_session(

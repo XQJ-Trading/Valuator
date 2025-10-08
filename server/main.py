@@ -325,29 +325,21 @@ async def get_supported_models():
     }
 
 
-@app.get("/api/v1/chat/stream")
-async def chat_stream_get(query: str, model: Optional[str] = None):
+@app.post("/api/v1/chat/stream")
+async def chat_stream_post(request: ChatRequest):
     """
-    GET endpoint for chat stream (for compatibility) - also saves to history
+    POST endpoint for chat stream - also saves to history
     
     Args:
-        query: User query
-        model: Optional model name (must be one of supported models)
+        request: Chat request containing query and optional model
     """
-    # Validate model if provided
-    if model is not None and model not in config.supported_models:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported model: {model}. Supported models are: {', '.join(config.supported_models)}"
-        )
-    
     async def sse() -> AsyncGenerator[str, None]:
         events = []  # Collect events for saving
         try:
             yield "event: start\n" + "data: {}\n\n"
 
-            agent = AIAgent(model_name=model)
-            async for event in agent.solve_stream(query):
+            agent = AIAgent(model_name=request.model)
+            async for event in agent.solve_stream(request.query):
                 events.append(event)  # Store for saving
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -355,13 +347,13 @@ async def chat_stream_get(query: str, model: Optional[str] = None):
             
             # Save session after streaming completes
             try:
-                await save_chat_session(query, events, model)
+                await save_chat_session(request.query, events, request.model)
             except Exception as save_error:
                 logger.error(f"Failed to save stream session: {save_error}")
                 
         except Exception as e:
             err = {"type": "error", "message": str(e)}
-            error_event = {"type": "error", "content": str(e), "metadata": {"model": model or config.agent_model}}
+            error_event = {"type": "error", "content": str(e), "metadata": {"model": request.model or config.agent_model}}
             events.append(error_event)
             
             yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
@@ -369,7 +361,7 @@ async def chat_stream_get(query: str, model: Optional[str] = None):
             
             # Save error session
             try:
-                await save_chat_session(query, events, model, success=False)
+                await save_chat_session(request.query, events, request.model, success=False)
             except Exception:
                 pass
 

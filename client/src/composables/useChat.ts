@@ -97,76 +97,96 @@ export function useChat() {
     
     try {
       const queryWithRule = buildQueryWithRule()
-      const url = new URL(`${API_BASE}/api/v1/chat/stream`)
-      url.searchParams.set('query', queryWithRule)
-      if (selectedModel.value) {
-        url.searchParams.set('model', selectedModel.value)
+      const requestBody = {
+        query: queryWithRule,
+        ...(selectedModel.value && { model: selectedModel.value })
       }
 
-      const es = new EventSource(url.toString())
-      let closed = false
-
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          
-          if (data.type === 'token') {
-            if (currentTokenMessage) {
-              currentTokenMessage.content += data.content
-            } else {
-              currentTokenMessage = {
-                type: 'token',
-                content: data.content,
-                timestamp: new Date()
-              }
-              messages.value.push(currentTokenMessage)
-            }
-          } else if (data.type === 'start') {
-            currentTokenMessage = null
-            addMessage('start', data.query || '시작', {
-              query: data.query
-            })
-          } else if (data.type === 'end') {
-            currentTokenMessage = null
-            addMessage('end', '완료', {})
-          } else {
-            currentTokenMessage = null
-            addMessage(data.type, data.content || '', {
-              tool: data.tool,
-              tool_input: data.tool_input,
-              tool_output: data.tool_output,
-              error: data.error,
-              message: data.message,
-              tool_result: data.tool_result
-            })
-          }
-          
-          // 상태 업데이트
-          if (data.type === 'thought') {
-            status.value = '🧠 사고중...'
-          } else if (data.type === 'action') {
-            status.value = `⚡ ${data.tool || '도구'} 실행중...`
-          } else if (data.type === 'observation') {
-            status.value = '👁️ 결과 분석중...'
-          }
-        } catch (err) {
-          console.warn('메시지 파싱 오류:', err)
-        }
-      }
-
-      es.addEventListener('end', () => {
-        status.value = '완료'
-        query.value = ''
-        rule.value = ''
-        if (!closed) { es.close(); closed = true }
-        loading.value = false
+      const response = await fetch(`${API_BASE}/api/v1/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
       })
 
-      es.onerror = () => {
-        status.value = '스트림 오류'
-        addMessage('error', '스트리밍 연결에 문제가 발생했습니다.')
-        if (!closed) { es.close(); closed = true }
-        loading.value = false
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('스트림을 읽을 수 없습니다.')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6)
+            if (dataStr.trim() === '') continue
+
+            try {
+              const data = JSON.parse(dataStr)
+              
+              if (data.type === 'token') {
+                if (currentTokenMessage) {
+                  currentTokenMessage.content += data.content
+                } else {
+                  currentTokenMessage = {
+                    type: 'token',
+                    content: data.content,
+                    timestamp: new Date()
+                  }
+                  messages.value.push(currentTokenMessage)
+                }
+              } else if (data.type === 'start') {
+                currentTokenMessage = null
+                addMessage('start', data.query || '시작', {
+                  query: data.query
+                })
+              } else if (data.type === 'end') {
+                currentTokenMessage = null
+                addMessage('end', '완료', {})
+              } else {
+                currentTokenMessage = null
+                addMessage(data.type, data.content || '', {
+                  tool: data.tool,
+                  tool_input: data.tool_input,
+                  tool_output: data.tool_output,
+                  error: data.error,
+                  message: data.message,
+                  tool_result: data.tool_result
+                })
+              }
+              
+              // 상태 업데이트
+              if (data.type === 'thought') {
+                status.value = '🧠 사고중...'
+              } else if (data.type === 'action') {
+                status.value = `⚡ ${data.tool || '도구'} 실행중...`
+              } else if (data.type === 'observation') {
+                status.value = '👁️ 결과 분석중...'
+              }
+            } catch (err) {
+              console.warn('메시지 파싱 오류:', err, 'Data:', dataStr)
+            }
+          } else if (line.startsWith('event: end')) {
+            status.value = '완료'
+            query.value = ''
+            rule.value = ''
+            loading.value = false
+            break
+          }
+        }
       }
     } catch (e: any) {
       status.value = '오류 발생'

@@ -44,7 +44,7 @@ export function useChat() {
     if (!rule.value.trim()) {
       return query.value
     }
-    return `${query.value}<rule>${rule.value}</rule>`
+    return `${query.value}\n<rule>\n${rule.value}\n</rule>`
   }
 
   function addMessage(type: Message['type'], content: string, metadata?: any) {

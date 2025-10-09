@@ -355,6 +355,7 @@ function formatJson(data: any): string {
   color: #0ea5e9;
   font-size: 1rem;
   line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 /* 종료 메시지 */

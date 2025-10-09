@@ -268,9 +268,6 @@ async def replay_session_as_stream(session_id: str):
             # Stream events
             for event in events:
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                
-                # Add small delay for better UX (optional)
-                await asyncio.sleep(0.1)
             
         except Exception as e:
             error_event = {"type": "error", "message": str(e)}

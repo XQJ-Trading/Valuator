@@ -484,10 +484,6 @@ class ReActEngine:
         
         state.add_thought(thought_content)
         
-        # Log cache metrics if available
-        if response.cache_metrics:
-            self._log_cache_metrics("Thought", response.cache_metrics)
-        
         # Log step with API query
         if self.enable_logging:
             api_query = thought_prompt
@@ -531,10 +527,6 @@ class ReActEngine:
             tool_name=tool_name,
             tool_input=tool_input or {}
         )
-        
-        # Log cache metrics if available
-        if response.cache_metrics:
-            self._log_cache_metrics("Action", response.cache_metrics)
         
         # Log step with API query
         if self.enable_logging:
@@ -606,10 +598,6 @@ class ReActEngine:
             tool_result=tool_result
         )
         
-        # Log cache metrics if available
-        if response.cache_metrics:
-            self._log_cache_metrics("Observation", response.cache_metrics)
-        
         # Log step with API query
         if self.enable_logging:
             api_query = observation_prompt
@@ -639,10 +627,6 @@ class ReActEngine:
         final_answer = parsed.get("final_answer", response.content.strip())
         
         state.set_final_answer(final_answer)
-        
-        # Log cache metrics if available
-        if response.cache_metrics:
-            self._log_cache_metrics("Final Answer", response.cache_metrics)
         
         # Log step with API query
         if self.enable_logging:
@@ -918,21 +902,6 @@ The analysis reached the maximum number of steps, but I can provide this summary
             return "\n".join(formatted)
         except Exception as e:
             return f"Error formatting messages: {str(e)}"
-    
-    def _log_cache_metrics(self, step_type: str, cache_metrics: Dict[str, Any]):
-        """Log cache metrics for each ReAct step"""
-        if not cache_metrics:
-            return
-        
-        cached_tokens = cache_metrics.get('cached_content_token_count', 0)
-        total_tokens = cache_metrics.get('prompt_token_count', 0)
-        efficiency = cache_metrics.get('cache_efficiency_percentage', 0)
-        
-        if cached_tokens > 0:
-            logger.info(f"🔄 [{step_type}] Cache Hit - "
-                       f"Cached: {cached_tokens} tokens, "
-                       f"Total: {total_tokens} tokens, "
-                       f"Efficiency: {efficiency}%")
     
     def get_engine_stats(self) -> Dict[str, Any]:
         """Get engine statistics"""

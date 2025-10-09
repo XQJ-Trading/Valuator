@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -12,6 +13,116 @@ from pydantic import BaseModel, Field
 
 from ..utils.config import config
 from ..utils.logger import logger
+
+
+class GlobalGeminiRateLimiter:
+    """전역 Gemini API Rate Limiter - API key 단위로 TPM 제한을 관리"""
+    _instance = None
+    _lock = asyncio.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if hasattr(self, '_initialized'):
+            return
+        self._initialized = True
+        
+        # 모델별 TPM 제한 (Token per Minute)
+        self.model_limits = {
+            "gemini-2.5-pro": 2_000_000,
+            "gemini-2.5-flash": 1_000_000,
+            # 기본값 (모델명 매칭이 안될 경우)
+            "default": 1_000_000
+        }
+        
+        # 모델별 토큰 사용 이력: [(timestamp, tokens), ...]
+        self.usage_history = {
+            "gemini-2.5-pro": [],
+            "gemini-2.5-flash": []
+        }
+    
+    def _get_model_key(self, model_name: str) -> str:
+        """모델명을 정규화하여 키로 사용"""
+        model_name = model_name.lower()
+        if "2.5-pro" in model_name or "2.5pro" in model_name:
+            return "gemini-2.5-pro"
+        elif "2.5-flash" in model_name or "2.5flash" in model_name:
+            return "gemini-2.5-flash"
+        else:
+            return "gemini-2.5-flash"  # 기본값으로 Flash 사용
+    
+    def _cleanup_old_records(self, model_key: str, current_time: float):
+        """1분 이상 된 기록들을 정리"""
+        minute_ago = current_time - 60.0
+        if model_key not in self.usage_history:
+            self.usage_history[model_key] = []
+        
+        self.usage_history[model_key] = [
+            (timestamp, tokens) 
+            for timestamp, tokens in self.usage_history[model_key]
+            if timestamp > minute_ago
+        ]
+    
+    def _get_current_usage(self, model_key: str, current_time: float) -> int:
+        """현재 1분간의 토큰 사용량 계산"""
+        self._cleanup_old_records(model_key, current_time)
+        return sum(tokens for _, tokens in self.usage_history[model_key])
+    
+    async def wait_if_needed(self, model_name: str):
+        """현재 사용량이 70% 초과시 대기"""
+        async with self._lock:
+            model_key = self._get_model_key(model_name)
+            current_time = time.time()
+            limit = self.model_limits.get(model_key, self.model_limits["default"])
+            
+            current_usage = self._get_current_usage(model_key, current_time)
+            threshold = int(limit * 0.7)  # 70% 임계값
+            
+            if current_usage > threshold:
+                # 가장 오래된 기록의 시간을 찾아서 대기 시간 계산
+                if self.usage_history[model_key]:
+                    oldest_timestamp = min(timestamp for timestamp, _ in self.usage_history[model_key])
+                    wait_time = max(0, 60.0 - (current_time - oldest_timestamp))
+                    
+                    if wait_time > 0:
+                        usage_percentage = (current_usage / limit) * 100
+                        logger.info(f"🕐 70% 임계값 초과 대기중 - 모델: {model_name}, "
+                                  f"현재 사용량: {current_usage:,}/{limit:,} ({usage_percentage:.1f}%), "
+                                  f"임계값: {threshold:,}, 대기 시간: {wait_time:.1f}초")
+                        await asyncio.sleep(wait_time)
+    
+    def record_usage(self, model_name: str, tokens_used: int):
+        """API 호출 후 실제 토큰 사용량을 기록"""
+        if tokens_used <= 0:
+            return
+            
+        model_key = self._get_model_key(model_name)
+        current_time = time.time()
+        
+        if model_key not in self.usage_history:
+            self.usage_history[model_key] = []
+            
+        self.usage_history[model_key].append((current_time, tokens_used))
+        
+        # 기록 정리
+        self._cleanup_old_records(model_key, current_time)
+        
+        # 현재 사용량 로깅
+        current_usage = sum(tokens for _, tokens in self.usage_history[model_key])
+        limit = self.model_limits.get(model_key, self.model_limits["default"])
+        usage_percentage = (current_usage / limit) * 100
+        
+        logger.debug(f"📊 토큰 사용량 기록 - 모델: {model_name}, "
+                    f"사용: {tokens_used:,}, 1분간 총 사용량: {current_usage:,}/{limit:,} "
+                    f"({usage_percentage:.1f}%)")
+
+
+def get_rate_limiter() -> GlobalGeminiRateLimiter:
+    """전역 rate limiter 인스턴스를 반환"""
+    return GlobalGeminiRateLimiter()
 
 
 def _normalize_content(value: Any) -> str:
@@ -58,7 +169,6 @@ class GeminiResponse(BaseModel):
     content: str = Field(..., description="Response content")
     usage: Optional[Dict[str, Any]] = Field(None, description="Token usage information")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
-    cache_metrics: Optional[Dict[str, Any]] = Field(None, description="Context caching metrics")
 
 
 class GeminiChatSession:
@@ -74,6 +184,10 @@ class GeminiChatSession:
     ) -> GeminiResponse:
         """Send a message in the session and get a response"""
         self.history.append(HumanMessage(content=message))
+        
+        # Rate limiting - 70% 임계값 체크 및 대기
+        rate_limiter = get_rate_limiter()
+        await rate_limiter.wait_if_needed(self.model.model)
         
         response = await self.model.agenerate(
             messages=[self.history],
@@ -97,8 +211,11 @@ class GeminiChatSession:
             if isinstance(gen_info, dict):
                 usage = gen_info.get('usage_metadata')
 
-        # Extract cache metrics from usage metadata
-        cache_metrics = self._extract_cache_metrics(usage)
+        # Rate limiting - 실제 사용된 토큰 수를 기록
+        if usage:
+            total_tokens = self._extract_total_tokens(usage)
+            if total_tokens > 0:
+                rate_limiter.record_usage(self.model.model, total_tokens)
 
         # save log of gemini_low_level_request as file IO
         if config.gemini_low_level_request_logging:
@@ -129,7 +246,6 @@ class GeminiChatSession:
                 response_data = {
                     "content": content,
                     "usage": usage,
-                    "cache_metrics": cache_metrics,
                     "message_count": len(self.history)
                 }
 
@@ -158,48 +274,38 @@ class GeminiChatSession:
             content=content,
             usage=usage,
             metadata={"model": self.model.model},
-            cache_metrics=cache_metrics
         )
+
+    def _estimate_tokens(self, messages: List[BaseMessage]) -> int:
+        """토큰 사용량을 대략적으로 추정 (입력 토큰만)"""
+        total_chars = 0
+        for msg in messages:
+            if hasattr(msg, 'content') and msg.content:
+                total_chars += len(str(msg.content))
+        
+        # 대략적인 추정: 영어 기준 4자 = 1토큰, 한글 기준 2자 = 1토큰
+        # 보수적으로 3자 = 1토큰으로 계산하고 여유분 추가
+        estimated_tokens = int(total_chars / 3 * 1.2)  # 20% 여유분
+        return max(estimated_tokens, 100)  # 최소 100토큰
     
-    def _extract_cache_metrics(self, usage_metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Extract context caching metrics from usage metadata"""
+    def _extract_total_tokens(self, usage_metadata: Dict[str, Any]) -> int:
+        """usage metadata에서 총 토큰 사용량 추출"""
         if not usage_metadata:
-            return None
+            return 0
         
-        # Extract cache-related fields from usage metadata
-        cache_metrics = {}
+        # Google API 형식
+        if 'total_token_count' in usage_metadata:
+            return usage_metadata['total_token_count']
         
-        # Common cache fields in Gemini API usage metadata
-        cache_fields = [
-            'cached_content_token_count',  # Number of cached tokens used
-            'candidates_token_count',      # Output tokens
-            'prompt_token_count',          # Total input tokens
-            'total_token_count'            # Total tokens
-        ]
+        # LangChain 형식
+        if 'total_tokens' in usage_metadata:
+            return usage_metadata['total_tokens']
         
-        for field in cache_fields:
-            if field in usage_metadata:
-                cache_metrics[field] = usage_metadata[field]
+        # 분리된 형식에서 합산
+        input_tokens = usage_metadata.get('input_tokens', 0) or usage_metadata.get('prompt_token_count', 0)
+        output_tokens = usage_metadata.get('output_tokens', 0) or usage_metadata.get('candidates_token_count', 0)
         
-        # Calculate cache efficiency if we have the data
-        if 'cached_content_token_count' in cache_metrics and 'prompt_token_count' in cache_metrics:
-            cached_tokens = cache_metrics['cached_content_token_count']
-            total_input_tokens = cache_metrics['prompt_token_count']
-            
-            if total_input_tokens > 0:
-                cache_hit_ratio = cached_tokens / total_input_tokens
-                cache_metrics['cache_hit_ratio'] = cache_hit_ratio
-                cache_metrics['cache_efficiency_percentage'] = round(cache_hit_ratio * 100, 2)
-                
-                # Log cache metrics
-                if cached_tokens > 0:
-                    logger.info(f"🔄 Context Cache Hit - Cached: {cached_tokens} tokens, "
-                              f"Total Input: {total_input_tokens} tokens, "
-                              f"Cache Efficiency: {cache_metrics['cache_efficiency_percentage']}%")
-                else:
-                    logger.debug(f"📤 No Cache Hit - Total Input: {total_input_tokens} tokens")
-        
-        return cache_metrics if cache_metrics else None
+        return input_tokens + output_tokens
 
     async def stream_message(
         self,
@@ -223,7 +329,6 @@ class GeminiChatSession:
             yield response.content
         
         self.history.append(AIMessage(content=streamed_content))
-
 
 class GeminiModel:
     """Gemini model wrapper for AI Agent"""
@@ -250,7 +355,6 @@ class GeminiModel:
                 top_p=config.top_p,
                 top_k=config.top_k,
                 streaming=True,
-                convert_system_message_to_human=True,
             )
             logger.info(f"Initialized Gemini model: {self.model_name}")
         except Exception as e:
@@ -274,7 +378,7 @@ class GeminiModel:
         """
         try:
             logger.debug(f"Generating response with {len(messages)} messages")
-            
+
             # Remove callbacks parameter as it's not supported
             response = await self.llm.agenerate(
                 messages=[messages]
@@ -295,17 +399,13 @@ class GeminiModel:
                 gen_info = getattr(generation, 'generation_info', None) or {}
                 if isinstance(gen_info, dict):
                     usage = gen_info.get('usage_metadata')
-            
-            # Extract cache metrics from usage metadata
-            cache_metrics = self._extract_cache_metrics(usage)
-            
+
             logger.debug(f"Generated response: {len(content)} characters")
             
             return GeminiResponse(
                 content=content,
                 usage=usage,
                 metadata={"model": self.model_name},
-                cache_metrics=cache_metrics
             )
             
         except Exception as e:
@@ -403,6 +503,18 @@ class GeminiModel:
 
         return messages
     
+    def _estimate_tokens(self, messages: List[BaseMessage]) -> int:
+        """토큰 사용량을 대략적으로 추정 (입력 토큰만)"""
+        total_chars = 0
+        for msg in messages:
+            if hasattr(msg, 'content') and msg.content:
+                total_chars += len(str(msg.content))
+        
+        # 대략적인 추정: 영어 기준 4자 = 1토큰, 한글 기준 2자 = 1토큰
+        # 보수적으로 3자 = 1토큰으로 계산하고 여유분 추가
+        estimated_tokens = int(total_chars / 3 * 1.2)  # 20% 여유분
+        return max(estimated_tokens, 100)  # 최소 100토큰
+    
     def get_model_info(self) -> Dict[str, Any]:
         """Get model information"""
         return {
@@ -412,51 +524,6 @@ class GeminiModel:
             "top_p": config.top_p,
             "top_k": config.top_k
         }
-
-    def _extract_cache_metrics(self, usage_metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Extract context caching metrics from usage metadata"""
-        if not usage_metadata:
-            return None
-        
-        # Extract cache-related fields from usage metadata
-        cache_metrics: Dict[str, Any] = {}
-        
-        # Support both Google raw fields and LangChain UsageMetadata fields
-        # Raw Google fields
-        if 'prompt_token_count' in usage_metadata:
-            cache_metrics['prompt_token_count'] = usage_metadata.get('prompt_token_count', 0)
-            cache_metrics['candidates_token_count'] = usage_metadata.get('candidates_token_count', 0)
-            cache_metrics['total_token_count'] = usage_metadata.get('total_token_count', 0)
-            cache_metrics['cached_content_token_count'] = usage_metadata.get('cached_content_token_count', 0)
-        else:
-            # LangChain UsageMetadata shape: input_tokens/output_tokens/total_tokens
-            input_tokens = usage_metadata.get('input_tokens', 0)
-            output_tokens = usage_metadata.get('output_tokens', 0)
-            total_tokens = usage_metadata.get('total_tokens', input_tokens + output_tokens)
-            cache_metrics['prompt_token_count'] = input_tokens
-            cache_metrics['candidates_token_count'] = output_tokens
-            cache_metrics['total_token_count'] = total_tokens
-            # LangChain does not expose cached tokens; set 0
-            cache_metrics['cached_content_token_count'] = usage_metadata.get('cached_content_token_count', 0) or 0
-        
-        # Calculate cache efficiency if we have the data
-        cached_tokens = cache_metrics.get('cached_content_token_count', 0)
-        total_input_tokens = cache_metrics.get('prompt_token_count', 0)
-        if total_input_tokens > 0:
-            cache_hit_ratio = (cached_tokens / total_input_tokens) if cached_tokens > 0 else 0.0
-            cache_metrics['cache_hit_ratio'] = cache_hit_ratio
-            cache_metrics['cache_efficiency_percentage'] = round(cache_hit_ratio * 100, 2)
-            # Log cache metrics
-            if cached_tokens > 0:
-                logger.info(
-                    f"🔄 Context Cache Hit - Cached: {cached_tokens} tokens, "
-                    f"Total Input: {total_input_tokens} tokens, "
-                    f"Cache Efficiency: {cache_metrics['cache_efficiency_percentage']}%"
-                )
-            else:
-                logger.debug(f"📤 No Cache Hit - Total Input: {total_input_tokens} tokens")
-        
-        return cache_metrics if cache_metrics else None
 
     def start_chat_session(self, initial_messages: List[BaseMessage]) -> GeminiChatSession:
         """Starts a new chat session"""

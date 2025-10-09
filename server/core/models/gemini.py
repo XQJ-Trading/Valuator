@@ -100,31 +100,57 @@ class GeminiChatSession:
         # Extract cache metrics from usage metadata
         cache_metrics = self._extract_cache_metrics(usage)
 
-        # 파일로 응답 저장 (환경 설정에 따라)
+        # save log of gemini_low_level_request as file IO
         if config.gemini_low_level_request_logging:
             try:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"response_{timestamp}.json"
+                filename = f"request_response_{timestamp}.json"
                 filepath = os.path.join("logs", "gemini_low_level_request", filename)
+
+                # 요청 데이터 구성
+                request_data = {
+                    "timestamp": timestamp,
+                    "model": self.model.model,
+                    "messages": [
+                        {
+                            "type": msg.__class__.__name__,
+                            "content": msg.content
+                        } for msg in self.history
+                    ],
+                    "model_config": {
+                        "temperature": getattr(self.model, 'temperature', None),
+                        "max_output_tokens": getattr(self.model, 'max_output_tokens', None),
+                        "top_p": getattr(self.model, 'top_p', None),
+                        "top_k": getattr(self.model, 'top_k', None)
+                    }
+                }
 
                 # 응답 데이터 구성
                 response_data = {
-                    "timestamp": timestamp,
-                    "model": self.model.model,
                     "content": content,
                     "usage": usage,
                     "cache_metrics": cache_metrics,
                     "message_count": len(self.history)
                 }
 
+                # 요청과 응답을 모두 포함한 전체 데이터
+                full_data = {
+                    "request": request_data,
+                    "response": response_data,
+                    "metadata": {
+                        "session_id": id(self),  # 세션 식별용
+                        "total_messages": len(self.history)
+                    }
+                }
+
                 # 파일 저장
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
                 with open(filepath, 'w', encoding='utf-8') as f:
-                    json.dump(response_data, f, ensure_ascii=False, indent=2)
+                    json.dump(full_data, f, ensure_ascii=False, indent=2)
 
-                logger.debug(f"응답을 파일로 저장했습니다: {filepath}")
+                logger.debug(f"요청과 응답을 파일로 저장했습니다: {filepath}")
             except Exception as e:
-                logger.warning(f"응답 파일 저장 실패: {e}")
+                logger.warning(f"요청/응답 파일 저장 실패: {e}")
         
         self.history.append(AIMessage(content=content))
         
@@ -326,10 +352,6 @@ class GeminiModel:
                 logger.error(f"Fallback also failed: {ee}")
                 raise
     
-    def create_system_message(self, content: str) -> SystemMessage:
-        """Create a system message"""
-        return SystemMessage(content=content)
-    
     def create_human_message(self, content: str) -> HumanMessage:
         """Create a human message"""
         return HumanMessage(content=content)
@@ -339,38 +361,46 @@ class GeminiModel:
         return AIMessage(content=content)
     
     def format_messages(
-        self, 
-        system_prompt: str, 
+        self,
+        system_prompt: str,
         conversation_history: List[Dict[str, str]],
         current_input: str
     ) -> List[BaseMessage]:
         """
         Format messages for Gemini model
-        
+
         Args:
             system_prompt: System prompt for the conversation
             conversation_history: Previous conversation history
             current_input: Current user input
-            
+
         Returns:
             Formatted list of messages
         """
         messages = []
-        
-        # Add system message
-        if system_prompt:
-            messages.append(self.create_system_message(system_prompt))
-        
-        # Add conversation history
+
+        # Add system prompt as HumanMessage (Gemini doesn't support SystemMessage)
+        if system_prompt and system_prompt.strip():
+            messages.append(self.create_human_message(system_prompt))
+
+        # Add conversation history - filter out empty content
         for turn in conversation_history:
-            if turn.get("role") == "user":
-                messages.append(self.create_human_message(turn["content"]))
-            elif turn.get("role") == "assistant":
-                messages.append(self.create_ai_message(turn["content"]))
-        
-        # Add current input
-        messages.append(self.create_human_message(current_input))
-        
+            role = turn.get("role")
+            content = turn.get("content", "")
+
+            # Skip empty or whitespace-only content
+            if not content or not content.strip():
+                continue
+
+            if role == "user":
+                messages.append(self.create_human_message(content))
+            elif role == "assistant":
+                messages.append(self.create_ai_message(content))
+
+        # Add current input - only if it has content
+        if current_input and current_input.strip():
+            messages.append(self.create_human_message(current_input))
+
         return messages
     
     def get_model_info(self) -> Dict[str, Any]:

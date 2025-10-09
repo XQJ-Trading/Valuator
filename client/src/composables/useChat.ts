@@ -130,9 +130,12 @@ export function useChat() {
         buffer = lines.pop() || ''
 
         for (const line of lines) {
+          console.log(line)
+
           if (line.startsWith('data: ')) {
             const dataStr = line.slice(6)
             if (dataStr.trim() === '') continue
+            if (dataStr.trim() === '{}') continue
 
             try {
               const data = JSON.parse(dataStr)

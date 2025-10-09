@@ -60,7 +60,7 @@ Thumbs.db
 # Logs
 logs/react_sessions/*.json
 logs/server_history/*.json
-logs/low_level_query/*.json
+logs/gemini_low_level_request/*.json
 *.log
 
 # Temporary files

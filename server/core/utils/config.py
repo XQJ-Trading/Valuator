@@ -54,7 +54,7 @@ class Config(BaseSettings):
     log_file: Optional[str] = Field(default=None, alias="LOG_FILE")
     
     # Response Logging Configuration
-    enable_response_logging: bool = Field(default=False, alias="ENABLE_RESPONSE_LOGGING")
+    gemini_low_level_request_logging: bool = Field(default=False, alias="GEMINI_LOW_LEVEL_REQUEST_LOGGING")
     
     # MongoDB Configuration
     mongodb_enabled: bool = Field(default=False, alias="MONGODB_ENABLED")

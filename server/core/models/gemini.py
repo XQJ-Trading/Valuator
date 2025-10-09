@@ -101,11 +101,11 @@ class GeminiChatSession:
         cache_metrics = self._extract_cache_metrics(usage)
 
         # 파일로 응답 저장 (환경 설정에 따라)
-        if config.enable_response_logging:
+        if config.gemini_low_level_request_logging:
             try:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"response_{timestamp}.json"
-                filepath = os.path.join("logs", "low_level_query", filename)
+                filepath = os.path.join("logs", "gemini_low_level_request", filename)
 
                 # 응답 데이터 구성
                 response_data = {

@@ -888,26 +888,3 @@ The analysis reached the maximum number of steps, but I can provide this summary
         except Exception as e:
             logger.error(f"Fallback parsing also failed: {e}")
             return None, None
-    
-    def _format_messages_for_log(self, messages) -> str:
-        """Format messages for logging"""
-        try:
-            formatted = []
-            for msg in messages:
-                if hasattr(msg, 'content'):
-                    role = msg.__class__.__name__.replace('Message', '').lower()
-                    formatted.append(f"[{role}] {msg.content}")
-                else:
-                    formatted.append(str(msg))
-            return "\n".join(formatted)
-        except Exception as e:
-            return f"Error formatting messages: {str(e)}"
-    
-    def get_engine_stats(self) -> Dict[str, Any]:
-        """Get engine statistics"""
-        return {
-            "max_steps": self.max_steps,
-            "max_retries": self.max_retries,
-            "available_tools": len(self.tool_registry.tools),
-            "tool_names": list(self.tool_registry.tools.keys())
-        }

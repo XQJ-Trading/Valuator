@@ -275,18 +275,6 @@ class GeminiChatSession:
             usage=usage,
             metadata={"model": self.model.model},
         )
-
-    def _estimate_tokens(self, messages: List[BaseMessage]) -> int:
-        """토큰 사용량을 대략적으로 추정 (입력 토큰만)"""
-        total_chars = 0
-        for msg in messages:
-            if hasattr(msg, 'content') and msg.content:
-                total_chars += len(str(msg.content))
-        
-        # 대략적인 추정: 영어 기준 4자 = 1토큰, 한글 기준 2자 = 1토큰
-        # 보수적으로 3자 = 1토큰으로 계산하고 여유분 추가
-        estimated_tokens = int(total_chars / 3 * 1.2)  # 20% 여유분
-        return max(estimated_tokens, 100)  # 최소 100토큰
     
     def _extract_total_tokens(self, usage_metadata: Dict[str, Any]) -> int:
         """usage metadata에서 총 토큰 사용량 추출"""
@@ -360,98 +348,7 @@ class GeminiModel:
         except Exception as e:
             logger.error(f"Failed to initialize Gemini model: {e}")
             raise
-    
-    async def generate_response(
-        self, 
-        messages: List[BaseMessage],
-        callbacks: Optional[List[AsyncCallbackHandler]] = None
-    ) -> GeminiResponse:
-        """
-        Generate response from Gemini model
-        
-        Args:
-            messages: List of messages for conversation
-            callbacks: Optional callbacks for streaming
-            
-        Returns:
-            GeminiResponse object
-        """
-        try:
-            logger.debug(f"Generating response with {len(messages)} messages")
-
-            # Remove callbacks parameter as it's not supported
-            response = await self.llm.agenerate(
-                messages=[messages]
-            )
-            
-            # Extract response content & usage similar to session path
-            generation = response.generations[0][0]
-            message_obj = getattr(generation, 'message', None)
-            if message_obj and getattr(message_obj, 'content', None) is not None:
-                content = _normalize_content(message_obj.content)
-            else:
-                content = _normalize_content(getattr(generation, 'text', ""))
-            
-            usage = None
-            if message_obj is not None:
-                usage = getattr(message_obj, 'usage_metadata', None)
-            if usage is None:
-                gen_info = getattr(generation, 'generation_info', None) or {}
-                if isinstance(gen_info, dict):
-                    usage = gen_info.get('usage_metadata')
-
-            logger.debug(f"Generated response: {len(content)} characters")
-            
-            return GeminiResponse(
-                content=content,
-                usage=usage,
-                metadata={"model": self.model_name},
-            )
-            
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            raise
-    
-    async def generate_streaming_response(
-        self, 
-        messages: List[BaseMessage],
-        callbacks: Optional[List[AsyncCallbackHandler]] = None
-    ) -> AsyncGenerator[str, None]:
-        """
-        Generate streaming response from Gemini model
-        
-        Args:
-            messages: List of messages for conversation
-            callbacks: Optional callbacks for streaming
-            
-        Yields:
-            Response chunks as they are generated
-        """
-        try:
-            logger.debug(f"Generating streaming response with {len(messages)} messages")
-            
-            yielded_any = False
-            # Use nested messages shape for ChatGoogleGenerativeAI
-            async for chunk in self.llm.astream(messages=[messages]):
-                if hasattr(chunk, 'content') and chunk.content:
-                    yielded_any = True
-                    yield chunk.content
-            if not yielded_any:
-                logger.warning("No generation chunks were returned; falling back to non-streaming response")
-                full = await self.generate_response(messages, callbacks=callbacks)
-                # Optionally split into chunks for smoother UI
-                yield full.content
-                    
-        except Exception as e:
-            logger.error(f"Error generating streaming response: {e}")
-            # Fallback on error as well
-            try:
-                full = await self.generate_response(messages, callbacks=callbacks)
-                yield full.content
-            except Exception as ee:
-                logger.error(f"Fallback also failed: {ee}")
-                raise
-    
+     
     def create_human_message(self, content: str) -> HumanMessage:
         """Create a human message"""
         return HumanMessage(content=content)
@@ -502,28 +399,6 @@ class GeminiModel:
             messages.append(self.create_human_message(current_input))
 
         return messages
-    
-    def _estimate_tokens(self, messages: List[BaseMessage]) -> int:
-        """토큰 사용량을 대략적으로 추정 (입력 토큰만)"""
-        total_chars = 0
-        for msg in messages:
-            if hasattr(msg, 'content') and msg.content:
-                total_chars += len(str(msg.content))
-        
-        # 대략적인 추정: 영어 기준 4자 = 1토큰, 한글 기준 2자 = 1토큰
-        # 보수적으로 3자 = 1토큰으로 계산하고 여유분 추가
-        estimated_tokens = int(total_chars / 3 * 1.2)  # 20% 여유분
-        return max(estimated_tokens, 100)  # 최소 100토큰
-    
-    def get_model_info(self) -> Dict[str, Any]:
-        """Get model information"""
-        return {
-            "model_name": self.model_name,
-            "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
-            "top_p": config.top_p,
-            "top_k": config.top_k
-        }
 
     def start_chat_session(self, initial_messages: List[BaseMessage]) -> GeminiChatSession:
         """Starts a new chat session"""

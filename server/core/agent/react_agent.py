@@ -207,18 +207,6 @@ Key guidelines:
         self.system_prompt = prompt
         logger.info("Updated system prompt")
 
-    def get_model_info(self) -> Dict[str, Any]:
-        """Get model information"""
-        model_info = self.model.get_model_info()
-        model_info.update(
-            {
-                "agent_name": config.agent_name,
-                "agent_version": config.agent_version,
-                "system_prompt_length": len(self.system_prompt),
-            }
-        )
-        return model_info
-
     def is_ready(self) -> bool:
         """Check if agent is ready to process requests"""
         model_ready = self.model is not None
@@ -226,17 +214,6 @@ Key guidelines:
         engine_ready = hasattr(self, "react_engine") and self.react_engine is not None
         return model_ready and prompt_ready and engine_ready
 
-    def get_status(self) -> Dict[str, Any]:
-        """Get agent status"""
-        return {
-            "ready": self.is_ready(),
-            "model_info": self.get_model_info(),
-            "react_enabled": True,
-            "available_tools": (
-                len(self.tool_registry.tools) if hasattr(self, "tool_registry") else 0
-            ),
-            "timestamp": datetime.now().isoformat(),
-        }
 
 
 # Alias for backward compatibility

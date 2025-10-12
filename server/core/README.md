@@ -138,9 +138,6 @@ asyncio.run(main())
 ```python
 from ai_agent.utils.config import config
 
-# 설정 확인
-print(config.get_model_info())
-
 # 시스템 프롬프트 설정
 agent.set_system_prompt("당신은 전문적인 코딩 어시스턴트입니다.")
 ```

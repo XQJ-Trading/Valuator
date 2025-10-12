@@ -298,7 +298,7 @@ function formatJson(data: any): string {
 }
 
 .message-final_answer .message-text {
-  color: var(--secondary-color);
+  color: var(--text-primary);
   font-size: 1.05rem;
   line-height: 1.7;
 }
@@ -460,6 +460,111 @@ function formatJson(data: any): string {
   background: rgba(0, 0, 0, 0.06);
   padding: 0.2rem 0.4rem;
   border-radius: 4px;
+}
+
+/* 테이블 컨테이너 래퍼 */
+.markdown-body :deep(.table-wrapper) {
+  overflow-x: auto;
+  margin: 1rem 0;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 600px;
+  border: 2px solid #d1d5db !important;
+  border-radius: 8px;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-size: 0.85rem;
+  background: white;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid #d1d5db !important;
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.markdown-body :deep(th:first-child),
+.markdown-body :deep(td:first-child) {
+  text-align: left;
+  white-space: nowrap;
+  font-weight: 600;
+  min-width: 120px;
+  max-width: 150px;
+  position: sticky;
+  left: 0;
+  background: inherit !important;
+  z-index: 2;
+  box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.1);
+}
+
+.markdown-body :deep(th:not(:first-child)),
+.markdown-body :deep(td:not(:first-child)) {
+  min-width: 150px;
+  max-width: 250px;
+  word-wrap: break-word;
+  hyphens: auto;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.markdown-body :deep(td:not(:first-child)) {
+  text-align: left;
+}
+
+/* 긴 텍스트 처리 */
+.markdown-body :deep(td) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: table-cell;
+}
+
+.markdown-body :deep(td:hover) {
+  overflow: visible;
+  white-space: normal;
+  z-index: 10;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: white !important;
+  max-width: none !important;
+}
+
+/* 숫자가 포함된 열 스타일링 */
+.markdown-body :deep(td:nth-child(n+2)) {
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-body :deep(th) {
+  background: #f8fafc !important;
+  font-weight: 600;
+  color: #1f2937;
+  border-bottom: 2px solid #d1d5db !important;
+}
+
+.markdown-body :deep(td) {
+  background: #ffffff !important;
+}
+
+.markdown-body :deep(tbody tr:nth-child(even) td) {
+  background: #f9fafb !important;
+}
+
+.markdown-body :deep(tbody tr:hover td) {
+  background: rgba(59, 130, 246, 0.05) !important;
+}
+
+.markdown-body :deep(table caption) {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #1f2937;
 }
 
 /* 텍스트 스타일 */

@@ -58,6 +58,13 @@
           <strong>상세:</strong> {{ message.metadata.message }}
         </div>
       </div>
+      <div class="message-subtask-result" v-else-if="message.type === 'subtask_result'">
+        <div class="subtask-badge">📋 서브태스크 결과</div>
+        <div class="subtask-content markdown-body" v-html="renderMarkdown(message.content)"></div>
+        <div v-if="message.metadata?.source_type" class="subtask-source">
+          출처: {{ getMessageTitle(message.metadata.source_type as any) }}
+        </div>
+      </div>
       <div class="message-text" v-else>
         {{ message.content }}
       </div>
@@ -291,7 +298,7 @@ function formatJson(data: any): string {
 }
 
 .message-final_answer .message-text {
-  color: var(--secondary-color);
+  color: var(--text-primary);
   font-size: 1.05rem;
   line-height: 1.7;
 }
@@ -455,6 +462,111 @@ function formatJson(data: any): string {
   border-radius: 4px;
 }
 
+/* 테이블 컨테이너 래퍼 */
+.markdown-body :deep(.table-wrapper) {
+  overflow-x: auto;
+  margin: 1rem 0;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 600px;
+  border: 2px solid #d1d5db !important;
+  border-radius: 8px;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-size: 0.85rem;
+  background: white;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid #d1d5db !important;
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.markdown-body :deep(th:first-child),
+.markdown-body :deep(td:first-child) {
+  text-align: left;
+  white-space: nowrap;
+  font-weight: 600;
+  min-width: 120px;
+  max-width: 150px;
+  position: sticky;
+  left: 0;
+  background: inherit !important;
+  z-index: 2;
+  box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.1);
+}
+
+.markdown-body :deep(th:not(:first-child)),
+.markdown-body :deep(td:not(:first-child)) {
+  min-width: 150px;
+  max-width: 250px;
+  word-wrap: break-word;
+  hyphens: auto;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.markdown-body :deep(td:not(:first-child)) {
+  text-align: left;
+}
+
+/* 긴 텍스트 처리 */
+.markdown-body :deep(td) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: table-cell;
+}
+
+.markdown-body :deep(td:hover) {
+  overflow: visible;
+  white-space: normal;
+  z-index: 10;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: white !important;
+  max-width: none !important;
+}
+
+/* 숫자가 포함된 열 스타일링 */
+.markdown-body :deep(td:nth-child(n+2)) {
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-body :deep(th) {
+  background: #f8fafc !important;
+  font-weight: 600;
+  color: #1f2937;
+  border-bottom: 2px solid #d1d5db !important;
+}
+
+.markdown-body :deep(td) {
+  background: #ffffff !important;
+}
+
+.markdown-body :deep(tbody tr:nth-child(even) td) {
+  background: #f9fafb !important;
+}
+
+.markdown-body :deep(tbody tr:hover td) {
+  background: rgba(59, 130, 246, 0.05) !important;
+}
+
+.markdown-body :deep(table caption) {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
 /* 텍스트 스타일 */
 .message-text {
   line-height: 1.6;
@@ -607,5 +719,58 @@ function formatJson(data: any): string {
 
 .observation-content .section-title {
   color: var(--success-color);
+}
+
+/* 서브태스크 결과 메시지 */
+.message-subtask-result {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(168, 85, 247, 0.05) 100%);
+  border-color: #a855f7;
+  box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+}
+
+.message-subtask-result .message-header {
+  background: rgba(168, 85, 247, 0.1);
+  color: #a855f7;
+}
+
+.message-subtask-result:hover {
+  box-shadow: 0 8px 25px rgba(168, 85, 247, 0.3);
+}
+
+.message-subtask-result .subtask-badge {
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 1rem;
+  display: inline-block;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+}
+
+.message-subtask-result .subtask-content {
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 0.75rem;
+  background: rgba(168, 85, 247, 0.05);
+  border-radius: 8px;
+  border-left: 4px solid #a855f7;
+  margin-bottom: 0.75rem;
+}
+
+.message-subtask-result .subtask-content :deep(*) {
+  color: var(--text-primary) !important;
+}
+
+.message-subtask-result .subtask-source {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 0.5rem 0.75rem;
+  background: rgba(168, 85, 247, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(168, 85, 247, 0.1);
 }
 </style>

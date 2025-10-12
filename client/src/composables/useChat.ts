@@ -139,7 +139,7 @@ export function useChat() {
 
             try {
               const data = JSON.parse(dataStr)
-              
+
               if (data.type === 'token') {
                 if (currentTokenMessage) {
                   currentTokenMessage.content += data.content
@@ -161,14 +161,53 @@ export function useChat() {
                 addMessage('end', '완료', {})
               } else {
                 currentTokenMessage = null
-                addMessage(data.type, data.content || '', {
-                  tool: data.tool,
-                  tool_input: data.tool_input,
-                  tool_output: data.tool_output,
-                  error: data.error,
-                  message: data.message,
-                  tool_result: data.tool_result
-                })
+
+                // subtask_result 태그를 포함한 메시지인지 확인하고 별도 처리
+                if (data.content && (data.type === 'thought' || data.type === 'observation')) {
+                  const subtaskMatch = data.content.match(/<subtask_result>(.*?)<\/subtask_result>/s)
+                  if (subtaskMatch) {
+                    const subtaskContent = subtaskMatch[1].trim()
+
+                    // 원본 메시지 추가 (subtask_result 제외)
+                    const originalContent = data.content.replace(/<subtask_result>.*?<\/subtask_result>/s, '').trim()
+                    if (originalContent) {
+                      addMessage(data.type, originalContent, {
+                        tool: data.tool,
+                        tool_input: data.tool_input,
+                        tool_output: data.tool_output,
+                        error: data.error,
+                        message: data.message,
+                        tool_result: data.tool_result
+                      })
+                    }
+
+                    // subtask_result를 별도의 메시지로 추가
+                    addMessage('subtask_result', subtaskContent, {
+                      source_type: data.type,
+                      original_content: originalContent
+                    })
+                  } else {
+                    // 일반 메시지 처리
+                    addMessage(data.type, data.content || '', {
+                      tool: data.tool,
+                      tool_input: data.tool_input,
+                      tool_output: data.tool_output,
+                      error: data.error,
+                      message: data.message,
+                      tool_result: data.tool_result
+                    })
+                  }
+                } else {
+                  // 다른 타입의 메시지 처리
+                  addMessage(data.type, data.content || '', {
+                    tool: data.tool,
+                    tool_input: data.tool_input,
+                    tool_output: data.tool_output,
+                    error: data.error,
+                    message: data.message,
+                    tool_result: data.tool_result
+                  })
+                }
               }
               
               // 상태 업데이트

@@ -140,29 +140,84 @@ async function handleReplay(sessionId: string) {
     cleanupReplay = await replaySession(
       sessionId,
       (event) => {
-        // 이벤트를 Message 형식으로 변환
-        let content = event.content || ''
-        
-        // start 이벤트의 경우 query를 content로 사용
-        if (event.type === 'start' && event.query) {
-          content = event.query
+        // subtask_result 태그를 포함한 메시지인지 확인하고 별도 처리
+        if (event.content && (event.type === 'thought' || event.type === 'observation')) {
+          const subtaskMatch = event.content.match(/<subtask_result>(.*?)<\/subtask_result>/s)
+          if (subtaskMatch) {
+            const subtaskContent = subtaskMatch[1].trim()
+
+            // 원본 메시지 추가 (subtask_result 제외)
+            const originalContent = event.content.replace(/<subtask_result>.*?<\/subtask_result>/s, '').trim()
+            if (originalContent) {
+              const originalMessage: Message = {
+                type: event.type,
+                content: originalContent,
+                metadata: {
+                  tool: event.tool,
+                  tool_input: event.tool_input,
+                  tool_output: event.tool_output,
+                  error: event.error,
+                  tool_result: event.tool_result,
+                  query: event.query
+                },
+                timestamp: new Date()
+              }
+              replayMessages.value.push(originalMessage)
+            }
+
+            // subtask_result를 별도의 메시지로 추가
+            const subtaskMessage: Message = {
+              type: 'subtask_result',
+              content: subtaskContent,
+              metadata: {
+                source_type: event.type,
+                original_content: originalContent
+              },
+              timestamp: new Date()
+            }
+            replayMessages.value.push(subtaskMessage)
+          } else {
+            // 일반 메시지 처리
+            let content = event.content || ''
+            const message: Message = {
+              type: event.type,
+              content: content,
+              metadata: {
+                tool: event.tool,
+                tool_input: event.tool_input,
+                tool_output: event.tool_output,
+                error: event.error,
+                tool_result: event.tool_result,
+                query: event.query
+              },
+              timestamp: new Date()
+            }
+            replayMessages.value.push(message)
+          }
+        } else {
+          // 다른 타입의 메시지 처리
+          let content = event.content || ''
+          
+          // start 이벤트의 경우 query를 content로 사용
+          if (event.type === 'start' && event.query) {
+            content = event.query
+          }
+          
+          const message: Message = {
+            type: event.type,
+            content: content,
+            metadata: {
+              tool: event.tool,
+              tool_input: event.tool_input,
+              tool_output: event.tool_output,
+              error: event.error,
+              tool_result: event.tool_result,
+              query: event.query
+            },
+            timestamp: new Date()
+          }
+          replayMessages.value.push(message)
         }
-        
-        const message: Message = {
-          type: event.type,
-          content: content,
-          metadata: {
-            tool: event.tool,
-            tool_input: event.tool_input,
-            tool_output: event.tool_output,
-            error: event.error,
-            tool_result: event.tool_result,
-            query: event.query
-          },
-          timestamp: new Date()
-        }
-        
-        replayMessages.value.push(message)
         
         // 상태 업데이트
         if (event.type === 'thought') {

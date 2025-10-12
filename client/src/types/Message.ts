@@ -1,5 +1,5 @@
 export interface Message {
-  type: 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'token' | 'start' | 'end'
+  type: 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'token' | 'start' | 'end' | 'subtask_result'
   content: string
   metadata?: MessageMetadata
   timestamp: Date
@@ -15,6 +15,8 @@ export interface MessageMetadata {
   message?: string
   tool_result?: ToolResult
   query?: string
+  source_type?: string
+  original_content?: string
 }
 
 export interface ToolResult {

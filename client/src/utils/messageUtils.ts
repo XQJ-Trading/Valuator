@@ -9,7 +9,8 @@ export function getMessageIcon(type: MessageType): string {
     error: '❌',
     token: '💬',
     start: '🚀',
-    end: '✅'
+    end: '✅',
+    subtask_result: '📋'
   }
   return icons[type] || '💬'
 }
@@ -23,7 +24,8 @@ export function getMessageTitle(type: MessageType): string {
     error: '오류',
     token: '응답',
     start: '처리 시작',
-    end: '처리 완료'
+    end: '처리 완료',
+    subtask_result: '서브태스크 결과'
   }
   return titles[type] || '메시지'
 }

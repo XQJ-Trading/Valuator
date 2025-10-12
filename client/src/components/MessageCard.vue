@@ -58,6 +58,13 @@
           <strong>상세:</strong> {{ message.metadata.message }}
         </div>
       </div>
+      <div class="message-subtask-result" v-else-if="message.type === 'subtask_result'">
+        <div class="subtask-badge">📋 서브태스크 결과</div>
+        <div class="subtask-content markdown-body" v-html="renderMarkdown(message.content)"></div>
+        <div v-if="message.metadata?.source_type" class="subtask-source">
+          출처: {{ getMessageTitle(message.metadata.source_type as any) }}
+        </div>
+      </div>
       <div class="message-text" v-else>
         {{ message.content }}
       </div>
@@ -607,5 +614,58 @@ function formatJson(data: any): string {
 
 .observation-content .section-title {
   color: var(--success-color);
+}
+
+/* 서브태스크 결과 메시지 */
+.message-subtask-result {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(168, 85, 247, 0.05) 100%);
+  border-color: #a855f7;
+  box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+}
+
+.message-subtask-result .message-header {
+  background: rgba(168, 85, 247, 0.1);
+  color: #a855f7;
+}
+
+.message-subtask-result:hover {
+  box-shadow: 0 8px 25px rgba(168, 85, 247, 0.3);
+}
+
+.message-subtask-result .subtask-badge {
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 1rem;
+  display: inline-block;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+}
+
+.message-subtask-result .subtask-content {
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 0.75rem;
+  background: rgba(168, 85, 247, 0.05);
+  border-radius: 8px;
+  border-left: 4px solid #a855f7;
+  margin-bottom: 0.75rem;
+}
+
+.message-subtask-result .subtask-content :deep(*) {
+  color: var(--text-primary) !important;
+}
+
+.message-subtask-result .subtask-source {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 0.5rem 0.75rem;
+  background: rgba(168, 85, 247, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(168, 85, 247, 0.1);
 }
 </style>

@@ -42,11 +42,7 @@
       </div>
       <div class="input-controls">
         <div class="action-buttons">
-          <button @click="$emit('send')" :disabled="loading" class="btn btn-primary">
-            <span v-if="loading" class="loading-spinner"></span>
-            {{ loading ? '전송중...' : '전송' }}
-          </button>
-          <button @click="$emit('stream')" :disabled="loading" class="btn btn-secondary">
+          <button @click="$emit('stream')" :disabled="loading" class="btn btn-primary">
             <span v-if="loading" class="loading-spinner"></span>
             {{ loading ? '실시간 응답' : '실시간 응답' }}
           </button>
@@ -317,46 +313,25 @@ function getModelDisplayName(model: string): string {
   left: 100%;
 }
 
-/* 전송 버튼 (Primary) */
+/* 실시간 응답 버튼 (Primary) */
 .btn-primary {
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+  background: var(--primary-color);
   color: white;
-  border: 2px solid #1d4ed8;
-  box-shadow: 0 6px 16px rgba(29, 78, 216, 0.4);
+  border: 2px solid var(--primary-color);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
   font-weight: 700;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
-  border-color: #1e40af;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
   transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(29, 78, 216, 0.5);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.5);
 }
 
 .btn-primary:active:not(:disabled) {
   transform: translateY(0);
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
-}
-
-/* 스트림 버튼 (Secondary) */
-.btn-secondary {
-  background: linear-gradient(135deg, #6d28d9 0%, #8b5cf6 100%);
-  color: white;
-  border: 2px solid #6d28d9;
-  box-shadow: 0 6px 16px rgba(109, 40, 217, 0.4);
-  font-weight: 700;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #5b21b6 0%, #6d28d9 100%);
-  border-color: #5b21b6;
-  transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(109, 40, 217, 0.5);
-}
-
-.btn-secondary:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
 }
 
 /* 지우기 버튼 (Outline) */
@@ -391,14 +366,7 @@ function getModelDisplayName(model: string): string {
   50% { box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5); }
 }
 
-.btn-secondary:hover:not(:disabled) {
-  animation: button-glow-secondary 2s ease-in-out infinite;
-}
 
-@keyframes button-glow-secondary {
-  0%, 100% { box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3); }
-  50% { box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5); }
-}
 
 /* 로딩 스피너 */
 .loading-spinner {

@@ -1,5 +1,5 @@
 <template>
-  <div class="session-card" :class="{ 'session-success': session.success, 'session-failed': !session.success }" @click="handleCardClick">
+  <div class="session-card" :class="{ 'session-completed': session.success, 'session-error': !session.success }" @click="handleCardClick">
     <div class="session-header">
       <div class="session-meta">
         <span class="session-status">
@@ -100,38 +100,42 @@ function handleDeleteClick(event: Event) {
 .session-card {
   border-radius: var(--border-radius);
   overflow: hidden;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   transition: var(--transition);
-  border: 2px solid;
+  border: 2px solid #e5e7eb;
   margin-bottom: 1rem;
   cursor: pointer;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
-  border-color: var(--primary-color);
+  background: #ffffff;
 }
 
 .session-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border-color: #d1d5db;
 }
 
-.session-success {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%);
-  border-color: #22c55e;
-  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
+.session-completed {
+  background: #ffffff;
+  border-color: #6b7280;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
-.session-success:hover {
-  box-shadow: 0 8px 25px rgba(34, 197, 94, 0.3);
+.session-completed:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  border-color: #374151;
+  background: #f8fafc;
 }
 
-.session-failed {
-  background: linear-gradient(135deg, rgba(220, 38, 38, 0.1) 0%, rgba(220, 38, 38, 0.05) 100%);
-  border-color: var(--error-color);
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
+.session-error {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
-.session-failed:hover {
-  box-shadow: 0 8px 25px rgba(220, 38, 38, 0.3);
+.session-error:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  border-color: #6b7280;
+  background: #e5e7eb;
 }
 
 /* 헤더 */
@@ -141,17 +145,19 @@ function handleDeleteClick(event: Event) {
   gap: 0.75rem;
   padding: 1rem 1.25rem;
   font-weight: 500;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.session-success .session-header {
-  background: rgba(34, 197, 94, 0.1);
-  color: #059669;
+.session-completed .session-header {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-bottom-color: #0ea5e9;
 }
 
-.session-failed .session-header {
-  background: rgba(220, 38, 38, 0.1);
-  color: var(--error-color);
+.session-error .session-header {
+  background: #f8f9fa;
+  color: #422006;
+  border-bottom-color: #f59e0b;
 }
 
 .session-meta {
@@ -182,45 +188,28 @@ function handleDeleteClick(event: Event) {
 }
 
 .btn-delete {
-  background: linear-gradient(135deg, var(--primary-color) 0%, #1d4ed8 100%);
-  color: white;
-  border: 1px solid var(--primary-color);
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
   border-radius: 8px;
   padding: 0.4rem 0.75rem;
   cursor: pointer;
   transition: var(--transition);
   font-size: 0.85rem;
   font-weight: 500;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
-  position: relative;
-  overflow: hidden;
-}
-
-.btn-delete::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-  transition: left 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .btn-delete:hover {
-  transform: scale(1.05) translateY(-1px);
-  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-  border-color: #dc2626;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
-}
-
-.btn-delete:hover::before {
-  left: 100%;
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  color: #1f2937;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .btn-delete:active {
-  transform: scale(0.98);
-  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.2);
+  background: #d1d5db;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* 본문 */
@@ -247,34 +236,36 @@ function handleDeleteClick(event: Event) {
 
 .session-query strong,
 .session-answer strong {
-  color: var(--primary-color);
+  color: #374151;
   margin-right: 0.5rem;
   font-weight: 600;
 }
 
-.session-success .session-query strong,
-.session-success .session-answer strong {
+.session-completed .session-query strong,
+.session-completed .session-answer strong {
   color: #059669;
 }
 
-.session-failed .session-query strong,
-.session-failed .session-answer strong {
-  color: var(--error-color);
+.session-error .session-query strong,
+.session-error .session-answer strong {
+  color: #dc2626;
 }
 
 /* 푸터 */
 .session-footer {
   padding: 0.75rem 1.25rem;
-  border-top: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.02);
+  border-top: 1px solid #d1d5db;
+  background: #fafbfc;
 }
 
-.session-success .session-footer {
-  background: rgba(34, 197, 94, 0.05);
+.session-completed .session-footer {
+  background: #f0f9ff;
+  border-top-color: #0ea5e9;
 }
 
-.session-failed .session-footer {
-  background: rgba(220, 38, 38, 0.05);
+.session-error .session-footer {
+  background: #fef7f0;
+  border-top-color: #f59e0b;
 }
 
 .session-stats {
@@ -282,7 +273,7 @@ function handleDeleteClick(event: Event) {
   flex-wrap: wrap;
   gap: 1rem;
   font-size: 0.85rem;
-  color: var(--text-secondary);
+  color: #4b5563;
 }
 
 .stat-item {
@@ -291,18 +282,21 @@ function handleDeleteClick(event: Event) {
   gap: 0.5rem;
   font-weight: 500;
   padding: 0.25rem 0.5rem;
-  background: rgba(0, 0, 0, 0.05);
+  background: #e5e7eb;
   border-radius: 12px;
+  color: #374151;
 }
 
-.session-success .stat-item {
-  background: rgba(34, 197, 94, 0.1);
-  color: #059669;
+.session-completed .stat-item {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #3b82f6;
 }
 
-.session-failed .stat-item {
-  background: rgba(220, 38, 38, 0.1);
-  color: var(--error-color);
+.session-error .stat-item {
+  background: #fed7aa;
+  color: #9a3412;
+  border: 1px solid #f59e0b;
 }
 
 /* 반응형 */

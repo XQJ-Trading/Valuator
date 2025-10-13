@@ -12,11 +12,6 @@
         <button @click="stopReplay" class="btn-back">← 목록으로</button>
         <div class="replay-controls">
           <span class="replay-status">{{ replayStatus }}</span>
-          <select v-model="playbackSpeed" class="speed-selector">
-            <option :value="0.5">0.5x</option>
-            <option :value="1">1x</option>
-            <option :value="2">2x</option>
-          </select>
         </div>
       </div>
       
@@ -96,7 +91,6 @@ const currentOffset = ref(0)
 const replayMode = ref(false)
 const replayMessages = ref<Message[]>([])
 const replayStatus = ref('준비')
-const playbackSpeed = ref(1)
 let cleanupReplay: (() => void) | null = null
 
 // 초기 로드 (이미 로딩 중이 아닐 때만)
@@ -230,7 +224,7 @@ async function handleReplay(sessionId: string) {
           replayStatus.value = '재생 완료'
         }
       },
-      playbackSpeed.value
+1
     )
   } catch (e: any) {
     console.error('Replay error:', e)
@@ -341,15 +335,7 @@ async function handleDelete(sessionId: string) {
   color: var(--text-secondary);
 }
 
-.speed-selector {
-  padding: 0.25rem 0.4rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
+
 
 .replay-messages {
   flex: 1;
@@ -456,10 +442,7 @@ async function handleDelete(sessionId: string) {
     font-size: 0.8rem;
   }
   
-  .speed-selector {
-    padding: 0.2rem 0.35rem;
-    font-size: 0.8rem;
-  }
+
   
   .replay-messages {
     padding: 0.6rem 0.85rem;
@@ -510,10 +493,7 @@ async function handleDelete(sessionId: string) {
     font-size: 0.75rem;
   }
   
-  .speed-selector {
-    padding: 0.15rem 0.3rem;
-    font-size: 0.75rem;
-  }
+
   
   .replay-messages {
     padding: 0.5rem 0.7rem;

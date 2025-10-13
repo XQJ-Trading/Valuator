@@ -15,11 +15,6 @@
             <button @click="stopReplay" class="btn-back">← 목록으로</button>
             <div class="replay-controls">
               <span class="replay-status">{{ replayStatus }}</span>
-              <select v-model="playbackSpeed" class="speed-selector">
-                <option :value="0.5">0.5x</option>
-                <option :value="1">1x</option>
-                <option :value="2">2x</option>
-              </select>
             </div>
           </div>
           
@@ -103,7 +98,6 @@ const currentOffset = ref(0)
 const replayMode = ref(false)
 const replayMessages = ref<Message[]>([])
 const replayStatus = ref('준비')
-const playbackSpeed = ref(1)
 let cleanupReplay: (() => void) | null = null
 
 // 모달 열릴 때 세션 로드
@@ -173,7 +167,7 @@ async function handleReplay(sessionId: string) {
           replayStatus.value = '재생 완료'
         }
       },
-      playbackSpeed.value
+1
     )
   } catch (e: any) {
     console.error('Replay error:', e)
@@ -203,8 +197,7 @@ async function handleDelete(sessionId: string) {
   }
 }
 
-// 재생 속도 변경 시 효과 없음 (이미 시작된 재생에는 적용 안됨)
-// 새로 재생할 때만 적용
+
 </script>
 
 <style scoped>
@@ -319,14 +312,7 @@ async function handleDelete(sessionId: string) {
   color: var(--text-secondary);
 }
 
-.speed-selector {
-  padding: 0.25rem 0.5rem;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  cursor: pointer;
-}
+
 
 .replay-messages {
   flex: 1;

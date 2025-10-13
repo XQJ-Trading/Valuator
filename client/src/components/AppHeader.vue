@@ -4,7 +4,7 @@
       <router-link to="/" class="app-title-link">
         <h1 class="app-title">
           <span class="title-icon">🤖</span>
-          AI Agent
+          Qualitative Research Agent
         </h1>
       </router-link>
       

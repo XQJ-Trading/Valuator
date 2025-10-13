@@ -27,46 +27,48 @@ defineProps<Props>()
 /* 메시지 컨테이너 */
 .messages-container {
   width: 100%;
-  padding: 0 0 1.5rem 0;
+  padding: 0 0 1rem 0;
 }
 
 .empty-state {
   text-align: center;
-  padding: 2.5rem 2rem;
+  padding: 2rem 1.5rem;
   color: var(--text-secondary);
 }
 
 .empty-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
+  font-size: 3rem;
+  margin-bottom: 0.75rem;
   opacity: 0.5;
 }
 
 .empty-state h3 {
   margin: 0 0 0.5rem 0;
   color: var(--text-primary);
+  font-size: 1.25rem;
 }
 
 .empty-state p {
   margin: 0;
   max-width: 500px;
   margin: 0 auto;
-  line-height: 1.6;
+  line-height: 1.5;
+  font-size: 0.95rem;
 }
 
 .message-group {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
   position: relative;
 }
 
 .message-group::after {
   content: '';
   position: absolute;
-  bottom: -0.625rem;
+  bottom: -0.5rem;
   left: 50%;
   transform: translateX(-50%);
-  width: 40px;
-  height: 2px;
+  width: 30px;
+  height: 1px;
   background: linear-gradient(90deg, transparent, var(--border-color), transparent);
   opacity: 0.3;
 }
@@ -78,7 +80,56 @@ defineProps<Props>()
 /* 반응형 디자인 */
 @media (max-width: 768px) {
   .messages-container {
-    padding: 0 1rem 2rem;
+    padding: 0 0 0.75rem 0;
+  }
+  
+  .empty-state {
+    padding: 1.5rem 1rem;
+  }
+  
+  .empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .empty-state h3 {
+    font-size: 1.1rem;
+  }
+  
+  .empty-state p {
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+  
+  .message-group {
+    margin-bottom: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .messages-container {
+    padding: 0 0 0.5rem 0;
+  }
+  
+  .empty-state {
+    padding: 1rem 0.75rem;
+  }
+  
+  .empty-icon {
+    font-size: 2rem;
+    margin-bottom: 0.4rem;
+  }
+  
+  .empty-state h3 {
+    font-size: 1rem;
+  }
+  
+  .empty-state p {
+    font-size: 0.85rem;
+  }
+  
+  .message-group {
+    margin-bottom: 0.75rem;
   }
 }
 </style>

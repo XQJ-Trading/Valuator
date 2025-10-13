@@ -43,17 +43,25 @@ const {
 
 <style scoped>
 .chat-page {
-  min-height: calc(100vh - 80px);
+  min-height: calc(100vh - 60px);
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 1rem;
   display: flex;
   flex-direction: column;
 }
 
 @media (max-width: 768px) {
   .chat-page {
-    padding: 0 1rem;
+    min-height: calc(100vh - 50px);
+    padding: 0 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-page {
+    min-height: calc(100vh - 45px);
+    padding: 0 0.5rem;
   }
 }
 </style>

@@ -265,22 +265,22 @@ async function handleDelete(sessionId: string) {
 
 <style scoped>
 .history-page {
-  min-height: calc(100vh - 80px);
+  min-height: calc(100vh - 60px);
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1rem;
   display: flex;
   flex-direction: column;
 }
 
 /* 헤더 */
 .page-header {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .page-header h1 {
   margin: 0;
-  font-size: 2rem;
+  font-size: 1.5rem;
   color: var(--text-primary);
 }
 
@@ -309,7 +309,7 @@ async function handleDelete(sessionId: string) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-tertiary);
 }
@@ -318,11 +318,12 @@ async function handleDelete(sessionId: string) {
   background: var(--primary-color);
   color: white;
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.85rem;
   border-radius: var(--border-radius);
   cursor: pointer;
   font-weight: 600;
   transition: var(--transition);
+  font-size: 0.9rem;
 }
 
 .btn-back:hover {
@@ -336,23 +337,24 @@ async function handleDelete(sessionId: string) {
 }
 
 .replay-status {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
 }
 
 .speed-selector {
-  padding: 0.25rem 0.5rem;
+  padding: 0.25rem 0.4rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-primary);
   cursor: pointer;
+  font-size: 0.85rem;
 }
 
 .replay-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1rem;
 }
 
 /* 상태 */
@@ -404,7 +406,7 @@ async function handleDelete(sessionId: string) {
 }
 
 .btn-load-more {
-  padding: 0.75rem 2rem;
+  padding: 0.5rem 1.5rem;
   background: var(--primary-color);
   color: white;
   border: none;
@@ -412,6 +414,7 @@ async function handleDelete(sessionId: string) {
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
+  font-size: 0.9rem;
 }
 
 .btn-load-more:hover:not(:disabled) {
@@ -428,11 +431,113 @@ async function handleDelete(sessionId: string) {
 /* 반응형 */
 @media (max-width: 768px) {
   .history-page {
-    padding: 1rem;
+    min-height: calc(100vh - 50px);
+    padding: 0.75rem;
+  }
+  
+  .page-header {
+    margin-bottom: 0.75rem;
   }
   
   .page-header h1 {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
+  }
+  
+  .replay-header {
+    padding: 0.6rem 0.85rem;
+  }
+  
+  .btn-back {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+  }
+  
+  .replay-status {
+    font-size: 0.8rem;
+  }
+  
+  .speed-selector {
+    padding: 0.2rem 0.35rem;
+    font-size: 0.8rem;
+  }
+  
+  .replay-messages {
+    padding: 0.6rem 0.85rem;
+  }
+  
+  .loading,
+  .error,
+  .empty {
+    padding: 2rem 1rem;
+  }
+  
+  .btn-load-more {
+    padding: 0.45rem 1.25rem;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .history-page {
+    min-height: calc(100vh - 45px);
+    padding: 0.5rem;
+  }
+  
+  .page-header {
+    margin-bottom: 0.5rem;
+  }
+  
+  .page-header h1 {
+    font-size: 1.1rem;
+  }
+  
+  .replay-header {
+    padding: 0.5rem 0.7rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  
+  .btn-back {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+  }
+  
+  .replay-controls {
+    gap: 0.75rem;
+  }
+  
+  .replay-status {
+    font-size: 0.75rem;
+  }
+  
+  .speed-selector {
+    padding: 0.15rem 0.3rem;
+    font-size: 0.75rem;
+  }
+  
+  .replay-messages {
+    padding: 0.5rem 0.7rem;
+  }
+  
+  .loading,
+  .error,
+  .empty {
+    padding: 1.5rem 0.75rem;
+  }
+  
+  .spinner {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .btn-load-more {
+    padding: 0.4rem 1rem;
+    font-size: 0.8rem;
+  }
+  
+  .btn-retry {
+    padding: 0.35rem 0.85rem;
+    font-size: 0.85rem;
   }
 }
 </style>

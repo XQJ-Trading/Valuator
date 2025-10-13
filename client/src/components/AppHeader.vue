@@ -39,7 +39,7 @@ function handleNewSession() {
 .app-header {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 1rem 0;
+  padding: 0.75rem 0;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -49,7 +49,7 @@ function handleNewSession() {
 .header-content {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -62,12 +62,12 @@ function handleNewSession() {
 
 .app-title {
   margin: 0;
-  font-size: 1.75rem;
+  font-size: 1.4rem;
   font-weight: 700;
   color: var(--primary-color);
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   transition: var(--transition);
 }
 
@@ -76,7 +76,7 @@ function handleNewSession() {
 }
 
 .title-icon {
-  font-size: 2rem;
+  font-size: 1.5rem;
   animation: pulse 2s infinite;
 }
 
@@ -95,8 +95,8 @@ function handleNewSession() {
 .nav-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
   background: linear-gradient(135deg, var(--primary-color) 0%, #1d4ed8 100%);
   color: white;
   border: none;
@@ -104,8 +104,10 @@ function handleNewSession() {
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+  text-decoration: none; /* router-link 기본 스타일 제거 */
+  font-family: inherit; /* 폰트 통일 */
 }
 
 .nav-btn:hover {
@@ -120,7 +122,7 @@ function handleNewSession() {
 }
 
 .nav-icon {
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 /* 모달 스타일 */
@@ -209,35 +211,66 @@ function handleNewSession() {
 
 /* 반응형 디자인 */
 @media (max-width: 768px) {
+  .app-header {
+    padding: 0.5rem 0;
+  }
+  
   .header-content {
-    padding: 0 1rem;
+    padding: 0 0.75rem;
     flex-wrap: wrap;
-    gap: 1rem;
-  }
-  
-  .app-title {
-    font-size: 1.5rem;
-  }
-  
-  .nav-menu {
     gap: 0.75rem;
   }
   
+  .app-title {
+    font-size: 1.25rem;
+  }
+  
+  .title-icon {
+    font-size: 1.3rem;
+  }
+  
+  .nav-menu {
+    gap: 0.5rem;
+  }
+  
   .nav-btn {
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+  }
+  
+  .nav-icon {
     font-size: 0.85rem;
   }
 }
 
 @media (max-width: 480px) {
+  .header-content {
+    padding: 0 0.5rem;
+  }
+  
+  .app-title {
+    font-size: 1.1rem;
+  }
+  
+  .title-icon {
+    font-size: 1.2rem;
+  }
+  
   .nav-menu {
     width: 100%;
     justify-content: center;
+    gap: 0.4rem;
   }
   
   .nav-btn {
     flex: 1;
     justify-content: center;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.75rem;
+  }
+  
+  .nav-icon {
+    font-size: 0.8rem;
   }
 }
 </style>

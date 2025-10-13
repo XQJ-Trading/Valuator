@@ -92,14 +92,14 @@ function getModelDisplayName(model: string): string {
 /* 입력 섹션 */
 .input-section {
   width: 100%;
-  padding: 1.5rem 0;
+  padding: 1rem 0;
 }
 
 .input-container {
   background: var(--bg-secondary);
   border: 2px solid var(--border-color);
   border-radius: var(--border-radius);
-  padding: 1.5rem;
+  padding: 1rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   position: relative;
   box-sizing: border-box;
@@ -118,14 +118,14 @@ function getModelDisplayName(model: string): string {
 
 .query-input {
   width: 100%;
-  min-height: 120px;
-  padding: 1.25rem;
+  min-height: 100px;
+  padding: 1rem;
   border: 2px solid #d1d5db;
   border-radius: var(--border-radius);
   background: #ffffff;
   color: #111827;
-  font-size: 1.05rem;
-  line-height: 1.6;
+  font-size: 0.95rem;
+  line-height: 1.5;
   resize: vertical;
   transition: var(--transition);
   font-family: inherit;
@@ -150,19 +150,19 @@ function getModelDisplayName(model: string): string {
 
 /* 모델 선택 섹션 */
 .model-section {
-  margin-top: 1rem;
-  padding-top: 1rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
 }
 
 .model-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 0.75rem;
-  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
 }
 
 .model-icon {
@@ -171,12 +171,12 @@ function getModelDisplayName(model: string): string {
 
 .model-select {
   width: 100%;
-  padding: 1rem;
+  padding: 0.75rem;
   border: 2px solid #d1d5db;
   border-radius: var(--border-radius);
   background: #ffffff;
   color: #111827;
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: var(--transition);
@@ -185,9 +185,9 @@ function getModelDisplayName(model: string): string {
   appearance: none;
   background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
   background-repeat: no-repeat;
-  background-position: right 1rem center;
-  background-size: 1rem;
-  padding-right: 3rem;
+  background-position: right 0.75rem center;
+  background-size: 0.9rem;
+  padding-right: 2.5rem;
 }
 
 .model-select:hover {
@@ -210,19 +210,19 @@ function getModelDisplayName(model: string): string {
 
 /* Rule 입력 섹션 */
 .rule-section {
-  margin-top: 1rem;
-  padding-top: 1rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
 }
 
 .rule-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 0.75rem;
-  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
 }
 
 .rule-icon {
@@ -231,14 +231,14 @@ function getModelDisplayName(model: string): string {
 
 .rule-input {
   width: 100%;
-  min-height: 80px;
-  padding: 1rem;
+  min-height: 70px;
+  padding: 0.75rem;
   border: 2px solid #d1d5db;
   border-radius: var(--border-radius);
   background: #ffffff;
   color: #111827;
-  font-size: 1rem;
-  line-height: 1.5;
+  font-size: 0.9rem;
+  line-height: 1.4;
   resize: vertical;
   transition: var(--transition);
   font-family: inherit;
@@ -265,12 +265,12 @@ function getModelDisplayName(model: string): string {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-top: 1.25rem;
-  gap: 1.5rem;
+  margin-top: 1rem;
+  gap: 1rem;
   flex-wrap: wrap;
   width: 100%;
   box-sizing: border-box;
-  min-height: 3rem;
+  min-height: 2.5rem;
 }
 
 /* 버튼 스타일 */
@@ -282,7 +282,7 @@ function getModelDisplayName(model: string): string {
 }
 
 .btn {
-  padding: 0.75rem 1.5rem;
+  padding: 0.5rem 1.2rem;
   border-radius: var(--border-radius);
   font-weight: 600;
   cursor: pointer;
@@ -290,8 +290,8 @@ function getModelDisplayName(model: string): string {
   border: 2px solid;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.95rem;
+  gap: 0.4rem;
+  font-size: 0.85rem;
   position: relative;
   overflow: hidden;
 }
@@ -417,27 +417,80 @@ function getModelDisplayName(model: string): string {
 /* 반응형 디자인 */
 @media (max-width: 768px) {
   .input-section {
-    padding: 1.5rem 1rem;
+    padding: 0.75rem 0;
+  }
+  
+  .input-container {
+    padding: 0.75rem;
+  }
+  
+  .query-input {
+    min-height: 90px;
+    padding: 0.85rem;
+    font-size: 0.9rem;
+  }
+  
+  .model-select, .rule-input {
+    padding: 0.65rem;
+    font-size: 0.85rem;
+  }
+  
+  .model-label, .rule-label {
+    font-size: 0.85rem;
+    margin-bottom: 0.4rem;
   }
   
   .input-controls {
     flex-direction: column;
     align-items: stretch;
-    gap: 1rem;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
   }
   
   .action-buttons {
     justify-content: center;
+    gap: 0.4rem;
+  }
+  
+  .btn {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.8rem;
   }
 }
 
 @media (max-width: 480px) {
+  .input-section {
+    padding: 0.5rem 0;
+  }
+  
+  .input-container {
+    padding: 0.6rem;
+  }
+  
+  .query-input {
+    min-height: 80px;
+    padding: 0.75rem;
+    font-size: 0.85rem;
+  }
+  
+  .model-select, .rule-input {
+    padding: 0.6rem;
+    font-size: 0.8rem;
+  }
+  
+  .model-label, .rule-label {
+    font-size: 0.8rem;
+  }
+  
   .action-buttons {
     flex-direction: column;
+    gap: 0.3rem;
   }
   
   .btn {
     justify-content: center;
+    padding: 0.35rem 0.8rem;
+    font-size: 0.75rem;
   }
 }
 </style>

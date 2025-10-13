@@ -153,39 +153,41 @@ function formatJson(data: any): string {
 .message-card .message-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 1.25rem;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
   font-weight: 500;
 }
 
 .message-card .message-icon {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
 }
 
 .message-card .message-title {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 
 .message-card .message-timestamp {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
-  margin-left: auto;
+  flex: 1;
 }
 
 .message-card .copy-btn {
   background: linear-gradient(135deg, var(--primary-color) 0%, #1d4ed8 100%);
   color: white;
   border: 1px solid var(--primary-color);
-  border-radius: 8px;
-  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
   cursor: pointer;
   transition: var(--transition);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
   position: relative;
   overflow: hidden;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .message-card .copy-btn::before {
@@ -215,7 +217,7 @@ function formatJson(data: any): string {
 }
 
 .message-card .message-content {
-  padding: 1.25rem;
+  padding: 1rem;
   border-top: 1px solid var(--border-color);
 }
 
@@ -234,8 +236,8 @@ function formatJson(data: any): string {
 .message-thought .message-text {
   color: var(--primary-color);
   font-style: italic;
-  font-size: 1.05rem;
-  line-height: 1.6;
+  font-size: 0.95rem;
+  line-height: 1.5;
 }
 
 /* 액션 메시지 */
@@ -299,8 +301,8 @@ function formatJson(data: any): string {
 
 .message-final_answer .message-text {
   color: var(--text-primary);
-  font-size: 1.05rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 /* 오류 메시지 */
@@ -386,15 +388,15 @@ function formatJson(data: any): string {
 /* 코드 스타일 */
 .message-code pre {
   margin: 0;
-  padding: 1rem;
+  padding: 0.75rem;
   background: rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
+  border-radius: 6px;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-size: 0.8rem;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 400px;
+  max-height: 300px;
   overflow-y: auto;
 }
 
@@ -570,6 +572,7 @@ function formatJson(data: any): string {
 /* 텍스트 스타일 */
 .message-text {
   line-height: 1.6;
+  font-size: 1rem;
 }
 
 .message-text strong {
@@ -772,5 +775,203 @@ function formatJson(data: any): string {
   background: rgba(168, 85, 247, 0.03);
   border-radius: 6px;
   border: 1px solid rgba(168, 85, 247, 0.1);
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+  .message-card .message-header {
+    padding: 0.6rem 0.85rem;
+    gap: 0.4rem;
+  }
+  
+  .message-card .message-icon {
+    font-size: 1rem;
+  }
+  
+  .message-card .message-title {
+    font-size: 0.85rem;
+  }
+  
+  .message-card .message-timestamp {
+    font-size: 0.7rem;
+  }
+  
+  .message-card .copy-btn {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.75rem;
+  }
+  
+  .message-card .message-content {
+    padding: 0.85rem;
+  }
+  
+  .message-text {
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  
+  .message-thought .message-text,
+  .message-final_answer .message-text {
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  
+  .message-code pre {
+    padding: 0.6rem;
+    font-size: 0.75rem;
+    max-height: 250px;
+  }
+  
+  .tool-result-info {
+    padding: 0.75rem;
+  }
+  
+  .tool-data {
+    padding: 0.6rem;
+    font-size: 0.8rem;
+    max-height: 200px;
+  }
+  
+  .section-title {
+    font-size: 0.85rem;
+  }
+  
+  .markdown-body {
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3 {
+    margin: 0.75rem 0 0.5rem;
+  }
+  
+  .markdown-body p {
+    margin: 0.6rem 0;
+  }
+  
+  .markdown-body :deep(table) {
+    font-size: 0.8rem;
+    min-width: 500px;
+  }
+  
+  .markdown-body :deep(th),
+  .markdown-body :deep(td) {
+    padding: 0.5rem 0.6rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-card {
+    margin-bottom: 0.85rem;
+  }
+  
+  .message-card .message-header {
+    padding: 0.5rem 0.7rem;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+  
+  .message-card .message-icon {
+    font-size: 0.9rem;
+  }
+  
+  .message-card .message-title {
+    font-size: 0.8rem;
+  }
+  
+  .message-card .message-timestamp {
+    font-size: 0.65rem;
+    width: 100%;
+    margin-left: 0;
+    margin-top: 0.2rem;
+  }
+  
+  .message-card .copy-btn {
+    padding: 0.2rem 0.35rem;
+    font-size: 0.7rem;
+  }
+  
+  .message-card .message-content {
+    padding: 0.7rem;
+  }
+  
+  .message-text {
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  
+  .message-thought .message-text,
+  .message-final_answer .message-text {
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+  
+  .message-code pre {
+    padding: 0.5rem;
+    font-size: 0.7rem;
+    max-height: 200px;
+  }
+  
+  .tool-result-info {
+    padding: 0.6rem;
+  }
+  
+  .tool-status {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+  }
+  
+  .tool-data {
+    padding: 0.5rem;
+    font-size: 0.75rem;
+    max-height: 150px;
+  }
+  
+  .section-title {
+    font-size: 0.8rem;
+  }
+  
+  .markdown-body {
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  
+  .markdown-body :deep(table) {
+    font-size: 0.75rem;
+    min-width: 400px;
+  }
+  
+  .markdown-body :deep(th),
+  .markdown-body :deep(td) {
+    padding: 0.4rem 0.5rem;
+  }
+  
+  .markdown-body :deep(th:first-child),
+  .markdown-body :deep(td:first-child) {
+    min-width: 100px;
+    max-width: 120px;
+  }
+  
+  .error-details {
+    padding: 0.6rem;
+    font-size: 0.85rem;
+  }
+  
+  .subtask-badge {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.8rem;
+  }
+  
+  .subtask-content {
+    padding: 0.6rem;
+    font-size: 0.9rem;
+  }
+  
+  .subtask-source {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.6rem;
+  }
 }
 </style>

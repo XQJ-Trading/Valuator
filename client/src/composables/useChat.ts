@@ -2,8 +2,25 @@ import { ref } from 'vue'
 import type { Message } from '../types/Message'
 
 export function useChat() {
-  const query = ref('')
-  const rule = ref('')
+  // localStorage에서 저장된 값 불러오기
+  const getStoredQuery = (): string => {
+    try {
+      return localStorage.getItem('chat_query') || ''
+    } catch {
+      return ''
+    }
+  }
+
+  const getStoredRule = (): string => {
+    try {
+      return localStorage.getItem('chat_rule') || ''
+    } catch {
+      return ''
+    }
+  }
+
+  const query = ref(getStoredQuery())
+  const rule = ref(getStoredRule())
   const status = ref('준비완료')
   const loading = ref(false)
   const messages = ref<Message[]>([])
@@ -11,6 +28,16 @@ export function useChat() {
   const availableModels = ref<string[]>([])
 
   const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+
+  // localStorage 저장 함수
+  const saveToStorage = () => {
+    try {
+      localStorage.setItem('chat_query', query.value)
+      localStorage.setItem('chat_rule', rule.value)
+    } catch (error) {
+      console.warn('localStorage 저장 실패:', error)
+    }
+  }
 
   // 지원 모델 목록 가져오기
   async function fetchAvailableModels() {
@@ -31,9 +58,8 @@ export function useChat() {
 
   function clearAll() {
     messages.value = []
-    query.value = ''
-    rule.value = ''
     status.value = '준비완료'
+    // query와 rule은 유지 (입력 텍스트는 남겨둠)
   }
 
   function setModel(model: string) {
@@ -223,6 +249,8 @@ export function useChat() {
             }
           } else if (line.startsWith('event: end')) {
             status.value = '완료'
+            // 현재 입력값을 localStorage에 저장 (다음 접속을 위해)
+            saveToStorage()
             query.value = ''
             rule.value = ''
             loading.value = false

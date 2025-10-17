@@ -1,19 +1,19 @@
 import asyncio
 import json
-from typing import AsyncGenerator, Optional, List, Dict, Any
-from datetime import datetime
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 
+from .adapters import HistoryAdapter
 from .core.agent.react_agent import AIAgent
-from .repositories import FileSessionRepository, MongoSessionRepository
 from .core.utils.config import config
 from .core.utils.logger import logger
-from .adapters import HistoryAdapter
+from .repositories import FileSessionRepository, MongoSessionRepository
 
 
 # Initialize history repository for server (separate from ReactLogger)

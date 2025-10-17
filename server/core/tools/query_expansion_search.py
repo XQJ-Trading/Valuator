@@ -2,10 +2,11 @@
 Query expansion enhanced web search tool for AI Agent"""
 
 import json
-from typing import Dict, Any, List
-from .base import BaseTool, ToolResult
+from typing import Any, Dict, List
+
 from ..utils.config import config
 from ..utils.logger import logger
+from .base import BaseTool, ToolResult
 
 
 class QueryExpansionSearchTool(BaseTool):

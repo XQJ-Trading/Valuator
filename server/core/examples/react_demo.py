@@ -6,7 +6,7 @@ from typing import Optional
 from ..agent.react_agent import AIAgent
 from ..utils.config import config
 from ..utils.logger import logger
-from ..utils.react_logger import view_session_log, list_all_sessions
+from ..utils.react_logger import list_all_sessions, view_session_log
 
 
 class AIAgentDemo:

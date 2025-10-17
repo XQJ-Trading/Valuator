@@ -2,16 +2,16 @@
 
 import asyncio
 import json
-import httpx
-from typing import Dict, Any, Optional, List
 from abc import ABC
+from typing import Any, Dict, List, Optional
 
-from langchain_perplexity import ChatPerplexity
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_perplexity import ChatPerplexity
 
-from .base import BaseTool, ToolResult
 from ..utils.config import config
 from ..utils.logger import logger
+from .base import BaseTool, ToolResult
 
 
 class ReActBaseTool(BaseTool, ABC):
@@ -79,6 +79,7 @@ class PerplexitySearchTool(ReActBaseTool):
             api_key = config.perplexity_api_key
             if not api_key:
                 import os
+
                 from dotenv import load_dotenv
 
                 load_dotenv(".env")
@@ -504,8 +505,8 @@ class CodeExecutorTool(ReActBaseTool):
             self.logger.info(f"Executing code: {code[:100]}...")
 
             # Capture output using StringIO
-            import io
             import contextlib
+            import io
 
             # Create string buffer to capture output
             output_buffer = io.StringIO()

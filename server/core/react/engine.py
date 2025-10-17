@@ -621,7 +621,7 @@ class ReActEngine:
 
             # Add a summary observation for the decomposed query setup
             state.add_observation(
-                content=f"쿼리가 {len(decomposed_queries)}개의 개별 검색으로 준비되었습니다. 각 검색을 순차적으로 실행하겠습니다.",
+                content=f"Find {len(decomposed_queries)} sub-query",
                 tool_output={
                     "action_type": "individual_searches",
                     "queries": decomposed_queries,

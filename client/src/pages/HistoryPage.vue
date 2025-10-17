@@ -1,62 +1,63 @@
 <template>
-  <div class="history-page">
-    <!-- 헤더 -->
-    <div class="page-header">
-      <h1>📚 Session History</h1>
-    </div>
+  <div class="page-container">
+    <div class="page-content">
+      <!-- 헤더 -->
+      <div class="page-header">
+        <h1>📚 Session History</h1>
+      </div>
 
-
-    <!-- 재생 모드 -->
-    <div v-if="replayMode" class="replay-container">
-      <div class="replay-header">
-        <button @click="stopReplay" class="btn-back">← 목록으로</button>
-        <div class="replay-controls">
-          <span class="replay-status">{{ replayStatus }}</span>
+      <!-- 재생 모드 -->
+      <div v-if="replayMode" class="replay-container">
+        <div class="replay-header">
+          <button @click="stopReplay" class="btn btn-primary">← 목록으로</button>
+          <div class="replay-controls">
+            <span class="replay-status">{{ replayStatus }}</span>
+          </div>
+        </div>
+        
+        <!-- 재생 메시지 컨테이너 -->
+        <div class="replay-messages">
+          <MessagesContainer :messages="replayMessages" />
         </div>
       </div>
-      
-      <!-- 재생 메시지 컨테이너 -->
-      <div class="replay-messages">
-        <MessagesContainer :messages="replayMessages" />
-      </div>
-    </div>
 
-    <!-- 세션 목록 -->
-    <div v-else class="sessions-container">
-      <div v-if="loading" class="loading">
-        <div class="spinner"></div>
-        <p>로딩중...</p>
+      <!-- 세션 목록 -->
+      <div v-else class="sessions-container">
+        <div v-if="loading" class="loading">
+          <div class="spinner"></div>
+          <p>로딩중...</p>
+        </div>
+
+        <div v-else-if="error" class="error">
+          <p>❌ {{ error }}</p>
+          <button @click="fetchSessions()" class="btn btn-primary">다시 시도</button>
+        </div>
+
+        <div v-else-if="sessions.length === 0" class="empty">
+          <p>📭 세션이 없습니다</p>
+        </div>
+
+        <div v-else class="sessions-list">
+          <SessionCard
+            v-for="session in sessions"
+            :key="session.session_id"
+            :session="session"
+            @replay="handleReplay"
+            @delete="handleDelete"
+          />
+        </div>
       </div>
 
-      <div v-else-if="error" class="error">
-        <p>❌ {{ error }}</p>
-        <button @click="fetchSessions()" class="btn-retry">다시 시도</button>
+      <!-- 푸터 (페이지네이션) -->
+      <div v-if="!replayMode && sessions.length > 0" class="page-footer">
+        <button
+          @click="loadMore"
+          :disabled="loading"
+          class="btn btn-primary"
+        >
+          {{ loading ? '로딩중...' : '더 보기' }}
+        </button>
       </div>
-
-      <div v-else-if="sessions.length === 0" class="empty">
-        <p>📭 세션이 없습니다</p>
-      </div>
-
-      <div v-else class="sessions-list">
-        <SessionCard
-          v-for="session in sessions"
-          :key="session.session_id"
-          :session="session"
-          @replay="handleReplay"
-          @delete="handleDelete"
-        />
-      </div>
-    </div>
-
-    <!-- 푸터 (페이지네이션) -->
-    <div v-if="!replayMode && sessions.length > 0" class="page-footer">
-      <button
-        @click="loadMore"
-        :disabled="loading"
-        class="btn-load-more"
-      >
-        {{ loading ? '로딩중...' : '더 보기' }}
-      </button>
     </div>
   </div>
 </template>
@@ -258,38 +259,7 @@ async function handleDelete(sessionId: string) {
 </script>
 
 <style scoped>
-.history-page {
-  min-height: calc(100vh - 60px);
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 헤더 */
-.page-header {
-  margin-bottom: 1rem;
-}
-
-.page-header h1 {
-  margin: 0;
-  font-size: 1.5rem;
-  color: var(--text-primary);
-}
-
-/* 세션 컨테이너 */
-.sessions-container {
-  flex: 1;
-  margin-bottom: 1rem;
-}
-
-.sessions-list {
-  display: flex;
-  flex-direction: column;
-}
-
-/* 재생 컨테이너 */
+/* HistoryPage 전용 스타일 */
 .replay-container {
   flex: 1;
   display: flex;
@@ -308,22 +278,6 @@ async function handleDelete(sessionId: string) {
   background: var(--bg-tertiary);
 }
 
-.btn-back {
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  padding: 0.4rem 0.85rem;
-  border-radius: var(--border-radius);
-  cursor: pointer;
-  font-weight: 600;
-  transition: var(--transition);
-  font-size: 0.9rem;
-}
-
-.btn-back:hover {
-  background: #1d4ed8;
-}
-
 .replay-controls {
   display: flex;
   align-items: center;
@@ -335,12 +289,21 @@ async function handleDelete(sessionId: string) {
   color: var(--text-secondary);
 }
 
-
-
 .replay-messages {
   flex: 1;
   overflow-y: auto;
   padding: 0.75rem 1rem;
+}
+
+/* 세션 컨테이너 */
+.sessions-container {
+  flex: 1;
+  margin-bottom: 1rem;
+}
+
+.sessions-list {
+  display: flex;
+  flex-direction: column;
 }
 
 /* 상태 */
@@ -370,79 +333,21 @@ async function handleDelete(sessionId: string) {
   to { transform: rotate(360deg); }
 }
 
-.btn-retry {
-  margin-top: 1rem;
-  padding: 0.5rem 1rem;
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: var(--border-radius);
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.btn-retry:hover {
-  background: #1d4ed8;
-}
-
 /* 푸터 */
 .page-footer {
   padding-top: 1rem;
   text-align: center;
 }
 
-.btn-load-more {
-  padding: 0.5rem 1.5rem;
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: var(--border-radius);
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition);
-  font-size: 0.9rem;
-}
-
-.btn-load-more:hover:not(:disabled) {
-  background: #1d4ed8;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
-}
-
-.btn-load-more:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* 반응형 */
 @media (max-width: 768px) {
-  .history-page {
-    min-height: calc(100vh - 50px);
-    padding: 0.75rem;
-  }
-  
-  .page-header {
-    margin-bottom: 0.75rem;
-  }
-  
-  .page-header h1 {
-    font-size: 1.3rem;
-  }
-  
   .replay-header {
     padding: 0.6rem 0.85rem;
-  }
-  
-  .btn-back {
-    padding: 0.35rem 0.75rem;
-    font-size: 0.85rem;
   }
   
   .replay-status {
     font-size: 0.8rem;
   }
-  
-
   
   .replay-messages {
     padding: 0.6rem 0.85rem;
@@ -453,36 +358,13 @@ async function handleDelete(sessionId: string) {
   .empty {
     padding: 2rem 1rem;
   }
-  
-  .btn-load-more {
-    padding: 0.45rem 1.25rem;
-    font-size: 0.85rem;
-  }
 }
 
 @media (max-width: 480px) {
-  .history-page {
-    min-height: calc(100vh - 45px);
-    padding: 0.5rem;
-  }
-  
-  .page-header {
-    margin-bottom: 0.5rem;
-  }
-  
-  .page-header h1 {
-    font-size: 1.1rem;
-  }
-  
   .replay-header {
     padding: 0.5rem 0.7rem;
     flex-wrap: wrap;
     gap: 0.5rem;
-  }
-  
-  .btn-back {
-    padding: 0.3rem 0.6rem;
-    font-size: 0.8rem;
   }
   
   .replay-controls {
@@ -492,8 +374,6 @@ async function handleDelete(sessionId: string) {
   .replay-status {
     font-size: 0.75rem;
   }
-  
-
   
   .replay-messages {
     padding: 0.5rem 0.7rem;
@@ -508,16 +388,6 @@ async function handleDelete(sessionId: string) {
   .spinner {
     width: 30px;
     height: 30px;
-  }
-  
-  .btn-load-more {
-    padding: 0.4rem 1rem;
-    font-size: 0.8rem;
-  }
-  
-  .btn-retry {
-    padding: 0.35rem 0.85rem;
-    font-size: 0.85rem;
   }
 }
 </style>

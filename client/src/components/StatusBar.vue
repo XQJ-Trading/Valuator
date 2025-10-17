@@ -47,7 +47,7 @@ const statusIcon = computed(() => {
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   border: 2px solid #e2e8f0;
   border-radius: var(--border-radius);
-  padding: 1.25rem 1.75rem;
+  padding: 0.75rem 1.25rem;
   display: flex;
   align-items: center;
   gap: 1rem;

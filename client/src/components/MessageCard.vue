@@ -572,7 +572,7 @@ function formatJson(data: any): string {
 /* 텍스트 스타일 */
 .message-text {
   line-height: 1.6;
-  font-size: 1rem;
+  font-size: var(--font-base);
 }
 
 .message-text strong {
@@ -589,6 +589,21 @@ function formatJson(data: any): string {
   border-radius: 4px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.9em;
+}
+
+/* message-text 반응형 스타일 */
+@media (max-width: 768px) {
+  .message-text {
+    font-size: var(--font-sm);
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-text {
+    font-size: var(--font-xs);
+    line-height: 1.4;
+  }
 }
 
 /* Tool Result 스타일 */

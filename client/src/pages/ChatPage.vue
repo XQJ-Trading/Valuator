@@ -1,22 +1,24 @@
 <template>
-  <div class="chat-page">
-    <!-- Input Section -->
-    <InputSection 
-      v-model:query="query"
-      v-model:rule="rule"
-      v-model:selectedModel="selectedModel"
-      :loading="loading"
-      :availableModels="availableModels"
-      @send="send"
-      @stream="stream"
-      @clear="clearAll"
-    />
+  <div class="page-container">
+    <div class="page-content">
+      <!-- Input Section -->
+      <InputSection 
+        v-model:query="query"
+        v-model:rule="rule"
+        v-model:selectedModel="selectedModel"
+        :loading="loading"
+        :availableModels="availableModels"
+        @send="send"
+        @stream="stream"
+        @clear="clearAll"
+      />
 
-    <!-- Status Bar -->
-    <StatusBar :status="status" :loading="loading" />
+      <!-- Status Bar -->
+      <StatusBar :status="status" :loading="loading" />
 
-    <!-- Messages Container -->
-    <MessagesContainer :messages="messages" />
+      <!-- Messages Container -->
+      <MessagesContainer :messages="messages" />
+    </div>
   </div>
 </template>
 
@@ -41,27 +43,4 @@ const {
 } = useChat()
 </script>
 
-<style scoped>
-.chat-page {
-  min-height: calc(100vh - 60px);
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 1rem;
-  display: flex;
-  flex-direction: column;
-}
-
-@media (max-width: 768px) {
-  .chat-page {
-    min-height: calc(100vh - 50px);
-    padding: 0 0.75rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .chat-page {
-    min-height: calc(100vh - 45px);
-    padding: 0 0.5rem;
-  }
-}
-</style>
+<!-- 공통 스타일은 styles/layout/_page-base.css로 이동 -->

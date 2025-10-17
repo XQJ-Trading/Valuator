@@ -1,0 +1,35 @@
+/* 반응형 공통 규칙 */
+.responsive-container {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* 모바일 최적화 */
+@media (max-width: 768px) {
+  .responsive-container {
+    padding: 0 var(--spacing-md);
+  }
+  
+  .responsive-grid {
+    grid-template-columns: 1fr;
+  gap: var(--spacing-md);
+  }
+}
+
+@media (max-width: 480px) {
+  .responsive-container {
+    padding: 0 var(--spacing-sm);
+  }
+  
+  .responsive-grid {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-sm);
+  }
+}
+
+/* 터치 디바이스 최적화 */
+@media (max-width: 768px) {
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+}

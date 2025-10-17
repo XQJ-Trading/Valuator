@@ -1,7 +1,6 @@
 """AI Agent with integrated ReAct capabilities"""
 
 from typing import Dict, Any, Optional, List, AsyncGenerator
-from datetime import datetime
 
 from ..models.gemini import GeminiModel
 from ..react.engine import ReActEngine
@@ -213,7 +212,6 @@ Key guidelines:
         prompt_ready = self.system_prompt is not None
         engine_ready = hasattr(self, "react_engine") and self.react_engine is not None
         return model_ready and prompt_ready and engine_ready
-
 
 
 # Alias for backward compatibility

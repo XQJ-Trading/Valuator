@@ -19,17 +19,17 @@ class GlobalGeminiRateLimiter:
     """전역 Gemini API Rate Limiter - API key 단위로 TPM 제한을 관리"""
     _instance = None
     _lock = asyncio.Lock()
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
         if hasattr(self, '_initialized'):
             return
         self._initialized = True
-        
+
         # 모델별 TPM 제한 (Token per Minute)
         self.model_limits = {
             "gemini-2.5-pro": 2_000_000,
@@ -37,13 +37,13 @@ class GlobalGeminiRateLimiter:
             # 기본값 (모델명 매칭이 안될 경우)
             "default": 1_000_000
         }
-        
+
         # 모델별 토큰 사용 이력: [(timestamp, tokens), ...]
         self.usage_history = {
             "gemini-2.5-pro": [],
             "gemini-2.5-flash": []
         }
-    
+
     def _get_model_key(self, model_name: str) -> str:
         """모델명을 정규화하여 키로 사용"""
         model_name = model_name.lower()
@@ -53,68 +53,68 @@ class GlobalGeminiRateLimiter:
             return "gemini-2.5-flash"
         else:
             return "gemini-2.5-flash"  # 기본값으로 Flash 사용
-    
+
     def _cleanup_old_records(self, model_key: str, current_time: float):
         """1분 이상 된 기록들을 정리"""
         minute_ago = current_time - 60.0
         if model_key not in self.usage_history:
             self.usage_history[model_key] = []
-        
+
         self.usage_history[model_key] = [
-            (timestamp, tokens) 
+            (timestamp, tokens)
             for timestamp, tokens in self.usage_history[model_key]
             if timestamp > minute_ago
         ]
-    
+
     def _get_current_usage(self, model_key: str, current_time: float) -> int:
         """현재 1분간의 토큰 사용량 계산"""
         self._cleanup_old_records(model_key, current_time)
         return sum(tokens for _, tokens in self.usage_history[model_key])
-    
+
     async def wait_if_needed(self, model_name: str):
         """현재 사용량이 70% 초과시 대기"""
         async with self._lock:
             model_key = self._get_model_key(model_name)
             current_time = time.time()
             limit = self.model_limits.get(model_key, self.model_limits["default"])
-            
+
             current_usage = self._get_current_usage(model_key, current_time)
             threshold = int(limit * 0.7)  # 70% 임계값
-            
+
             if current_usage > threshold:
                 # 가장 오래된 기록의 시간을 찾아서 대기 시간 계산
                 if self.usage_history[model_key]:
                     oldest_timestamp = min(timestamp for timestamp, _ in self.usage_history[model_key])
                     wait_time = max(0, 60.0 - (current_time - oldest_timestamp))
-                    
+
                     if wait_time > 0:
                         usage_percentage = (current_usage / limit) * 100
                         logger.info(f"🕐 70% 임계값 초과 대기중 - 모델: {model_name}, "
                                   f"현재 사용량: {current_usage:,}/{limit:,} ({usage_percentage:.1f}%), "
                                   f"임계값: {threshold:,}, 대기 시간: {wait_time:.1f}초")
                         await asyncio.sleep(wait_time)
-    
+
     def record_usage(self, model_name: str, tokens_used: int):
         """API 호출 후 실제 토큰 사용량을 기록"""
         if tokens_used <= 0:
             return
-            
+
         model_key = self._get_model_key(model_name)
         current_time = time.time()
-        
+
         if model_key not in self.usage_history:
             self.usage_history[model_key] = []
-            
+
         self.usage_history[model_key].append((current_time, tokens_used))
-        
+
         # 기록 정리
         self._cleanup_old_records(model_key, current_time)
-        
+
         # 현재 사용량 로깅
         current_usage = sum(tokens for _, tokens in self.usage_history[model_key])
         limit = self.model_limits.get(model_key, self.model_limits["default"])
         usage_percentage = (current_usage / limit) * 100
-        
+
         logger.debug(f"📊 토큰 사용량 기록 - 모델: {model_name}, "
                     f"사용: {tokens_used:,}, 1분간 총 사용량: {current_usage:,}/{limit:,} "
                     f"({usage_percentage:.1f}%)")
@@ -140,9 +140,9 @@ def _normalize_content(value: Any) -> str:
             try:
                 if isinstance(item, dict):
                     if "text" in item and isinstance(item["text"], str):
-                        parts.append(item["text"]) 
+                        parts.append(item["text"])
                     elif "content" in item and isinstance(item["content"], str):
-                        parts.append(item["content"]) 
+                        parts.append(item["content"])
                     else:
                         # Fallback stringification
                         parts.append(str(item))
@@ -169,6 +169,7 @@ class GeminiResponse(BaseModel):
     content: str = Field(..., description="Response content")
     usage: Optional[Dict[str, Any]] = Field(None, description="Token usage information")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    grounding_metadata: Optional[Dict[str, Any]] = Field(None, description="Search grounding metadata")
 
 
 class GeminiChatSession:
@@ -184,11 +185,11 @@ class GeminiChatSession:
     ) -> GeminiResponse:
         """Send a message in the session and get a response"""
         self.history.append(HumanMessage(content=message))
-        
+
         # Rate limiting - 70% 임계값 체크 및 대기
         rate_limiter = get_rate_limiter()
         await rate_limiter.wait_if_needed(self.model.model)
-        
+
         response = await self.model.agenerate(
             messages=[self.history],
             callbacks=callbacks
@@ -210,6 +211,10 @@ class GeminiChatSession:
             gen_info = getattr(generation, 'generation_info', None) or {}
             if isinstance(gen_info, dict):
                 usage = gen_info.get('usage_metadata')
+
+        # Extract grounding metadata if search grounding is enabled
+        grounding_metadata = None
+        grounding_metadata = self._extract_grounding_metadata(generation)
 
         # Rate limiting - 실제 사용된 토큰 수를 기록
         if usage:
@@ -267,32 +272,93 @@ class GeminiChatSession:
                 logger.debug(f"요청과 응답을 파일로 저장했습니다: {filepath}")
             except Exception as e:
                 logger.warning(f"요청/응답 파일 저장 실패: {e}")
-        
+
         self.history.append(AIMessage(content=content))
-        
+
         return GeminiResponse(
             content=content,
             usage=usage,
             metadata={"model": self.model.model},
+            grounding_metadata=grounding_metadata,
         )
-    
+
+    def _extract_grounding_metadata(self, generation) -> Optional[Dict[str, Any]]:
+        """응답에서 search grounding 메타데이터 추출"""
+        try:
+            # generation_info에서 grounding 정보 추출
+            gen_info = getattr(generation, 'generation_info', None) or {}
+
+            # Google API 응답 형식에서 grounding 정보 확인
+            if 'candidates' in gen_info and len(gen_info['candidates']) > 0:
+                candidate = gen_info['candidates'][0]
+
+                # groundingMetadata 확인 (camelCase로 변경)
+                if 'groundingMetadata' in candidate:
+                    grounding_data = candidate['groundingMetadata']
+
+                    # 필요한 정보 추출
+                    metadata = {
+                        "search_queries": [],
+                        "grounding_chunks": [],
+                        "grounding_supports": [],
+                        "search_entry_point": None
+                    }
+
+                    # 검색 쿼리 추출 (webSearchQueries로 변경)
+                    if 'webSearchQueries' in grounding_data:
+                        metadata["search_queries"] = grounding_data['webSearchQueries']
+
+                    # 검색 진입점 정보 추출
+                    if 'searchEntryPoint' in grounding_data:
+                        metadata["search_entry_point"] = grounding_data['searchEntryPoint']
+
+                    # grounding chunks 정보 추출
+                    if 'groundingChunks' in grounding_data:
+                        for chunk in grounding_data['groundingChunks']:
+                            chunk_info = {
+                                "title": chunk.get('web', {}).get('title', ''),
+                                "uri": chunk.get('web', {}).get('uri', ''),
+                            }
+                            metadata["grounding_chunks"].append(chunk_info)
+
+                    # grounding supports 정보 추출
+                    if 'groundingSupports' in grounding_data:
+                        supports = []
+                        for support in grounding_data['groundingSupports']:
+                            support_info = {
+                                "segment": support.get('segment', {}),
+                                "grounding_chunk_indices": support.get('groundingChunkIndices', [])
+                            }
+                            supports.append(support_info)
+                        metadata["grounding_supports"] = supports
+
+                    if metadata["search_queries"] or metadata["grounding_chunks"]:
+                        logger.debug(f"Grounding metadata extracted: {len(metadata['search_queries'])} queries, {len(metadata['grounding_chunks'])} chunks")
+                        return metadata
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to extract grounding metadata: {e}")
+            return None
+
     def _extract_total_tokens(self, usage_metadata: Dict[str, Any]) -> int:
         """usage metadata에서 총 토큰 사용량 추출"""
         if not usage_metadata:
             return 0
-        
+
         # Google API 형식
         if 'total_token_count' in usage_metadata:
             return usage_metadata['total_token_count']
-        
+
         # LangChain 형식
         if 'total_tokens' in usage_metadata:
             return usage_metadata['total_tokens']
-        
+
         # 분리된 형식에서 합산
         input_tokens = usage_metadata.get('input_tokens', 0) or usage_metadata.get('prompt_token_count', 0)
         output_tokens = usage_metadata.get('output_tokens', 0) or usage_metadata.get('candidates_token_count', 0)
-        
+
         return input_tokens + output_tokens
 
     async def stream_message(
@@ -302,7 +368,7 @@ class GeminiChatSession:
     ) -> AsyncGenerator[str, None]:
         """Send a message and stream the response"""
         self.history.append(HumanMessage(content=message))
-        
+
         streamed_content = ""
         # LangChain ChatGoogleGenerativeAI expects nested messages for streaming
         yielded_any = False
@@ -315,48 +381,52 @@ class GeminiChatSession:
         if not yielded_any:
             response = await self.send_message(message, callbacks=callbacks)
             yield response.content
-        
+
         self.history.append(AIMessage(content=streamed_content))
 
 class GeminiModel:
     """Gemini model wrapper for AI Agent"""
-    
+
     def __init__(self, model_name: Optional[str] = None):
         """
         Initialize Gemini model
-        
+
         Args:
             model_name: Model name to use (defaults to config value)
         """
         self.model_name = model_name or config.agent_model
         self.llm = None
         self._initialize_model()
-    
+
     def _initialize_model(self):
         """Initialize the Gemini model"""
         try:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.model_name,
-                google_api_key=config.google_api_key,
-                temperature=config.temperature,
-                max_output_tokens=config.max_tokens,
-                top_p=config.top_p,
-                top_k=config.top_k,
-                streaming=True,
-            )
-            logger.info(f"Initialized Gemini model: {self.model_name}")
+            # 기본 모델 설정
+            model_kwargs = {
+                "model": self.model_name,
+                "temperature": config.temperature,
+                "max_tokens": config.max_tokens,
+                "top_p": config.top_p,
+                "top_k": config.top_k,
+                "streaming": True,
+            }
+
+            model_kwargs["tools"] = [{"google_search": {}}]
+            logger.info(f"Enabling Google Search grounding for model: {self.model_name}")
+
+            self.llm = ChatGoogleGenerativeAI(**model_kwargs)
         except Exception as e:
             logger.error(f"Failed to initialize Gemini model: {e}")
             raise
-     
+
     def create_human_message(self, content: str) -> HumanMessage:
         """Create a human message"""
         return HumanMessage(content=content)
-    
+
     def create_ai_message(self, content: str) -> AIMessage:
         """Create an AI message"""
         return AIMessage(content=content)
-    
+
     def format_messages(
         self,
         system_prompt: str,

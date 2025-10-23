@@ -177,8 +177,6 @@ class QueryDecomposer:
                     f"Query decomposed into {len(sub_queries)} sub-queries: {sub_queries}"
                 )
                 return sub_queries
-
-            logger.warning("Decomposition failed, using original query")
             return [query]
 
         except Exception as e:
@@ -190,9 +188,65 @@ class QueryDecomposer:
         response_text = response_text.strip()
 
         if response_text.startswith("```"):
-            response_text = re.sub(r"```(?:json)?\n?", "", response_text).strip()
+            # Extract content between ```json and ```
+            match = re.search(
+                r"```(?:json)?\s*\n?(.*?)\n?```", response_text, re.DOTALL
+            )
+            if match:
+                response_text = match.group(1).strip()
+            else:
+                # Fallback: remove ``` markers
+                response_text = re.sub(r"```(?:json)?\n?", "", response_text).strip()
+
+        # Handle incomplete JSON responses (common issue)
+        if response_text.startswith("```json") and not response_text.endswith("```"):
+            # Try to find the end of the JSON content
+            lines = response_text.split("\n")
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.strip() == "```json":
+                    in_json = True
+                    continue
+                elif line.strip() == "```" and in_json:
+                    break
+                elif in_json:
+                    json_lines.append(line)
+            if json_lines:
+                response_text = "\n".join(json_lines).strip()
+
+        # Handle truncated JSON responses (try to complete them)
+        if response_text.startswith("[") and not response_text.endswith("]"):
+            # Try to find the last complete element and close the array
+            lines = response_text.split("\n")
+            complete_lines = []
+            for line in lines:
+                line = line.strip()
+                if line and '"' in line:
+                    # Clean up the line and add it
+                    cleaned_line = line.rstrip(",").strip()
+                    if cleaned_line.startswith('"') and cleaned_line.endswith('"'):
+                        complete_lines.append(cleaned_line)
+                    elif cleaned_line.startswith('"'):
+                        # Try to complete the string
+                        complete_lines.append(cleaned_line + '"')
+            if complete_lines:
+                # Try to create a valid JSON array
+                response_text = "[" + ",".join(complete_lines) + "]"
+
+        # Additional fallback: try to extract queries from incomplete JSON
+        if response_text.startswith("```json") and "[" in response_text:
+            # Try to extract array content even if incomplete
+            array_start = response_text.find("[")
+            if array_start != -1:
+                array_content = response_text[array_start:]
+                # Try to find quoted strings in the array content
+                quoted_strings = re.findall(r'"([^"]+)"', array_content)
+                if len(quoted_strings) >= 2:
+                    return quoted_strings[:6]
 
         try:
+            # Try to parse as JSON array
             if response_text.startswith("[") and response_text.endswith("]"):
                 queries = json.loads(response_text)
                 if isinstance(queries, list):
@@ -203,12 +257,76 @@ class QueryDecomposer:
                             valid.append(q.strip())
                             seen.add(q.lower())
                     return valid[:6] if valid else []
+
+            # Try to parse as JSON object with array
+            elif response_text.startswith("{") and response_text.endswith("}"):
+                data = json.loads(response_text)
+                if isinstance(data, dict):
+                    # Look for common keys that might contain queries
+                    for key in [
+                        "queries",
+                        "sub_queries",
+                        "questions",
+                        "search_queries",
+                        "items",
+                    ]:
+                        if key in data and isinstance(data[key], list):
+                            queries = data[key]
+                            valid = []
+                            seen = set()
+                            for q in queries:
+                                if (
+                                    isinstance(q, str)
+                                    and q.strip()
+                                    and q.lower() not in seen
+                                ):
+                                    valid.append(q.strip())
+                                    seen.add(q.lower())
+                            return valid[:6] if valid else []
         except json.JSONDecodeError:
             pass
 
+        # Try to extract queries from numbered lists
+        numbered_pattern = (
+            r"(?:\d+\.?\s*|\-\s*|\*\s*)(.+?)(?=\n\d+\.?\s*|\n\-\s*|\n\*\s*|$)"
+        )
+        numbered_matches = re.findall(
+            numbered_pattern, response_text, re.MULTILINE | re.DOTALL
+        )
+        if len(numbered_matches) >= 2:
+            valid = []
+            seen = set()
+            for match in numbered_matches:
+                query = match.strip()
+                if query and query.lower() not in seen:
+                    valid.append(query)
+                    seen.add(query.lower())
+            return valid[:6] if valid else []
+
+        # Try to extract quoted strings
         quoted = re.findall(r'"([^"]+)"', response_text)
         if len(quoted) >= 2:
             return list(dict.fromkeys(quoted))[:6]
+
+        # Try to extract from lines that look like queries
+        lines = [line.strip() for line in response_text.split("\n") if line.strip()]
+        valid_lines = []
+        seen = set()
+        for line in lines:
+            if (
+                len(line) > 10
+                and line.lower() not in seen
+                and not line.startswith(("Query:", "Sub-query:", "Question:"))
+            ):
+                valid_lines.append(line)
+                seen.add(line.lower())
+        if len(valid_lines) >= 2:
+            return valid_lines[:6]
+
+        # Final fallback: try to extract any quoted strings from the response
+        quoted_strings = re.findall(r'"([^"]{20,})"', response_text)
+        if len(quoted_strings) >= 2:
+            return quoted_strings[:6]
 
         return []
 
@@ -400,9 +518,8 @@ class SearchResultSynthesizer:
                 synthesis_parts.append(f"**{query}**:\n{truncated}")
 
         if synthesis_parts:
-            return (
-                f"다음은 {len(successful_results)}개의 검색 결과를 종합한 정보입니다:\n\n"
-                + "\n\n".join(synthesis_parts)
+            return f"다음은 {len(successful_results)}개의 검색 결과를 종합한 정보입니다:\n\n" + "\n\n".join(
+                synthesis_parts
             )
         else:
             return "결과를 통합할 수 없습니다."

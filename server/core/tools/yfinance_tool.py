@@ -1,6 +1,6 @@
 """YFinance tool to fetch balance sheet metrics"""
 
-from typing import Any, Dict, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .base import BaseTool, ToolResult
 
@@ -235,12 +235,7 @@ class YFinanceBalanceSheetTool(BaseTool):
                 },
             )
         except Exception as e:
-            return ToolResult(
-                success=False, 
-                result=None, 
-                error=str(e),
-                metadata={}
-            )
+            return ToolResult(success=False, result=None, error=str(e), metadata={})
 
     def get_schema(self) -> Dict[str, Any]:
         return {

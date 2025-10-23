@@ -464,22 +464,17 @@ class ReActEngine:
             elif step.step_type == ReActStepType.THOUGHT:
                 thought_contents.append(step.content.lower())
 
-        # Check for identical or very similar consecutive actions
-        # Only detect infinite loop if we have 5+ consecutive similar actions
-        if len(action_contents) >= 5:
-            consecutive_similar = 0
-            for i in range(len(action_contents) - 1):
-                if (
-                    self._similarity_score(action_contents[i], action_contents[i + 1])
-                    > 0.9
-                ):
-                    consecutive_similar += 1
-                else:
-                    consecutive_similar = 0
-
-                if consecutive_similar >= 4:  # 5 consecutive similar actions
-                    logger.warning("Detected repetitive action pattern")
-                    return True
+        # Check for repetitive actions (simplified approach)
+        # If we have many actions but they're all very similar, it might be a loop
+        if len(action_contents) >= 6:
+            # Count how many unique actions we have
+            unique_actions = len(set(action_contents))
+            # If we have 6+ actions but only 1-2 unique ones, it's likely a loop
+            if unique_actions <= 2:
+                logger.warning(
+                    "Detected repetitive action pattern - too few unique actions"
+                )
+                return True
 
         # Check for thoughts that keep mentioning the same completion
         if len(thought_contents) >= 4:
@@ -503,22 +498,6 @@ class ReActEngine:
                 return True
 
         return False
-
-    def _similarity_score(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two texts (simple word overlap)"""
-        if not text1 or not text2:
-            return 0.0
-
-        words1 = set(text1.split())
-        words2 = set(text2.split())
-
-        if not words1 or not words2:
-            return 0.0
-
-        intersection = words1.intersection(words2)
-        union = words1.union(words2)
-
-        return len(intersection) / len(union) if union else 0.0
 
     async def _thought_step(self, state: ReActState):
         """Execute thought step"""

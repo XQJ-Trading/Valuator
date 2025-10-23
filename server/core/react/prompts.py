@@ -1,6 +1,6 @@
 """ReAct prompt templates"""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .state import ReActState, ReActStep, ReActStepType
 
@@ -24,7 +24,7 @@ You have access to the following tools. Use them when necessary.
 
 **CRITICAL Response Format:**
 You MUST follow these rules for every response.
--   **For Tool Actions**: 
+-   **For Tool Actions**:
     -   **Code Execution ONLY**: Use ```python\nyour_code_here\n``` format (no JSON wrapper)
     -   **All Other Tools**: Your response MUST be ONLY a single, valid JSON object
         -   Format: `{{"tool": "tool_name", "parameters": {{"param_name": "param_value"}}}}`
@@ -61,8 +61,8 @@ Based on your last thought, execute ONE tool action.
 -   Do NOT add any extra text or explanations
 
 **For complex queries requiring multiple searches:**
-- Use web_search with enable_expansion=true to enable QueryExpansionSearch that automatically decomposes and executes multiple searches based on query complexity
-- This allows the system to intelligently break down complex queries into smaller, manageable searches
+- Use deep_search for deep analysis that automatically decomposes and executes multiple searches based on query complexity
+- Use web_search for simple, direct searches
 
 **Action:**"""
 

@@ -1,7 +1,7 @@
 """Tools package for AI Agent"""
 
 from .base import BaseTool, ToolResult
-from .query_expansion_search import QueryExpansionSearchTool
+from .deep_search import DeepSearchTool
 from .react_tool import CodeExecutorTool, FileSystemTool, PerplexitySearchTool
 from .web_search import WebSearchTool
 from .yfinance_tool import YFinanceBalanceSheetTool
@@ -11,7 +11,7 @@ __all__ = [
     "ToolResult",
     "WebSearchTool",
     "YFinanceBalanceSheetTool",
-    "QueryExpansionSearchTool",
+    "DeepSearchTool",
     "PerplexitySearchTool",
     "CodeExecutorTool",
     "FileSystemTool",

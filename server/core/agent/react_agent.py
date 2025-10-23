@@ -5,6 +5,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from ..models.gemini import GeminiModel
 from ..react.engine import ReActEngine
 from ..tools.base import ToolRegistry
+from ..tools.deep_search import DeepSearchTool
 from ..tools.react_tool import CodeExecutorTool, FileSystemTool, PerplexitySearchTool
 from ..tools.yfinance_tool import YFinanceBalanceSheetTool
 from ..utils.config import config
@@ -45,6 +46,7 @@ class AIAgent:
 
         # Register default tools
         self.tool_registry.register(PerplexitySearchTool())
+        self.tool_registry.register(DeepSearchTool())
         self.tool_registry.register(CodeExecutorTool())
         self.tool_registry.register(FileSystemTool())
         self.tool_registry.register(YFinanceBalanceSheetTool())

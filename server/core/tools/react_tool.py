@@ -3,8 +3,11 @@
 import asyncio
 import json
 from abc import ABC
+import os
+import re
 from typing import Any, Dict, List, Optional
 
+from dotenv import load_dotenv
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_perplexity import ChatPerplexity
@@ -65,12 +68,10 @@ class ReActBaseTool(BaseTool, ABC):
 
 
 class PerplexitySearchTool(ReActBaseTool):
-    """Real web search using Perplexity AI via LangChain"""
-
     def __init__(self):
         super().__init__(
             name="web_search",
-            description="Search the web for current information using Perplexity AI. Provides real-time web results with citations. Set enable_expansion=true for comprehensive query expansion search.",
+            description="Search the web for current information using Perplexity AI. Provides real-time web results with citations.",
         )
 
         # ChatPerplexity 초기화
@@ -100,183 +101,48 @@ class PerplexitySearchTool(ReActBaseTool):
             self.chat = None
             self.available = False
 
-    async def _execute_impl(
+    async def execute(
         self,
         query: str,
-        enable_expansion: bool = False,
-        expansion_depth: int = None,
         **kwargs,
     ) -> ToolResult:
-        """Execute web search using ChatPerplexity"""
+        """
+        Perplexity를 사용하여 단일 웹 검색을 실행합니다.
 
-        # If expansion is enabled, perform adaptive decomposition based on query complexity
-        if enable_expansion:
-            try:
-                # Let LLM determine optimal decomposition approach
-                from .query_expansion_search import QueryExpansionSearchTool
+        Args:
+            query: 검색할 쿼리
+            **kwargs: (무시됨)
 
-                expansion_tool = QueryExpansionSearchTool()
-                decomposed_queries = await expansion_tool._analyze_and_decompose_query(
-                    query, expansion_depth
-                )
-
-                # Prepare for individual searches
-                return await self.execute_individual_search(
-                    decomposed_queries, **kwargs
-                )
-
-            except Exception as e:
-                self.logger.warning(
-                    f"Adaptive expansion failed, falling back to regular search: {e}"
-                )
-                # If decomposition fails, fall back to simple parallel search with analysis
-                return await self._execute_simple_parallel_search(query, 3)
-
-        # Regular single search
+        Returns:
+            ToolResult: 검색 결과
+        """
         return await self._execute_single_search(query)
 
-    async def execute_individual_search(
-        self,
-        decomposed_queries: List[str],
-        **kwargs,
-    ) -> ToolResult:
-        """
-        Execute individual searches for each decomposed query asynchronously
-
-        This runs all sub-queries in parallel using asyncio.gather for optimal performance
-        """
-        self.logger.info(
-            f"Starting {len(decomposed_queries)} concurrent individual searches: {decomposed_queries}"
-        )
-
-        async def single_search(query: str) -> dict:
-            """Execute a single search and return structured result"""
-            try:
-                # 개별 검색에서는 별도 로그 생략 - _execute_single_search에서 로그 출력
-                result = await self._execute_single_search(query)
-                if result.success and result.result:
-                    return {
-                        "query": query,
-                        "success": True,
-                        "answer": result.result.get("answer", "No answer"),
-                        "sources": result.result.get("sources", []),
-                        "metadata": result.metadata,
-                    }
-                else:
-                    return {
-                        "query": query,
-                        "success": False,
-                        "answer": "Search failed",
-                        "sources": [],
-                        "error": result.error,
-                    }
-            except Exception as e:
-                self.logger.error(f"Individual search failed for '{query}': {e}")
-                return {
-                    "query": query,
-                    "success": False,
-                    "answer": f"Search error: {str(e)}",
-                    "sources": [],
-                    "error": str(e),
-                }
-
-        # Execute all individual searches asynchronously
-        tasks = [single_search(query) for query in decomposed_queries]
-        search_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Process and consolidate results
-        successful_searches = []
-        all_answers = []
-
-        for i, result in enumerate(search_results):
-            if isinstance(result, Exception):
-                self.logger.error(f"Search {i+1} failed with exception: {result}")
-                all_answers.append(
-                    f"Search {i+1} ({decomposed_queries[i]}): Failed - {str(result)}"
-                )
-            elif result.get("success", False):
-                successful_searches.append(result)
-                all_answers.append(
-                    f"Search {i+1} ({result['query']}):\n{result['answer']}"
-                )
-            else:
-                all_answers.append(
-                    f"Search {i+1} ({result['query']}): {result.get('answer', 'No results')}"
-                )
-
-        # Create comprehensive consolidated answer
-        if successful_searches:
-            consolidated_answer = f"Comprehensive Analysis for Original Query\n\n"
-            consolidated_answer += "=" * 60 + "\n"
-            consolidated_answer += "INDIVIDUAL SEARCH RESULTS\n"
-            consolidated_answer += "=" * 60 + "\n\n"
-
-            for answer in all_answers:
-                consolidated_answer += answer + "\n\n"
-                consolidated_answer += "-" * 40 + "\n\n"
-
-            summary = f"\nSUMMARY: {len(successful_searches)}/{len(decomposed_queries)} searches completed successfully.\n"
-            consolidated_answer += summary
-
-            return ToolResult(
-                success=True,
-                result={
-                    "action_type": "consolidated_individual_searches",
-                    "original_decomposed_queries": decomposed_queries,
-                    "total_searches": len(decomposed_queries),
-                    "successful_searches": len(successful_searches),
-                    "consolidated_answer": consolidated_answer,
-                    "all_answers": all_answers,
-                    "search_details": successful_searches,
-                },
-                metadata={
-                    "individual_searches_executed": len(decomposed_queries),
-                    "successful_individual_searches": len(successful_searches),
-                    "query_list": decomposed_queries,
-                },
-            )
-        else:
-            return ToolResult(
-                success=False,
-                result=None,
-                error=f"All {len(decomposed_queries)} individual searches failed",
-                metadata={
-                    "individual_searches_failed": len(decomposed_queries),
-                    "query_list": decomposed_queries,
-                },
-            )
-
     async def _execute_single_search(self, query: str) -> ToolResult:
-        """Execute a single web search"""
-        if not self.available:
-            # Fallback to basic response when API not available
+        """내부적으로 단일 웹 검색을 실행합니다."""
+        if not self.available or not self.chat:
             return ToolResult(
                 success=False,
                 result=None,
-                error="Perplexity API not available. Check PPLX_API_KEY configuration.",
+                error="Perplexity API not available. Check PPLX_API_KEY configuration or dependencies.",
             )
 
         try:
-            self.logger.info(f"Searching web with Perplexity for: {query}")
+            logger.info(f"Searching web with Perplexity for: {query}")
 
-            # 시스템 프롬프트와 사용자 쿼리 구성
             messages = [
                 SystemMessage(
-                    content="You are a helpful search assistant. Provide accurate, up-to-date information with sources when possible. Be concise but comprehensive."
+                    content="You are a comprehensive search assistant. Provide detailed, accurate, and up-to-date information with sources. Be thorough and analytical in your responses."
                 ),
                 HumanMessage(content=query),
             ]
 
-            # ChatPerplexity 호출
             response = await self.chat.ainvoke(messages)
-
-            # 응답 처리
             answer = response.content
 
-            # 메타데이터에서 소스 정보 추출 (가능한 경우)
+            # 메타데이터에서 소스 정보 추출
             sources = []
             if hasattr(response, "response_metadata") and response.response_metadata:
-                # Perplexity 응답에서 인용 정보 추출 시도
                 if "citations" in response.response_metadata:
                     sources = response.response_metadata["citations"]
                 elif "sources" in response.response_metadata:
@@ -284,8 +150,6 @@ class PerplexitySearchTool(ReActBaseTool):
 
             # 응답에서 URL 패턴 추출 (fallback)
             if not sources:
-                import re
-
                 url_pattern = r"https?://[^\s)]+"
                 found_urls = re.findall(url_pattern, answer)
                 sources = list(set(found_urls))  # 중복 제거
@@ -306,168 +170,22 @@ class PerplexitySearchTool(ReActBaseTool):
                 success=False, result=None, error=f"Search failed: {str(e)}"
             )
 
-    async def _execute_simple_parallel_search(
-        self, query: str, expansion_depth: int
-    ) -> ToolResult:
-        """Execute simple parallel search when LLM-based expansion fails"""
-        from langchain_core.messages import HumanMessage
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        try:
-            # Use LLM to create simple sub-queries for parallel execution
-            llm = ChatGoogleGenerativeAI(
-                model=config.agent_model,
-                temperature=0.1,
-                max_tokens=1028,
-                api_key=config.google_api_key,
-            )
-
-            # Create sub-queries based on query analysis - aim for 4 sub-queries like in the example
-            target_depth = min(expansion_depth, 4)  # Default to 4 like user's example
-
-            sub_query_prompt = f"""
-            Given the search query: "{query}"
-
-            Break this into {target_depth} focused sub-queries that explore different aspects.
-            Each should be specific and searchable.
-
-            Return ONLY a comma-separated list of {target_depth} queries.
-            """
-
-            messages = [HumanMessage(content=sub_query_prompt)]
-            response = await llm.ainvoke(messages)
-
-            response_text = response.content.strip()
-
-            # Parse comma-separated queries
-            if "," in response_text:
-                sub_queries = [q.strip() for q in response_text.split(",") if q.strip()]
-            else:
-                # Simple fallback decomposition
-                words = query.split()
-                if len(words) >= 4:
-                    # Split into roughly equal parts
-                    chunk_size = len(words) // target_depth
-                    sub_queries = []
-                    for i in range(target_depth):
-                        start = i * chunk_size
-                        end = (
-                            (i + 1) * chunk_size if i < target_depth - 1 else len(words)
-                        )
-                        sub_queries.append(" ".join(words[start:end]))
-                else:
-                    # Fallback: just use original query multiple times
-                    sub_queries = [query] * target_depth
-
-            # Limit to target depth
-            sub_queries = sub_queries[:target_depth]
-
-            # Execute all queries in parallel - each with expansion enabled recursively
-            self.logger.info(
-                f"Executing {len(sub_queries)} parallel searches with expansion:"
-            )
-            for i, sq in enumerate(sub_queries, 1):
-                self.logger.info(f"  {i}. '{sq}' (enable_expansion=true)")
-
-            # Each sub-query will recursively call web_search with enable_expansion=true
-            # This creates nested expansion where each sub-query gets further decomposed
-            # Limit to 2 levels deep as requested, with reduced depth for nested calls
-            tasks = [
-                self.execute(query=sub_query, enable_expansion=True, expansion_depth=2)
-                for sub_query in sub_queries
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process results
-            successful_results = []
-            all_answers = []
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    self.logger.error(f"Search {i+1} failed: {result}")
-                    all_answers.append(
-                        f"Search {i+1} ({sub_queries[i]}): Failed - {str(result)}"
-                    )
-                elif result.success and result.result:
-                    successful_results.append(result)
-                    consolidated = result.result.get(
-                        "consolidated_answer", result.result.get("answer", "No answer")
-                    )
-                    all_answers.append(
-                        f"Search {i+1} ({result.result.get('original_query', sub_queries[i])}):\n{consolidated}"
-                    )
-                else:
-                    all_answers.append(f"Search {i+1} ({sub_queries[i]}): No results")
-
-            if not successful_results:
-                return ToolResult(
-                    success=False,
-                    result=None,
-                    error="All parallel searches failed",
-                )
-
-            # Final consolidation of all parallel results
-            final_answer = f"Comprehensive Multi-Level Analysis for: {query}\n\n"
-            final_answer += "=" * 80 + "\n"
-            final_answer += "PARALLEL SEARCH RESULTS\n"
-            final_answer += "=" * 80 + "\n\n"
-
-            for answer in all_answers:
-                final_answer += answer + "\n\n"
-                final_answer += "-" * 60 + "\n\n"
-
-            # Add summary statistics
-            total_sub_searches = sum(
-                r.result.get("total_searches", 0)
-                for r in successful_results
-                if r.result
-            )
-
-            return ToolResult(
-                success=True,
-                result={
-                    "query": query,
-                    "answer": final_answer,
-                    "sources": [],  # Would need to collect from all nested results
-                    "parallel_searches": len(sub_queries),
-                    "successful_searches": len(successful_results),
-                    "total_nested_searches": total_sub_searches,
-                },
-                metadata={
-                    "search_type": "nested_parallel_expansion",
-                    "sub_queries": sub_queries,
-                    "expansion_depth": expansion_depth,
-                },
-            )
-
-        except Exception as e:
-            self.logger.error(f"Simple parallel search failed: {e}")
-            # Final fallback: just do regular search
-            return await self._execute_single_search(query)
-
     def get_schema(self) -> Dict[str, Any]:
         return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query for current web information",
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query for current web information",
+                        },
                     },
-                    "enable_expansion": {
-                        "type": "boolean",
-                        "description": "Enable adaptive query decomposition - automatically determines optimal number of sub-queries based on query complexity",
-                        "default": False,
-                    },
-                    "expansion_depth": {
-                        "type": "integer",
-                        "description": "Specific number of query expansions (1-5). If not provided with enable_expansion=true, will auto-determine based on query complexity",
-                        "minimum": 1,
-                        "maximum": 5,
-                    },
+                    "required": ["query"],
                 },
-                "required": ["query"],
             },
         }
 

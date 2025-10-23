@@ -16,7 +16,7 @@ from ..utils.logger import logger
 
 
 class GlobalGeminiRateLimiter:
-    """전역 Gemini API Rate Limiter - API key 단위로 TPM 제한을 관리"""
+    """Global Gemini API Rate Limiter managing TPM limits per API key"""
     _instance = None
     _lock = asyncio.Lock()
 
@@ -30,32 +30,32 @@ class GlobalGeminiRateLimiter:
             return
         self._initialized = True
 
-        # 모델별 TPM 제한 (Token per Minute)
+        # Model TPM limits (Token per Minute)
         self.model_limits = {
             "gemini-2.5-pro": 2_000_000,
             "gemini-2.5-flash": 1_000_000,
-            # 기본값 (모델명 매칭이 안될 경우)
+            # Default fallback
             "default": 1_000_000
         }
 
-        # 모델별 토큰 사용 이력: [(timestamp, tokens), ...]
+        # Token usage history per model: [(timestamp, tokens), ...]
         self.usage_history = {
             "gemini-2.5-pro": [],
             "gemini-2.5-flash": []
         }
 
     def _get_model_key(self, model_name: str) -> str:
-        """모델명을 정규화하여 키로 사용"""
+        """Normalize model name for key lookup"""
         model_name = model_name.lower()
         if "2.5-pro" in model_name or "2.5pro" in model_name:
             return "gemini-2.5-pro"
         elif "2.5-flash" in model_name or "2.5flash" in model_name:
             return "gemini-2.5-flash"
         else:
-            return "gemini-2.5-flash"  # 기본값으로 Flash 사용
+            return "gemini-2.5-flash"
 
     def _cleanup_old_records(self, model_key: str, current_time: float):
-        """1분 이상 된 기록들을 정리"""
+        """Remove records older than 1 minute"""
         minute_ago = current_time - 60.0
         if model_key not in self.usage_history:
             self.usage_history[model_key] = []
@@ -67,35 +67,35 @@ class GlobalGeminiRateLimiter:
         ]
 
     def _get_current_usage(self, model_key: str, current_time: float) -> int:
-        """현재 1분간의 토큰 사용량 계산"""
+        """Calculate current 1-minute token usage"""
         self._cleanup_old_records(model_key, current_time)
         return sum(tokens for _, tokens in self.usage_history[model_key])
 
     async def wait_if_needed(self, model_name: str):
-        """현재 사용량이 70% 초과시 대기"""
+        """Wait if usage exceeds 70% threshold"""
         async with self._lock:
             model_key = self._get_model_key(model_name)
             current_time = time.time()
             limit = self.model_limits.get(model_key, self.model_limits["default"])
 
             current_usage = self._get_current_usage(model_key, current_time)
-            threshold = int(limit * 0.7)  # 70% 임계값
+            threshold = int(limit * 0.7)  # 70% threshold
 
             if current_usage > threshold:
-                # 가장 오래된 기록의 시간을 찾아서 대기 시간 계산
+                # Calculate wait time from oldest record
                 if self.usage_history[model_key]:
                     oldest_timestamp = min(timestamp for timestamp, _ in self.usage_history[model_key])
                     wait_time = max(0, 60.0 - (current_time - oldest_timestamp))
 
                     if wait_time > 0:
                         usage_percentage = (current_usage / limit) * 100
-                        logger.info(f"🕐 70% 임계값 초과 대기중 - 모델: {model_name}, "
-                                  f"현재 사용량: {current_usage:,}/{limit:,} ({usage_percentage:.1f}%), "
-                                  f"임계값: {threshold:,}, 대기 시간: {wait_time:.1f}초")
+                        logger.info(f"🕐 Throttling (70%+ threshold) - Model: {model_name}, "
+                                  f"Usage: {current_usage:,}/{limit:,} ({usage_percentage:.1f}%), "
+                                  f"Threshold: {threshold:,}, Wait: {wait_time:.1f}s")
                         await asyncio.sleep(wait_time)
 
     def record_usage(self, model_name: str, tokens_used: int):
-        """API 호출 후 실제 토큰 사용량을 기록"""
+        """Record actual token usage after API call"""
         if tokens_used <= 0:
             return
 
@@ -106,22 +106,19 @@ class GlobalGeminiRateLimiter:
             self.usage_history[model_key] = []
 
         self.usage_history[model_key].append((current_time, tokens_used))
-
-        # 기록 정리
         self._cleanup_old_records(model_key, current_time)
 
-        # 현재 사용량 로깅
         current_usage = sum(tokens for _, tokens in self.usage_history[model_key])
         limit = self.model_limits.get(model_key, self.model_limits["default"])
         usage_percentage = (current_usage / limit) * 100
 
-        logger.debug(f"📊 토큰 사용량 기록 - 모델: {model_name}, "
-                    f"사용: {tokens_used:,}, 1분간 총 사용량: {current_usage:,}/{limit:,} "
+        logger.debug(f"📊 Token usage - Model: {model_name}, "
+                    f"Used: {tokens_used:,}, 1min total: {current_usage:,}/{limit:,} "
                     f"({usage_percentage:.1f}%)")
 
 
 def get_rate_limiter() -> GlobalGeminiRateLimiter:
-    """전역 rate limiter 인스턴스를 반환"""
+    """Return global rate limiter instance"""
     return GlobalGeminiRateLimiter()
 
 
@@ -186,7 +183,7 @@ class GeminiChatSession:
         """Send a message in the session and get a response"""
         self.history.append(HumanMessage(content=message))
 
-        # Rate limiting - 70% 임계값 체크 및 대기
+        # Rate limiting check
         rate_limiter = get_rate_limiter()
         await rate_limiter.wait_if_needed(self.model.model)
 
@@ -195,7 +192,6 @@ class GeminiChatSession:
             callbacks=callbacks
         )
 
-        # Prefer AIMessage fields if available (LangChain wraps usage there)
         generation = response.generations[0][0]
         message_obj = getattr(generation, 'message', None)
         if message_obj and getattr(message_obj, 'content', None) is not None:
@@ -203,7 +199,6 @@ class GeminiChatSession:
         else:
             content = _normalize_content(getattr(generation, 'text', ""))
 
-        # Extract usage from AIMessage.usage_metadata first, then fall back
         usage = None
         if message_obj is not None:
             usage = getattr(message_obj, 'usage_metadata', None)
@@ -212,24 +207,23 @@ class GeminiChatSession:
             if isinstance(gen_info, dict):
                 usage = gen_info.get('usage_metadata')
 
-        # Extract grounding metadata if search grounding is enabled
-        grounding_metadata = None
         grounding_metadata = self._extract_grounding_metadata(generation)
+        code_execution_metadata = self._extract_code_execution_metadata(generation)
 
-        # Rate limiting - 실제 사용된 토큰 수를 기록
+        # Record actual token usage
         if usage:
             total_tokens = self._extract_total_tokens(usage)
             if total_tokens > 0:
                 rate_limiter.record_usage(self.model.model, total_tokens)
 
-        # save log of gemini_low_level_request as file IO
+        # Save low-level request/response logs
         if config.gemini_low_level_request_logging:
             try:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"request_response_{timestamp}.json"
                 filepath = os.path.join("logs", "gemini_low_level_request", filename)
 
-                # 요청 데이터 구성
+                # Build request data
                 request_data = {
                     "timestamp": timestamp,
                     "model": self.model.model,
@@ -247,31 +241,33 @@ class GeminiChatSession:
                     }
                 }
 
-                # 응답 데이터 구성
+                # Build response data
                 response_data = {
                     "content": content,
                     "usage": usage,
-                    "message_count": len(self.history)
+                    "message_count": len(self.history),
+                    "grounding_metadata": grounding_metadata,
+                    "code_execution_metadata": code_execution_metadata
                 }
 
-                # 요청과 응답을 모두 포함한 전체 데이터
+                # Complete request/response data
                 full_data = {
                     "request": request_data,
                     "response": response_data,
                     "metadata": {
-                        "session_id": id(self),  # 세션 식별용
+                        "session_id": id(self),
                         "total_messages": len(self.history)
                     }
                 }
 
-                # 파일 저장
+                # Save to file
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
                 with open(filepath, 'w', encoding='utf-8') as f:
                     json.dump(full_data, f, ensure_ascii=False, indent=2)
 
-                logger.debug(f"요청과 응답을 파일로 저장했습니다: {filepath}")
+                logger.debug(f"Saved request/response to: {filepath}")
             except Exception as e:
-                logger.warning(f"요청/응답 파일 저장 실패: {e}")
+                logger.warning(f"Failed to save request/response: {e}")
 
         self.history.append(AIMessage(content=content))
 
@@ -283,20 +279,16 @@ class GeminiChatSession:
         )
 
     def _extract_grounding_metadata(self, generation) -> Optional[Dict[str, Any]]:
-        """응답에서 search grounding 메타데이터 추출"""
+        """Extract search grounding metadata from response"""
         try:
-            # generation_info에서 grounding 정보 추출
             gen_info = getattr(generation, 'generation_info', None) or {}
 
-            # Google API 응답 형식에서 grounding 정보 확인
             if 'candidates' in gen_info and len(gen_info['candidates']) > 0:
                 candidate = gen_info['candidates'][0]
 
-                # groundingMetadata 확인 (camelCase로 변경)
                 if 'groundingMetadata' in candidate:
                     grounding_data = candidate['groundingMetadata']
 
-                    # 필요한 정보 추출
                     metadata = {
                         "search_queries": [],
                         "grounding_chunks": [],
@@ -304,15 +296,12 @@ class GeminiChatSession:
                         "search_entry_point": None
                     }
 
-                    # 검색 쿼리 추출 (webSearchQueries로 변경)
                     if 'webSearchQueries' in grounding_data:
                         metadata["search_queries"] = grounding_data['webSearchQueries']
 
-                    # 검색 진입점 정보 추출
                     if 'searchEntryPoint' in grounding_data:
                         metadata["search_entry_point"] = grounding_data['searchEntryPoint']
 
-                    # grounding chunks 정보 추출
                     if 'groundingChunks' in grounding_data:
                         for chunk in grounding_data['groundingChunks']:
                             chunk_info = {
@@ -321,7 +310,7 @@ class GeminiChatSession:
                             }
                             metadata["grounding_chunks"].append(chunk_info)
 
-                    # grounding supports 정보 추출
+                    # Extract grounding supports
                     if 'groundingSupports' in grounding_data:
                         supports = []
                         for support in grounding_data['groundingSupports']:
@@ -342,20 +331,64 @@ class GeminiChatSession:
             logger.warning(f"Failed to extract grounding metadata: {e}")
             return None
 
+    def _extract_code_execution_metadata(self, generation) -> Optional[Dict[str, Any]]:
+        """Extract code execution metadata (text, executableCode, codeExecutionResult)"""
+        try:
+            gen_info = getattr(generation, 'generation_info', None) or {}
+
+            if 'candidates' in gen_info and len(gen_info['candidates']) > 0:
+                candidate = gen_info['candidates'][0]
+
+                if 'content' in candidate and 'parts' in candidate['content']:
+                    parts = candidate['content']['parts']
+
+                    metadata = {
+                        "text_parts": [],
+                        "executable_code_parts": [],
+                        "code_execution_results": []
+                    }
+
+                    for part in parts:
+                        if 'text' in part:
+                            metadata["text_parts"].append(part['text'])
+
+                        if 'executableCode' in part:
+                            exec_code = part['executableCode']
+                            code_info = {
+                                "language": exec_code.get('language'),
+                                "code": exec_code.get('code')
+                            }
+                            metadata["executable_code_parts"].append(code_info)
+
+                        if 'codeExecutionResult' in part:
+                            exec_result = part['codeExecutionResult']
+                            result_info = {
+                                "outcome": exec_result.get('outcome'),
+                                "output": exec_result.get('output')
+                            }
+                            metadata["code_execution_results"].append(result_info)
+
+                    if metadata["executable_code_parts"] or metadata["code_execution_results"]:
+                        logger.debug(f"Code execution metadata extracted: {len(metadata['executable_code_parts'])} code parts, {len(metadata['code_execution_results'])} results")
+                        return metadata
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to extract code execution metadata: {e}")
+            return None
+
     def _extract_total_tokens(self, usage_metadata: Dict[str, Any]) -> int:
-        """usage metadata에서 총 토큰 사용량 추출"""
+        """Extract total tokens from usage metadata"""
         if not usage_metadata:
             return 0
 
-        # Google API 형식
         if 'total_token_count' in usage_metadata:
             return usage_metadata['total_token_count']
 
-        # LangChain 형식
         if 'total_tokens' in usage_metadata:
             return usage_metadata['total_tokens']
 
-        # 분리된 형식에서 합산
         input_tokens = usage_metadata.get('input_tokens', 0) or usage_metadata.get('prompt_token_count', 0)
         output_tokens = usage_metadata.get('output_tokens', 0) or usage_metadata.get('candidates_token_count', 0)
 
@@ -370,7 +403,6 @@ class GeminiChatSession:
         self.history.append(HumanMessage(content=message))
 
         streamed_content = ""
-        # LangChain ChatGoogleGenerativeAI expects nested messages for streaming
         yielded_any = False
         async for chunk in self.model.astream(messages=[self.history], callbacks=callbacks):
             if hasattr(chunk, 'content') and chunk.content:
@@ -401,8 +433,9 @@ class GeminiModel:
     def _initialize_model(self):
         """Initialize the Gemini model"""
         try:
-            # 기본 모델 설정
+            # Configure base model
             model_kwargs = {
+                "google_api_key": config.google_api_key,
                 "model": self.model_name,
                 "temperature": config.temperature,
                 "max_tokens": config.max_tokens,
@@ -411,8 +444,11 @@ class GeminiModel:
                 "streaming": True,
             }
 
-            model_kwargs["tools"] = [{"google_search": {}}]
-            logger.info(f"Enabling Google Search grounding for model: {self.model_name}")
+            model_kwargs["tools"] = [
+                {"google_search": {}},
+                {"code_execution": {}}
+            ]
+            logger.info(f"Enabling Google Search grounding & code execution for model: {self.model_name}")
 
             self.llm = ChatGoogleGenerativeAI(**model_kwargs)
         except Exception as e:
@@ -446,11 +482,9 @@ class GeminiModel:
         """
         messages = []
 
-        # Add system prompt as HumanMessage (Gemini doesn't support SystemMessage)
         if system_prompt and system_prompt.strip():
             messages.append(self.create_human_message(system_prompt))
 
-        # Add conversation history - filter out empty content
         for turn in conversation_history:
             role = turn.get("role")
             content = turn.get("content", "")
@@ -458,13 +492,11 @@ class GeminiModel:
             # Skip empty or whitespace-only content
             if not content or not content.strip():
                 continue
-
             if role == "user":
                 messages.append(self.create_human_message(content))
             elif role == "assistant":
                 messages.append(self.create_ai_message(content))
 
-        # Add current input - only if it has content
         if current_input and current_input.strip():
             messages.append(self.create_human_message(current_input))
 

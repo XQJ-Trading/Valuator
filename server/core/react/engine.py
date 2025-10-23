@@ -291,162 +291,35 @@ class ReActEngine:
 
     def _should_provide_final_answer(self, state: ReActState) -> bool:
         """Determine if we have enough information for final answer"""
-        # More sophisticated logic for determining completion
-
-        # Check if we've reached maximum reasonable cycles
-        thought_steps = len(state.get_steps_by_type(ReActStepType.THOUGHT))
-        action_steps = len(state.get_steps_by_type(ReActStepType.ACTION))
-        observation_steps = len(state.get_steps_by_type(ReActStepType.OBSERVATION))
-
-        # Prevent infinite loops - max cycles from config
         from ..utils.config import config
 
+        # Check if we've reached maximum thought cycles
+        thought_steps = len(state.get_steps_by_type(ReActStepType.THOUGHT))
         if thought_steps >= config.react_max_thought_cycles:
             return True
 
-        # Only consider completion if we have at least one complete cycle
+        # Need at least one complete cycle
+        action_steps = len(state.get_steps_by_type(ReActStepType.ACTION))
+        observation_steps = len(state.get_steps_by_type(ReActStepType.OBSERVATION))
         if thought_steps < 1 or action_steps < 1 or observation_steps < 1:
             return False
 
-        # Check for repetitive "problem is solved" patterns
-        if self._is_repetitive_completion_pattern(state):
-            logger.info("Detected repetitive completion pattern - forcing final answer")
-            return True
+        # Check for explicit completion markers in the last step
+        if state.steps:
+            last_content = state.steps[-1].content.lower()
 
-        # Look at recent steps (not just observations) for completion signals
-        recent_steps = state.steps[-1:]  # Last 1 step only
-        completion_content = []
+            # Check for continuation marker
+            if "<next_task_required/>" in last_content:
+                return False
 
-        for step in recent_steps:
-            completion_content.append(step.content.lower())
-
-        all_content = " ".join(completion_content)
-
-        # Check for continuation markers first
-        if "<next_task_required/>" in all_content:
-            logger.info(
-                "Found <next_task_required/> marker - continuing with next step"
-            )
-            return False
-
-        # Check for explicit completion markers (highest priority)
-        explicit_completion_markers = ["<final_answer_ready/>"]
-
-        for marker in explicit_completion_markers:
-            if marker in all_content:
+            # Check for completion marker
+            if "<final_answer_ready/>" in last_content:
                 logger.info(
-                    f"Found explicit completion marker: {marker} - triggering final answer"
+                    "Found explicit completion marker - triggering final answer"
                 )
                 return True
 
-        # Enhanced completion indicators (fallback)
-        strong_completion_indicators = [
-            "problem is solved",
-            "task is complete",
-            "calculation is finished",
-            "answer is",
-            "final result",
-            "completed successfully",
-            "all steps are done",
-            "process is finished",
-            "ready for a new query",
-            "awaiting a new task",
-            "no further steps",
-            "definitively solved",
-            "i have confirmed",
-            "i have determined",
-            "the conclusion",
-            "based on the performed",
-            "all necessary checks",
-            "sufficient information",
-        ]
-
-        # Check for strong completion signals
-        completion_count = sum(
-            1 for indicator in strong_completion_indicators if indicator in all_content
-        )
-
-        if completion_count >= 2:  # Multiple completion indicators
-            logger.info(
-                f"Found {completion_count} completion indicators - triggering final answer"
-            )
-            return True
-
-        # Look specifically at observations for completion signals
-        recent_observations = state.get_steps_by_type(ReActStepType.OBSERVATION)
-        if recent_observations:
-            last_obs = recent_observations[-1]
-            obs_content = last_obs.content.lower()
-
-            # Check for tool execution results that indicate no action was taken
-            if (
-                "no tool was executed" in obs_content
-                and "expected" in obs_content
-                and len(recent_observations) >= 3
-            ):
-                # Multiple consecutive "no tool executed" observations suggest completion
-                consecutive_no_tool = 0
-                for obs in recent_observations[-3:]:
-                    if "no tool was executed" in obs.content.lower():
-                        consecutive_no_tool += 1
-
-                if consecutive_no_tool >= 3:
-                    logger.info(
-                        "Detected multiple consecutive 'no tool executed' - forcing completion"
-                    )
-                    return True
-
-            # If observation indicates we need more steps, continue
-            continue_indicators = [
-                "need to",
-                "should",
-                "next step",
-                "continue",
-                "more data needed",
-                "additional information",
-                "further analysis",
-                "will check",
-                "let me",
-                "i will",
-            ]
-
-            if any(indicator in obs_content for indicator in continue_indicators):
-                return False
-
-        # Default: continue unless we have strong evidence to stop
         return False
-
-    def _is_repetitive_completion_pattern(self, state: ReActState) -> bool:
-        """Check if there's a repetitive pattern indicating completion"""
-        if len(state.steps) < 6:
-            return False
-
-        recent_steps = state.steps[-1:]
-        action_contents = []
-
-        for step in recent_steps:
-            if step.step_type == ReActStepType.ACTION:
-                action_contents.append(step.content.lower())
-
-        if len(action_contents) < 3:
-            return False
-
-        # Check if multiple recent actions contain "problem is solved" or similar
-        completion_phrases = [
-            "problem is solved",
-            "task is complete",
-            "ready for a new query",
-            "no further steps",
-            "already provided the final answer",
-        ]
-
-        completion_actions = 0
-        for content in action_contents:
-            if any(phrase in content for phrase in completion_phrases):
-                completion_actions += 1
-
-        # If 3 or more of the last actions indicate completion, it's repetitive
-        return completion_actions >= 3
 
     def _detect_infinite_loop(self, state: ReActState) -> bool:
         """Detect if we're in an infinite loop pattern"""

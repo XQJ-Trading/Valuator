@@ -86,45 +86,6 @@ Key guidelines:
 - Use clear and easy-to-understand language
 - When appropriate, provide examples or explanations to help users understand concepts better"""
 
-    async def solve(
-        self,
-        query: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Solve a problem using ReAct approach (main interface)
-
-        Args:
-            query: Problem to solve
-            context: Additional context information
-
-        Returns:
-            Dictionary with solution results and metadata
-        """
-        logger.info(f"Solving with ReAct: {query[:100]}...")
-
-        # Solve using ReAct
-        react_state = await self.react_engine.solve(query, context or {})
-
-        # Prepare response
-        if react_state.is_completed and not react_state.error:
-            response = react_state.final_answer
-        else:
-            response = (
-                f"I encountered difficulties solving this problem. "
-                f"{react_state.error or 'The process was incomplete.'}"
-            )
-
-        return {
-            "response": response,
-            "react_state": react_state,
-            "reasoning_steps": len(react_state.steps),
-            "tools_used": list(
-                set(s.tool_name for s in react_state.steps if s.tool_name)
-            ),
-            "success": react_state.is_completed and not react_state.error,
-        }
-
     async def solve_stream(
         self,
         query: str,

@@ -1,10 +1,8 @@
 """AI Agent demonstration examples"""
 
 import asyncio
-from typing import Optional
 
 from ..agent.react_agent import AIAgent
-from ..utils.config import config
 from ..utils.logger import logger
 from ..utils.react_logger import list_all_sessions, view_session_log
 
@@ -128,7 +126,7 @@ class AIAgentDemo:
     async def _solve_with_react(self, query: str, show_progress: bool = True):
         """Solve a problem using ReAct and display results"""
         if show_progress:
-            print(f"\n🔍 Starting ReAct solving process...")
+            print("\n🔍 Starting ReAct solving process...")
             print(f"Query: {query}")
 
         print("\n" + "=" * 80)
@@ -137,8 +135,16 @@ class AIAgentDemo:
 
         # Solve using AI Agent
         start_time = asyncio.get_event_loop().time()
-        result = await self.agent.solve(query)
-        state = result["react_state"]
+
+        # Collect events from solve_stream
+        events = []
+        async for event in self.agent.solve_stream(query):
+            events.append(event)
+
+        # Extract final state from events
+        final_event = events[-1] if events else None
+        state = final_event.get("react_state") if final_event else None
+
         end_time = asyncio.get_event_loop().time()
 
         # Display the reasoning process

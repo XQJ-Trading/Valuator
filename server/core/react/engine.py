@@ -1,10 +1,8 @@
 """ReAct engine implementation"""
 
-import asyncio
 import json
-import re
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 import yaml
 
@@ -52,97 +50,6 @@ class ReActEngine:
 
         logger.info(f"Initialized ReAct engine with {len(tool_registry.tools)} tools")
 
-    async def solve(
-        self, query: str, context: Optional[Dict[str, Any]] = None
-    ) -> ReActState:
-        """
-        Solve a problem using ReAct approach
-
-        Args:
-            query: Problem to solve
-            context: Additional context information
-
-        Returns:
-            ReActState with complete solving process
-        """
-        logger.info(f"Starting ReAct solving: {query[:100]}...")
-        self.current_date = datetime.now().strftime("%Y-%m-%d")
-
-        # Start API session
-        tools_info = self.tool_registry.list_tools()
-        system_prompt = self.prompts.format_system_prompt(tools_info, self.current_date)
-        initial_messages = self.model.format_messages(system_prompt, [], "")
-        self.api_session = self.model.start_chat_session(initial_messages)
-
-        # Start logging session
-        session_id = None
-        if self.enable_logging:
-            session_id = react_logger.start_session(query)
-
-        # Initialize state
-        state = ReActState(
-            original_query=query, max_steps=self.max_steps, context=context or {}
-        )
-
-        try:
-            # Main ReAct loop
-            while state.should_continue():
-                logger.debug(f"ReAct step {state.current_step + 1}/{state.max_steps}")
-
-                # Check for repetitive patterns before proceeding
-                if self._detect_infinite_loop(state):
-                    logger.warning(
-                        "Detected potential infinite loop - forcing completion"
-                    )
-                    await self._force_completion(state)
-                    break
-
-                # Determine next step type
-                next_step_type = self._determine_next_step(state)
-                logger.debug(f"Next step type: {next_step_type}")
-
-                if next_step_type == ReActStepType.THOUGHT:
-                    await self._thought_step(state)
-                elif next_step_type == ReActStepType.ACTION:
-                    await self._action_step(state)
-                elif next_step_type == ReActStepType.OBSERVATION:
-                    await self._observation_step(state)
-                elif next_step_type == ReActStepType.FINAL_ANSWER:
-                    await self._final_answer_step(state)
-                    break
-
-                # Safety check
-                if state.current_step >= state.max_steps:
-                    logger.warning("Reached maximum steps, forcing completion")
-                    await self._force_completion(state)
-                    break
-
-            logger.info(f"ReAct solving completed in {state.current_step} steps")
-
-            # End logging session
-            if self.enable_logging:
-                react_logger.end_session(
-                    final_answer=state.final_answer,
-                    success=state.is_completed and not state.error,
-                )
-
-            return state
-
-        except Exception as e:
-            import traceback
-
-            logger.error(f"Error in ReAct solving: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"Error repr: {repr(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            state.error = str(e)
-
-            # End logging session with error
-            if self.enable_logging:
-                react_logger.end_session(final_answer=f"Error: {str(e)}", success=False)
-
-            return state
-
     async def solve_stream(
         self, query: str, context: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -160,9 +67,8 @@ class ReActEngine:
         self.api_session = self.model.start_chat_session(initial_messages)
 
         # Start logging session
-        session_id = None
         if self.enable_logging:
-            session_id = react_logger.start_session(query)
+            react_logger.start_session(query)
 
         state = ReActState(
             original_query=query, max_steps=self.max_steps, context=context or {}
@@ -462,36 +368,6 @@ class ReActEngine:
         tool_result = None
         error = None
 
-        # Check for special individual searches action
-        if (
-            last_step.tool_name == "web_search"
-            and last_step.tool_input
-            and last_step.tool_input.get("action_type") == "individual_searches"
-        ):
-            logger.info("Handling individual searches action")
-            decomposed_queries = last_step.tool_input.get("decomposed_queries", [])
-            logger.info(f"Processing {len(decomposed_queries)} individual searches")
-
-            # Add a summary observation for the decomposed query setup
-            state.add_observation(
-                content=f"Find {len(decomposed_queries)} sub-query",
-                tool_output={
-                    "action_type": "individual_searches",
-                    "queries": decomposed_queries,
-                },
-                error=None,
-                tool_result=ToolResult(
-                    success=True,
-                    result={
-                        "action_type": "individual_searches",
-                        "queries": decomposed_queries,
-                    },
-                    metadata={"decomposed_queries_count": len(decomposed_queries)},
-                ),
-            )
-            return
-
-        # Execute tool if specified
         if last_step.tool_name:
             try:
                 tool_result = await self.tool_registry.execute_tool(
@@ -637,12 +513,12 @@ The analysis reached the maximum number of steps, but I can provide this summary
                     test_content = cleaned_content.strip() + "}"
                     try:
                         data = json.loads(test_content)
-                    except:
+                    except json.JSONDecodeError:
                         # Try adding closing for nested objects
                         test_content = cleaned_content.strip() + "}}"
                         try:
                             data = json.loads(test_content)
-                        except:
+                        except json.JSONDecodeError:
                             pass
                 elif '"tool"' in cleaned_content and '"parameters"' in cleaned_content:
                     # Try to extract valid JSON from partial content
@@ -654,7 +530,7 @@ The analysis reached the maximum number of steps, but I can provide this summary
                     if match:
                         try:
                             data = json.loads(match.group())
-                        except:
+                        except json.JSONDecodeError:
                             pass
 
             if not data:
@@ -703,7 +579,7 @@ The analysis reached the maximum number of steps, but I can provide this summary
                             tool_name = data["tool"]
                             tool_input = data.get("parameters", {})
                             return tool_name, tool_input if tool_input else None
-                except:
+                except Exception:
                     pass
 
                 # If recovery failed, return None instead of raising error
@@ -724,7 +600,7 @@ The analysis reached the maximum number of steps, but I can provide this summary
                             tool_name = data["tool"]
                             tool_input = data.get("parameters", {})
                             return tool_name, tool_input if tool_input else None
-                except:
+                except Exception:
                     pass
 
         # Method 2: Try to parse as YAML
@@ -756,7 +632,7 @@ The analysis reached the maximum number of steps, but I can provide this summary
                 # Try to parse as YAML
                 try:
                     tool_input = yaml.safe_load(params_text) or {}
-                except:
+                except yaml.YAMLError:
                     # Parse simple key: value pairs
                     for line in params_text.split("\n"):
                         line = line.strip()

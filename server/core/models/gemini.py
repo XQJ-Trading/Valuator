@@ -290,17 +290,17 @@ class GeminiChatSession:
                     grounding_data = candidate['groundingMetadata']
 
                     metadata = {
-                        "search_queries": [],
-                        "grounding_chunks": [],
-                        "grounding_supports": [],
-                        "search_entry_point": None
+                        "webSearchQueries": [],
+                        "groundingChunks": [],
+                        "groundingSupports": [],
+                        "searchEntryPoint": None
                     }
 
                     if 'webSearchQueries' in grounding_data:
-                        metadata["search_queries"] = grounding_data['webSearchQueries']
+                        metadata["webSearchQueries"] = grounding_data['webSearchQueries']
 
                     if 'searchEntryPoint' in grounding_data:
-                        metadata["search_entry_point"] = grounding_data['searchEntryPoint']
+                        metadata["searchEntryPoint"] = grounding_data['searchEntryPoint']
 
                     if 'groundingChunks' in grounding_data:
                         for chunk in grounding_data['groundingChunks']:
@@ -308,7 +308,7 @@ class GeminiChatSession:
                                 "title": chunk.get('web', {}).get('title', ''),
                                 "uri": chunk.get('web', {}).get('uri', ''),
                             }
-                            metadata["grounding_chunks"].append(chunk_info)
+                            metadata["groundingChunks"].append(chunk_info)
 
                     # Extract grounding supports
                     if 'groundingSupports' in grounding_data:
@@ -316,13 +316,13 @@ class GeminiChatSession:
                         for support in grounding_data['groundingSupports']:
                             support_info = {
                                 "segment": support.get('segment', {}),
-                                "grounding_chunk_indices": support.get('groundingChunkIndices', [])
+                                "groundingChunkIndices": support.get('groundingChunkIndices', [])
                             }
                             supports.append(support_info)
-                        metadata["grounding_supports"] = supports
+                        metadata["groundingSupports"] = supports
 
-                    if metadata["search_queries"] or metadata["grounding_chunks"]:
-                        logger.debug(f"Grounding metadata extracted: {len(metadata['search_queries'])} queries, {len(metadata['grounding_chunks'])} chunks")
+                    if metadata["webSearchQueries"] or metadata["groundingChunks"]:
+                        logger.debug(f"Grounding metadata extracted: {len(metadata['webSearchQueries'])} queries, {len(metadata['groundingChunks'])} chunks")
                         return metadata
 
             return None
@@ -343,14 +343,14 @@ class GeminiChatSession:
                     parts = candidate['content']['parts']
 
                     metadata = {
-                        "text_parts": [],
-                        "executable_code_parts": [],
-                        "code_execution_results": []
+                        "text": [],
+                        "executableCode": [],
+                        "codeExecutionResult": []
                     }
 
                     for part in parts:
                         if 'text' in part:
-                            metadata["text_parts"].append(part['text'])
+                            metadata["text"].append(part['text'])
 
                         if 'executableCode' in part:
                             exec_code = part['executableCode']
@@ -358,7 +358,7 @@ class GeminiChatSession:
                                 "language": exec_code.get('language'),
                                 "code": exec_code.get('code')
                             }
-                            metadata["executable_code_parts"].append(code_info)
+                            metadata["executableCode"].append(code_info)
 
                         if 'codeExecutionResult' in part:
                             exec_result = part['codeExecutionResult']
@@ -366,10 +366,10 @@ class GeminiChatSession:
                                 "outcome": exec_result.get('outcome'),
                                 "output": exec_result.get('output')
                             }
-                            metadata["code_execution_results"].append(result_info)
+                            metadata["codeExecutionResult"].append(result_info)
 
-                    if metadata["executable_code_parts"] or metadata["code_execution_results"]:
-                        logger.debug(f"Code execution metadata extracted: {len(metadata['executable_code_parts'])} code parts, {len(metadata['code_execution_results'])} results")
+                    if metadata["executableCode"] or metadata["codeExecutionResult"]:
+                        logger.debug(f"Code execution metadata extracted: {len(metadata['executableCode'])} code parts, {len(metadata['codeExecutionResult'])} results")
                         return metadata
 
             return None

@@ -14,6 +14,7 @@ from .core.agent.react_agent import AIAgent
 from .core.utils.config import config
 from .core.utils.logger import logger
 from .repositories import FileSessionRepository, MongoSessionRepository
+from .services.session_service import SessionService
 
 
 # Initialize history repository for server (separate from ReactLogger)
@@ -36,16 +37,21 @@ def create_history_repository():
         return FileSessionRepository("logs/server_history")
 
 
-# Global repository instance
+# Global instances
 history_repository = None
+session_service: Optional[SessionService] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global history_repository
+    global history_repository, session_service
     history_repository = create_history_repository()
     print(f"History repository initialized: {type(history_repository).__name__}")
+
+    # Initialize session service
+    session_service = SessionService(history_repository=history_repository)
+    print(f"SessionService initialized")
 
     yield
 
@@ -462,3 +468,212 @@ async def chat_stream_post(request: ChatRequest):
             "Connection": "keep-alive",
         },
     )
+
+
+# ============================================================================
+# NEW SESSION-BASED API (독립적인 세션-스트림 구조)
+# ============================================================================
+
+
+@app.post("/api/v1/sessions")
+async def create_session(request: ChatRequest):
+    """
+    Create a new session and start background task (세션 생성 및 백그라운드 작업 시작)
+
+    Args:
+        request: Chat request containing query and optional model
+
+    Returns:
+        Session information with session_id
+    """
+    if session_service is None:
+        raise HTTPException(
+            status_code=500, detail="SessionService not initialized"
+        )
+
+    try:
+        # Create and start session (SessionService handles background task)
+        session = await session_service.start_session(
+            query=request.query, model=request.model
+        )
+
+        logger.info(f"Created session: {session.session_id}")
+
+        return {
+            "session_id": session.session_id,
+            "status": session.status.value,
+            "created_at": session.created_at.isoformat(),
+            "query": session.query,
+            "model": session.model,
+        }
+    except Exception as e:
+        logger.error(f"Error creating session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
+
+
+@app.get("/api/v1/sessions/{session_id}")
+async def get_session(session_id: str):
+    """
+    Get session details (세션 상태 조회)
+    - 활성 세션(메모리)이 있으면 먼저 반환
+    - 없으면 자동으로 히스토리에서 조회
+
+    Args:
+        session_id: Session ID
+
+    Returns:
+        Session details
+    """
+    if session_service is None:
+        raise HTTPException(
+            status_code=500, detail="SessionService not initialized"
+        )
+
+    try:
+        # SessionService의 get_session은 자동으로 활성/완료 세션 통합 조회
+        session = await session_service.get_session(session_id)
+        if session is not None:
+            return session.to_dict()
+
+        # 세션을 찾을 수 없으면 404
+        raise HTTPException(
+            status_code=404, detail=f"Session not found: {session_id}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
+
+
+@app.get("/api/v1/sessions/{session_id}/stream")
+async def stream_session_events(session_id: str):
+    """
+    Subscribe to session events as SSE stream (세션 이벤트 실시간 스트림)
+    - 언제든지 재연결 가능
+    - 이전 이벤트부터 다시 받을 수 있음
+
+    Args:
+        session_id: Session ID
+
+    Returns:
+        Server-sent events stream
+    """
+    if session_service is None:
+        raise HTTPException(
+            status_code=500, detail="SessionService not initialized"
+        )
+
+    async def sse() -> AsyncGenerator[str, None]:
+        try:
+            logger.info(f"Client subscribing to session: {session_id}")
+
+            # Subscribe to events using SessionService
+            async for event in session_service.subscribe_to_session(session_id):
+                # Convert SessionEvent to dict
+                event_dict = {
+                    "type": event.type,
+                    "content": event.content,
+                    "timestamp": event.timestamp.isoformat()
+                    if event.timestamp
+                    else None,
+                }
+
+                # Add optional fields
+                if event.tool:
+                    event_dict["tool"] = event.tool
+                if event.tool_input:
+                    event_dict["tool_input"] = event.tool_input
+                if event.tool_output:
+                    event_dict["tool_output"] = event.tool_output
+                if event.error:
+                    event_dict["error"] = event.error
+                if event.metadata:
+                    event_dict["metadata"] = event.metadata
+
+                yield f"data: {json.dumps(event_dict, ensure_ascii=False)}\n\n"
+
+            logger.info(f"Stream ended for session: {session_id}")
+        except Exception as e:
+            logger.error(f"Error streaming session events: {e}")
+            error_event = {
+                "type": "error",
+                "message": str(e),
+            }
+            yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.delete("/api/v1/sessions/{session_id}")
+async def delete_session_endpoint(session_id: str):
+    """
+    Delete/cleanup a session (세션 종료 및 정리)
+
+    Args:
+        session_id: Session ID
+
+    Returns:
+        Success message
+    """
+    if session_service is None:
+        raise HTTPException(
+            status_code=500, detail="SessionService not initialized"
+        )
+
+    try:
+        success = await session_service.end_session(session_id)
+        if not success:
+            raise HTTPException(
+                status_code=404, detail=f"Session not found: {session_id}"
+            )
+
+        return {
+            "message": f"Session deleted successfully: {session_id}",
+            "session_id": session_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+
+
+@app.get("/api/v1/sessions")
+async def list_active_sessions(limit: int = 20, offset: int = 0):
+    """
+    List active sessions (활성 세션 목록)
+
+    Args:
+        limit: Maximum number of sessions
+        offset: Offset for pagination
+
+    Returns:
+        List of active sessions
+    """
+    if session_service is None:
+        raise HTTPException(
+            status_code=500, detail="SessionService not initialized"
+        )
+
+    try:
+        sessions = await session_service.list_sessions(limit=limit, offset=offset)
+        return {
+            "sessions": [session.to_dict() for session in sessions],
+            "total": len(sessions),
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        logger.error(f"Error listing sessions: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to list sessions: {str(e)}"
+        )

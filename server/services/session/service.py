@@ -3,11 +3,11 @@
 import asyncio
 from typing import Any, AsyncGenerator, Optional
 
-from ..core.session.background_runner import BackgroundTaskRunner
-from ..core.session.manager import SessionManager
-from ..core.session.models import SessionData, SessionEvent, SessionStatus
-from ..core.utils.config import config
-from ..core.utils.logger import logger
+from ...core.utils.config import config
+from ...core.utils.logger import logger
+from .manager import SessionManager
+from .models import SessionData, SessionEvent, SessionStatus
+from .runner import BackgroundTaskRunner
 
 
 class SessionService:

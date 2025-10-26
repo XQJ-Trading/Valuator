@@ -1,5 +1,5 @@
 """Service layer for server operations"""
 
-from .session_service import SessionService
+from .session import SessionService
 
 __all__ = ["SessionService"]

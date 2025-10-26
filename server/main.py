@@ -14,7 +14,7 @@ from .core.agent.react_agent import AIAgent
 from .core.utils.config import config
 from .core.utils.logger import logger
 from .repositories import FileSessionRepository, MongoSessionRepository
-from .services.session_service import SessionService
+from .services.session import SessionService
 
 
 # Initialize history repository for server (separate from ReactLogger)

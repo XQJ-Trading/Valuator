@@ -39,6 +39,7 @@ import StatusBar from '../components/StatusBar.vue'
 import MessagesContainer from '../components/MessagesContainer.vue'
 import SessionControl from '../components/SessionControl.vue'
 import { useSession } from '../composables/useSession'
+import { useRouter } from 'vue-router'
 
 // Session mode only
 const {
@@ -60,9 +61,14 @@ const {
   reconnect
 } = useSession()
 
+const router = useRouter()
+
 // Session mode handlers
-const handleCreateSession = () => {
-  createSession()
+const handleCreateSession = async () => {
+  const sessionId = await createSession()
+  if (sessionId) {
+    router.push(`/session/${sessionId}`)
+  }
 }
 
 const handleReconnect = () => {

@@ -129,18 +129,18 @@ export function useSession() {
       
       // 메시지 추가
       addMessage('start', queryWithRule, { query: queryWithRule })
-      status.value = '스트리밍 연결중...'
-      
-      // 스트림 구독
-      await subscribeToStream(data.session_id)
       
       query.value = ''
       rule.value = ''
       saveToStorage()
+      
+      // session_id 반환 (라우팅을 위해)
+      return data.session_id
     } catch (e: any) {
       status.value = '오류 발생'
       addMessage('error', `세션 생성 실패: ${String(e)}`)
       loading.value = false
+      return null
     }
   }
 

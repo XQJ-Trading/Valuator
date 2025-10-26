@@ -64,9 +64,7 @@ class BackgroundTaskRunner:
                 # Add event to session
                 await self.session_manager.add_event(session_id, session_event)
 
-                logger.debug(
-                    f"Session {session_id} event: {session_event.type}"
-                )
+                logger.debug(f"Session {session_id} event: {session_event.type}")
 
             # Mark as completed
             await self.session_manager.update_session_status(
@@ -76,7 +74,7 @@ class BackgroundTaskRunner:
 
         except Exception as e:
             logger.error(f"Error in background task for session {session_id}: {e}")
-            
+
             # Add error event
             error_event = SessionEvent(
                 type="error",
@@ -85,7 +83,7 @@ class BackgroundTaskRunner:
                 error=str(e),
             )
             await self.session_manager.add_event(session_id, error_event)
-            
+
             # Mark as failed
             await self.session_manager.update_session_status(
                 session_id, SessionStatus.FAILED

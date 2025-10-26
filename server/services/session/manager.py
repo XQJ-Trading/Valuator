@@ -28,9 +28,7 @@ class SessionManager:
     # Session Creation & Lifecycle
     # ========================================================================
 
-    async def create_session(
-        self, query: str, model: str
-    ) -> SessionData:
+    async def create_session(self, query: str, model: str) -> SessionData:
         """
         Create a new session
 
@@ -118,7 +116,7 @@ class SessionManager:
 
         # Remove from active sessions
         del self.sessions[session_id]
-        
+
         # Clean up subscribers
         if session_id in self.subscribers:
             del self.subscribers[session_id]
@@ -138,9 +136,10 @@ class SessionManager:
         """
         now = datetime.now()
         cutoff = now - timedelta(hours=max_age_hours)
-        
+
         sessions_to_cleanup = [
-            session_id for session_id, session in self.sessions.items()
+            session_id
+            for session_id, session in self.sessions.items()
             if session.status == SessionStatus.COMPLETED
             and session.completed_at is not None
             and session.completed_at < cutoff
@@ -158,9 +157,7 @@ class SessionManager:
     # Event Management
     # ========================================================================
 
-    async def add_event(
-        self, session_id: str, event: SessionEvent
-    ) -> bool:
+    async def add_event(self, session_id: str, event: SessionEvent) -> bool:
         """
         Add event to session
 
@@ -210,7 +207,7 @@ class SessionManager:
             return False
 
         session.status = status
-        
+
         if status == SessionStatus.COMPLETED or status == SessionStatus.FAILED:
             session.completed_at = datetime.now()
 
@@ -245,7 +242,9 @@ class SessionManager:
         self.subscribers[session_id].append(subscriber_queue)
         session.subscriber_count = len(self.subscribers[session_id])
 
-        logger.info(f"New subscriber for session {session_id}, total: {session.subscriber_count}")
+        logger.info(
+            f"New subscriber for session {session_id}, total: {session.subscriber_count}"
+        )
 
         try:
             # First, yield all existing events
@@ -255,14 +254,14 @@ class SessionManager:
             # Then, wait for new events
             while True:
                 event = await subscriber_queue.get()
-                
+
                 # Check if session is still active
                 if session_id not in self.sessions:
                     logger.info(f"Session ended during subscription: {session_id}")
                     break
-                
+
                 yield event
-                
+
         except asyncio.CancelledError:
             logger.info(f"Subscription cancelled for session {session_id}")
         except Exception as e:
@@ -272,12 +271,14 @@ class SessionManager:
             if session_id in self.subscribers:
                 if subscriber_queue in self.subscribers[session_id]:
                     self.subscribers[session_id].remove(subscriber_queue)
-                
+
                 session = self.sessions.get(session_id)
                 if session:
                     session.subscriber_count = len(self.subscribers[session_id])
-                
-                logger.info(f"Removed subscriber for session {session_id}, remaining: {session.subscriber_count if session else 0}")
+
+                logger.info(
+                    f"Removed subscriber for session {session_id}, remaining: {session.subscriber_count if session else 0}"
+                )
 
     # ========================================================================
     # Utility Methods

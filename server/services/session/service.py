@@ -13,7 +13,7 @@ from .runner import BackgroundTaskRunner
 class SessionService:
     """
     High-level service for session management
-    
+
     Integrates SessionManager and BackgroundTaskRunner to provide
     a clean interface for session operations
     """
@@ -25,9 +25,7 @@ class SessionService:
         Args:
             history_repository: Optional repository for persisting sessions
         """
-        self.session_manager = SessionManager(
-            history_repository=history_repository
-        )
+        self.session_manager = SessionManager(history_repository=history_repository)
         self.history_repository = history_repository
         self.background_runner = BackgroundTaskRunner(self.session_manager)
         logger.info("SessionService initialized")
@@ -56,9 +54,7 @@ class SessionService:
 
         # Start background task
         asyncio.create_task(
-            self.background_runner.solve_in_background(
-                session.session_id, query, model
-            )
+            self.background_runner.solve_in_background(session.session_id, query, model)
         )
 
         logger.info(f"Started session: {session.session_id}")
@@ -83,9 +79,7 @@ class SessionService:
 
         # 2. Fall back to history
         if self.history_repository is not None:
-            history_session = await self.history_repository.get_session(
-                session_id
-            )
+            history_session = await self.history_repository.get_session(session_id)
             if history_session is not None:
                 logger.info(f"Found completed session in history: {session_id}")
                 return history_session
@@ -105,9 +99,7 @@ class SessionService:
         Returns:
             List of sessions
         """
-        return await self.session_manager.list_sessions(
-            limit=limit, offset=offset
-        )
+        return await self.session_manager.list_sessions(limit=limit, offset=offset)
 
     async def end_session(self, session_id: str) -> bool:
         """
@@ -137,9 +129,7 @@ class SessionService:
         Yields:
             Session events
         """
-        async for event in self.session_manager.subscribe_to_session(
-            session_id
-        ):
+        async for event in self.session_manager.subscribe_to_session(session_id):
             yield event
 
     # ========================================================================
@@ -159,13 +149,9 @@ class SessionService:
         Returns:
             Success status
         """
-        return await self.session_manager.update_session_status(
-            session_id, status
-        )
+        return await self.session_manager.update_session_status(session_id, status)
 
-    async def add_event(
-        self, session_id: str, event: SessionEvent
-    ) -> bool:
+    async def add_event(self, session_id: str, event: SessionEvent) -> bool:
         """
         Add event to session
 

@@ -487,9 +487,7 @@ async def create_session(request: ChatRequest):
         Session information with session_id
     """
     if session_service is None:
-        raise HTTPException(
-            status_code=500, detail="SessionService not initialized"
-        )
+        raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     try:
         # Create and start session (SessionService handles background task)
@@ -508,7 +506,9 @@ async def create_session(request: ChatRequest):
         }
     except Exception as e:
         logger.error(f"Error creating session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create session: {str(e)}"
+        )
 
 
 @app.get("/api/v1/sessions/{session_id}")
@@ -525,9 +525,7 @@ async def get_session(session_id: str):
         Session details
     """
     if session_service is None:
-        raise HTTPException(
-            status_code=500, detail="SessionService not initialized"
-        )
+        raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     try:
         # SessionService의 get_session은 자동으로 활성/완료 세션 통합 조회
@@ -536,9 +534,7 @@ async def get_session(session_id: str):
             return session.to_dict()
 
         # 세션을 찾을 수 없으면 404
-        raise HTTPException(
-            status_code=404, detail=f"Session not found: {session_id}"
-        )
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
     except HTTPException:
         raise
     except Exception as e:
@@ -560,9 +556,7 @@ async def stream_session_events(session_id: str):
         Server-sent events stream
     """
     if session_service is None:
-        raise HTTPException(
-            status_code=500, detail="SessionService not initialized"
-        )
+        raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     async def sse() -> AsyncGenerator[str, None]:
         try:
@@ -574,9 +568,9 @@ async def stream_session_events(session_id: str):
                 event_dict = {
                     "type": event.type,
                     "content": event.content,
-                    "timestamp": event.timestamp.isoformat()
-                    if event.timestamp
-                    else None,
+                    "timestamp": (
+                        event.timestamp.isoformat() if event.timestamp else None
+                    ),
                 }
 
                 # Add optional fields
@@ -625,9 +619,7 @@ async def delete_session_endpoint(session_id: str):
         Success message
     """
     if session_service is None:
-        raise HTTPException(
-            status_code=500, detail="SessionService not initialized"
-        )
+        raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     try:
         success = await session_service.end_session(session_id)
@@ -644,7 +636,9 @@ async def delete_session_endpoint(session_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting session: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete session: {str(e)}"
+        )
 
 
 @app.get("/api/v1/sessions")
@@ -660,9 +654,7 @@ async def list_active_sessions(limit: int = 20, offset: int = 0):
         List of active sessions
     """
     if session_service is None:
-        raise HTTPException(
-            status_code=500, detail="SessionService not initialized"
-        )
+        raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     try:
         sessions = await session_service.list_sessions(limit=limit, offset=offset)

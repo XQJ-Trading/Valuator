@@ -99,7 +99,7 @@ async function handleTerminate() {
   min-height: calc(100vh - 60px);
   max-width: 1200px;
   margin: 0 auto;
-  padding: 16px 1rem 0 1rem;
+  padding: 1rem;
   display: flex;
   flex-direction: column;
 }

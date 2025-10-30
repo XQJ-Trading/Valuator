@@ -411,6 +411,8 @@ function formatJson(data: any): string {
 .markdown-body {
   line-height: 1.75;
   color: var(--text-primary);
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .markdown-body h1,
@@ -573,6 +575,8 @@ function formatJson(data: any): string {
 .message-text {
   line-height: 1.6;
   font-size: 1rem;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .message-text strong {

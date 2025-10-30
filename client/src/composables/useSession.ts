@@ -150,16 +150,28 @@ export function useSession() {
       try {
         const streamUrl = `${API_BASE}/api/v1/sessions/${sessionId}/stream`
         
+        // 기존 연결이 있으면 먼저 정리
+        if (eventSource) {
+          eventSource.close()
+          eventSource = null
+        }
+        
         eventSource = new EventSource(streamUrl)
-        connectionState.value.connected = true
+        connectionState.value.connected = false  // onopen에서 true로 변경
         connectionState.value.reconnecting = false
         connectionState.value.reconnectAttempts = 0
         connectionState.value.lastError = undefined
 
         eventSource.onopen = () => {
-          console.log('Stream connected')
+          console.log('[SSE] Stream connected', {
+            sessionId,
+            readyState: eventSource?.readyState,
+            url: streamUrl
+          })
           connectionState.value.connected = true
+          connectionState.value.reconnecting = false
           status.value = '스트리밍중...'
+          resolve(undefined)
         }
 
         eventSource.onmessage = (event) => {
@@ -167,20 +179,44 @@ export function useSession() {
             const data: StreamEventData = JSON.parse(event.data)
             handleStreamEvent(data)
           } catch (err) {
-            console.warn('메시지 파싱 오류:', err)
+            console.warn('메시지 파싱 오류:', err, 'Raw data:', event.data)
           }
         }
 
         eventSource.onerror = (error) => {
-          console.error('Stream error:', error)
-          connectionState.value.connected = false
-          connectionState.value.lastError = String(error)
+          console.error('[SSE] Stream error:', {
+            error,
+            sessionId,
+            readyState: eventSource?.readyState,
+            url: streamUrl,
+            connected: connectionState.value.connected,
+            reconnecting: connectionState.value.reconnecting,
+            reconnectAttempts: connectionState.value.reconnectAttempts
+          })
           
-          if (eventSource?.readyState === EventSource.CLOSED) {
-            // 연결이 완전히 끊김
-            handleStreamDisconnect(sessionId)
+          // EventSource의 자동 재연결을 막기 위해 즉시 닫기
+          if (eventSource) {
+            console.log('[SSE] Closing EventSource manually')
+            eventSource.close()
+            eventSource = null
           }
+          
+          connectionState.value.connected = false
+          connectionState.value.lastError = 'Stream connection error'
+          
+          // 커스텀 재연결 로직 실행
+          handleStreamDisconnect(sessionId)
         }
+        
+        // 타임아웃 처리 (30초)
+        setTimeout(() => {
+          if (!connectionState.value.connected && eventSource) {
+            console.warn('Connection timeout')
+            eventSource.close()
+            reject(new Error('Connection timeout'))
+          }
+        }, 30000)
+        
       } catch (err) {
         reject(err)
       }
@@ -207,7 +243,7 @@ export function useSession() {
       addMessage('final_answer', data.content || '', {
         metadata: data.metadata
       })
-    } else if (data.type in ['thought', 'action', 'observation']) {
+    } else if (['thought', 'action', 'observation'].includes(data.type)) {
       addMessage(data.type as any, data.content || '', {
         tool: data.tool,
         tool_input: data.tool_input,
@@ -238,9 +274,14 @@ export function useSession() {
 
   // 스트림 끊김 시 처리
   function handleStreamDisconnect(sessionId: string) {
+    // 이미 재연결 중이거나 최대 시도 횟수 초과
+    if (connectionState.value.reconnecting) {
+      return
+    }
+    
     if (connectionState.value.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       status.value = '연결 실패'
-      addMessage('error', '스트림 연결이 끊어졌습니다. 재연결을 시도하세요.', {})
+      addMessage('error', '스트림 연결이 끊어졌습니다. 수동으로 재연결하세요.', {})
       loading.value = false
       return
     }
@@ -249,15 +290,24 @@ export function useSession() {
     connectionState.value.reconnectAttempts += 1
     status.value = `재연결 시도 중... (${connectionState.value.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
 
+    // 지수 백오프 적용
+    const delay = RECONNECT_DELAY * connectionState.value.reconnectAttempts
+    
     reconnectTimer = setTimeout(() => {
-      console.log('Attempting to reconnect...')
-      subscribeToStream(sessionId).catch((err) => {
-        console.error('Reconnection failed:', err)
-        if (connectionState.value.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          handleStreamDisconnect(sessionId)
-        }
-      })
-    }, RECONNECT_DELAY)
+      console.log(`Reconnecting attempt ${connectionState.value.reconnectAttempts}...`)
+      subscribeToStream(sessionId)
+        .then(() => {
+          console.log('Reconnection successful')
+          connectionState.value.reconnecting = false
+        })
+        .catch((err) => {
+          console.error('Reconnection failed:', err)
+          connectionState.value.reconnecting = false
+          if (connectionState.value.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            handleStreamDisconnect(sessionId)
+          }
+        })
+    }, delay)
   }
 
   // 수동 재연결

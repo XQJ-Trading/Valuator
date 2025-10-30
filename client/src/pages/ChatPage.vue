@@ -1,18 +1,5 @@
 <template>
   <div class="chat-page">
-    <!-- Session Control -->
-    <SessionControl
-      :currentSessionId="currentSessionId"
-      :connectionState="connectionState"
-      :activeSession="activeSession"
-      :isSessionActive="isSessionActive"
-      :sessionProgress="sessionProgress"
-      :loading="loading"
-      @create-session="handleCreateSession"
-      @reconnect="handleReconnect"
-      @terminate="handleTerminateSession"
-    />
-
     <!-- Input Section -->
     <InputSection 
       v-model:query="query"
@@ -37,7 +24,6 @@
 import InputSection from '../components/InputSection.vue'
 import StatusBar from '../components/StatusBar.vue'
 import MessagesContainer from '../components/MessagesContainer.vue'
-import SessionControl from '../components/SessionControl.vue'
 import { useSession } from '../composables/useSession'
 import { useRouter } from 'vue-router'
 
@@ -50,15 +36,8 @@ const {
   messages,
   selectedModel,
   availableModels,
-  currentSessionId,
-  activeSession,
-  connectionState,
-  isSessionActive,
-  sessionProgress,
   clearAll,
-  createSession,
-  terminateSession,
-  reconnect
+  createSession
 } = useSession()
 
 const router = useRouter()
@@ -71,13 +50,6 @@ const handleCreateSession = async () => {
   }
 }
 
-const handleReconnect = () => {
-  reconnect()
-}
-
-const handleTerminateSession = () => {
-  terminateSession()
-}
 </script>
 
 <style scoped>
@@ -85,7 +57,7 @@ const handleTerminateSession = () => {
   min-height: calc(100vh - 60px);
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 1rem;
+  padding: 16px 1rem 0 1rem;
   display: flex;
   flex-direction: column;
 }

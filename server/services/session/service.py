@@ -27,7 +27,9 @@ class SessionService:
         """
         self.session_manager = SessionManager(history_repository=history_repository)
         self.history_repository = history_repository
-        self.background_runner = BackgroundTaskRunner(self.session_manager, history_repository=history_repository)
+        self.background_runner = BackgroundTaskRunner(
+            self.session_manager, history_repository=history_repository
+        )
         logger.info("SessionService initialized")
 
     # ========================================================================
@@ -54,9 +56,7 @@ class SessionService:
 
         # Start background task
         asyncio.create_task(
-            self.background_runner.solve_in_background(
-                session.session_id, query, model
-            )
+            self.background_runner.solve_in_background(session.session_id, query, model)
         )
 
         logger.info(f"Started session: {session.session_id}")
@@ -112,9 +112,7 @@ class SessionService:
     # Event Streaming
     # ========================================================================
 
-    async def subscribe_to_session(
-        self, session_id: str
-    ) -> AsyncGenerator[Any, None]:
+    async def subscribe_to_session(self, session_id: str) -> AsyncGenerator[Any, None]:
         """
         Subscribe to session events as a stream
 

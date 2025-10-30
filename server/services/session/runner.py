@@ -14,7 +14,11 @@ from ...repositories import SessionRepository
 class BackgroundTaskRunner:
     """Runs background tasks independently from API responses"""
 
-    def __init__(self, session_manager: SessionManager, history_repository: Optional[SessionRepository] = None):
+    def __init__(
+        self,
+        session_manager: SessionManager,
+        history_repository: Optional[SessionRepository] = None,
+    ):
         """
         Initialize BackgroundTaskRunner
 

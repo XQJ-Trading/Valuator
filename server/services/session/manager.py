@@ -157,7 +157,9 @@ class SessionManager:
     # Event Management
     # ========================================================================
 
-    async def add_event(self, session_id: str, event: SessionEvent | Dict[str, Any]) -> bool:
+    async def add_event(
+        self, session_id: str, event: SessionEvent | Dict[str, Any]
+    ) -> bool:
         """
         Add event to session
 
@@ -178,7 +180,11 @@ class SessionManager:
             event_obj = SessionEvent(
                 type=event.get("type", ""),
                 content=event.get("content", ""),
-                timestamp=datetime.fromisoformat(event["timestamp"]) if isinstance(event.get("timestamp"), str) else event.get("timestamp", datetime.now()),
+                timestamp=(
+                    datetime.fromisoformat(event["timestamp"])
+                    if isinstance(event.get("timestamp"), str)
+                    else event.get("timestamp", datetime.now())
+                ),
                 tool=event.get("tool"),
                 tool_input=event.get("tool_input"),
                 tool_output=event.get("tool_output"),

@@ -35,7 +35,7 @@ class SessionEvent:
             "type": self.type,
             "content": self.content,
         }
-        
+
         # v1 형식과 호환되도록 필드 추가
         if self.tool:
             result["tool"] = self.tool
@@ -49,11 +49,11 @@ class SessionEvent:
             result["metadata"] = self.metadata
         if self.query:
             result["query"] = self.query
-            
+
         # v1 호환성을 위해 timestamp 추가 (없으면 생략)
         if self.timestamp:
             result["timestamp"] = self.timestamp.isoformat()
-            
+
         return result
 
 

@@ -2,25 +2,27 @@
 
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 from ...core.agent.react_agent import AIAgent
 from ...core.utils.logger import logger
 from .manager import SessionManager
-from .models import SessionEvent, SessionStatus
+from .models import SessionStatus
 
 
 class BackgroundTaskRunner:
     """Runs background tasks independently from API responses"""
 
-    def __init__(self, session_manager: SessionManager):
+    def __init__(self, session_manager: SessionManager, history_repository: Optional[Any] = None):
         """
         Initialize BackgroundTaskRunner
 
         Args:
             session_manager: SessionManager instance for managing sessions
+            history_repository: Optional repository for persisting sessions
         """
         self.session_manager = session_manager
+        self.history_repository = history_repository
         logger.info("BackgroundTaskRunner initialized")
 
     async def solve_in_background(
@@ -47,44 +49,59 @@ class BackgroundTaskRunner:
             # Create agent
             agent = AIAgent(model_name=model)
 
-            # Stream events from agent
+            # Stream events from agent and publish as dict
             async for event_dict in agent.solve_stream(query):
-                # Convert dict event to SessionEvent
-                session_event = SessionEvent(
-                    type=event_dict.get("type", ""),
-                    content=event_dict.get("content", ""),
-                    timestamp=datetime.now(),
-                    tool=event_dict.get("tool"),
-                    tool_input=event_dict.get("tool_input"),
-                    tool_output=event_dict.get("tool_output"),
-                    error=event_dict.get("error"),
-                    metadata=event_dict.get("metadata"),
-                )
+                # Publish event dict directly to session
+                await self.session_manager.add_event(session_id, event_dict)
 
-                # Add event to session
-                await self.session_manager.add_event(session_id, session_event)
+                logger.debug(f"Session {session_id} event: {event_dict.get('type')}")
 
-                logger.debug(f"Session {session_id} event: {session_event.type}")
+            # Send end event to notify client
+            end_event_dict = {
+                "type": "end",
+                "content": "",
+                "timestamp": datetime.now().isoformat(),
+            }
+            await self.session_manager.add_event(session_id, end_event_dict)
 
             # Mark as completed
             await self.session_manager.update_session_status(
                 session_id, SessionStatus.COMPLETED
             )
+
+            # Save to history repository
+            session = await self.session_manager.get_session(session_id)
+            if session and self.history_repository:
+                try:
+                    await self.history_repository.save_session(session.to_dict())
+                    logger.info(f"Saved completed session to history: {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to save session to history: {e}")
+
             logger.info(f"Background task completed for session: {session_id}")
 
         except Exception as e:
             logger.error(f"Error in background task for session {session_id}: {e}")
 
-            # Add error event
-            error_event = SessionEvent(
-                type="error",
-                content="",
-                timestamp=datetime.now(),
-                error=str(e),
-            )
-            await self.session_manager.add_event(session_id, error_event)
+            # Add error event as dict
+            error_event_dict = {
+                "type": "error",
+                "content": "",
+                "timestamp": datetime.now().isoformat(),
+                "error": str(e),
+            }
+            await self.session_manager.add_event(session_id, error_event_dict)
 
             # Mark as failed
             await self.session_manager.update_session_status(
                 session_id, SessionStatus.FAILED
             )
+
+            # Save failed session to history repository
+            session = await self.session_manager.get_session(session_id)
+            if session and self.history_repository:
+                try:
+                    await self.history_repository.save_session(session.to_dict())
+                    logger.info(f"Saved failed session to history: {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to save failed session to history: {e}")

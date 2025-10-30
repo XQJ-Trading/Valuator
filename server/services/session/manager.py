@@ -157,13 +157,13 @@ class SessionManager:
     # Event Management
     # ========================================================================
 
-    async def add_event(self, session_id: str, event: SessionEvent) -> bool:
+    async def add_event(self, session_id: str, event: SessionEvent | Dict[str, Any]) -> bool:
         """
         Add event to session
 
         Args:
             session_id: Session ID
-            event: Event to add
+            event: Event to add (SessionEvent or dict)
 
         Returns:
             Success status
@@ -173,13 +173,29 @@ class SessionManager:
             logger.warning(f"Session not found: {session_id}")
             return False
 
-        session.events.append(event)
+        # Convert dict to SessionEvent if needed
+        if isinstance(event, dict):
+            event_obj = SessionEvent(
+                type=event.get("type", ""),
+                content=event.get("content", ""),
+                timestamp=datetime.fromisoformat(event["timestamp"]) if isinstance(event.get("timestamp"), str) else event.get("timestamp", datetime.now()),
+                tool=event.get("tool"),
+                tool_input=event.get("tool_input"),
+                tool_output=event.get("tool_output"),
+                error=event.get("error"),
+                metadata=event.get("metadata"),
+            )
+        else:
+            event_obj = event
 
-        # Broadcast to all subscribers
+        session.events.append(event_obj)
+
+        # Broadcast to all subscribers as dict
         if session_id in self.subscribers:
+            event_dict = event_obj.to_dict()
             for queue in self.subscribers[session_id]:
                 try:
-                    queue.put_nowait(event)
+                    queue.put_nowait(event_dict)
                 except asyncio.QueueFull:
                     logger.warning(f"Subscriber queue full for session: {session_id}")
 
@@ -220,7 +236,7 @@ class SessionManager:
 
     async def subscribe_to_session(
         self, session_id: str
-    ) -> AsyncGenerator[SessionEvent, None]:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Subscribe to session events as a stream
 
@@ -230,7 +246,7 @@ class SessionManager:
             session_id: Session ID to subscribe to
 
         Yields:
-            Session events
+            Session events as dictionaries (JSON-serializable)
         """
         session = self.sessions.get(session_id)
         if session is None:
@@ -238,7 +254,7 @@ class SessionManager:
             return
 
         # Create a queue for this subscriber
-        subscriber_queue: asyncio.Queue[SessionEvent] = asyncio.Queue()
+        subscriber_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
         self.subscribers[session_id].append(subscriber_queue)
         session.subscriber_count = len(self.subscribers[session_id])
 
@@ -247,9 +263,9 @@ class SessionManager:
         )
 
         try:
-            # First, yield all existing events
+            # First, yield all existing events as dictionaries
             for event in session.events:
-                yield event
+                yield event.to_dict()
 
             # Then, wait for new events
             while True:
@@ -260,6 +276,7 @@ class SessionManager:
                     logger.info(f"Session ended during subscription: {session_id}")
                     break
 
+                # Event is already a dict from add_event
                 yield event
 
         except asyncio.CancelledError:

@@ -559,35 +559,67 @@ async def stream_session_events(session_id: str):
         raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     async def sse() -> AsyncGenerator[str, None]:
+        KEEP_ALIVE_INTERVAL = 15  # 15초마다 keep-alive
+        
         try:
             logger.info(f"Client subscribing to session: {session_id}")
-
-            # Subscribe to events using SessionService
-            async for event in session_service.subscribe_to_session(session_id):
-                # Convert SessionEvent to dict
-                event_dict = {
-                    "type": event.type,
-                    "content": event.content,
-                    "timestamp": (
-                        event.timestamp.isoformat() if event.timestamp else None
-                    ),
-                }
-
-                # Add optional fields
-                if event.tool:
-                    event_dict["tool"] = event.tool
-                if event.tool_input:
-                    event_dict["tool_input"] = event.tool_input
-                if event.tool_output:
-                    event_dict["tool_output"] = event.tool_output
-                if event.error:
-                    event_dict["error"] = event.error
-                if event.metadata:
-                    event_dict["metadata"] = event.metadata
-
-                yield f"data: {json.dumps(event_dict, ensure_ascii=False)}\n\n"
-
-            logger.info(f"Stream ended for session: {session_id}")
+            
+            # 이벤트 큐 생성 (keep-alive와 실제 이벤트를 통합)
+            event_queue: asyncio.Queue = asyncio.Queue()
+            subscription_active = True
+            
+            async def keep_alive_sender():
+                """주기적으로 keep-alive를 큐에 추가"""
+                while subscription_active:
+                    await asyncio.sleep(KEEP_ALIVE_INTERVAL)
+                    if subscription_active:
+                        await event_queue.put(None)  # None = keep-alive 신호
+            
+            async def event_subscriber():
+                """세션 이벤트를 큐에 추가"""
+                try:
+                    async for event in session_service.subscribe_to_session(session_id):
+                        await event_queue.put(event)
+                except Exception as e:
+                    logger.error(f"Event subscription error: {e}")
+                    await event_queue.put({"type": "error", "message": str(e)})
+                finally:
+                    await event_queue.put("END")  # 종료 신호
+            
+            # 두 태스크 시작
+            keep_alive_task = asyncio.create_task(keep_alive_sender())
+            subscriber_task = asyncio.create_task(event_subscriber())
+            
+            try:
+                # 큐에서 이벤트 처리
+                while True:
+                    item = await event_queue.get()
+                    
+                    if item == "END":
+                        # 스트림 종료
+                        break
+                    elif item is None:
+                        # Keep-alive
+                        yield ": keep-alive\n\n"
+                    else:
+                        # 실제 이벤트
+                        yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                
+                logger.info(f"Stream ended for session: {session_id}")
+            finally:
+                # 태스크 정리
+                subscription_active = False
+                keep_alive_task.cancel()
+                subscriber_task.cancel()
+                try:
+                    await keep_alive_task
+                except asyncio.CancelledError:
+                    pass
+                try:
+                    await subscriber_task
+                except asyncio.CancelledError:
+                    pass
+                    
         except Exception as e:
             logger.error(f"Error streaming session events: {e}")
             error_event = {

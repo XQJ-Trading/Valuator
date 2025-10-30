@@ -184,6 +184,7 @@ class SessionManager:
                 tool_output=event.get("tool_output"),
                 error=event.get("error"),
                 metadata=event.get("metadata"),
+                query=event.get("query"),
             )
         else:
             event_obj = event

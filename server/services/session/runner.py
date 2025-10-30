@@ -70,16 +70,7 @@ class BackgroundTaskRunner:
                 session_id, SessionStatus.COMPLETED
             )
 
-            # Save to history repository
-            session = await self.session_manager.get_session(session_id)
-            if session and self.history_repository:
-                try:
-                    await self.history_repository.save_session(session.to_dict())
-                    logger.info(f"Saved completed session to history: {session_id}")
-                except Exception as e:
-                    logger.error(f"Failed to save session to history: {e}")
-
-            logger.info(f"Background task completed for session: {session_id}")
+            await self.session_manager.cleanup_session(session_id)
 
         except Exception as e:
             logger.error(f"Error in background task for session {session_id}: {e}")

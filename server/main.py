@@ -517,12 +517,13 @@ async def get_session(session_id: str):
     Get session details (세션 상태 조회)
     - 활성 세션(메모리)이 있으면 먼저 반환
     - 없으면 자동으로 히스토리에서 조회
+    - 히스토리에 있으면 redirect, 없으면 404
 
     Args:
         session_id: Session ID
 
     Returns:
-        Session details
+        Session details or redirect response
     """
     if session_service is None:
         raise HTTPException(status_code=500, detail="SessionService not initialized")

@@ -79,13 +79,6 @@ class SessionService:
         if session is not None:
             return session
 
-        # 2. Fall back to history
-        if self.history_repository is not None:
-            history_session = await self.history_repository.get_session(session_id)
-            if history_session is not None:
-                logger.info(f"Found completed session in history: {session_id}")
-                return history_session
-
         return None
 
     async def list_sessions(

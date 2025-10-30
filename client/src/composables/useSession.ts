@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import type { Message } from '../types/Message'
 import type { Session, ConnectionState, StreamEventData } from '../types/Session'
 
@@ -361,8 +362,9 @@ export function useSession() {
   async function fetchSessionStatus(sessionId: string) {
     try {
       const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`)
+
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
-      
+
       const data = await res.json()
       return data
     } catch (err) {

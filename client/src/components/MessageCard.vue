@@ -7,7 +7,15 @@
       <button @click="copyMessage(message.content)" class="copy-btn" title="복사">📋</button>
     </div>
     <div class="message-content">
-      <div class="message-text" v-if="message.type === 'thought'">
+      <div class="message-planning" v-if="message.type === 'planning'">
+        <div class="planning-badge">📋 작업 계획</div>
+        <div class="planning-content markdown-body" v-html="renderMarkdown(message.content)"></div>
+        <div v-if="message.metadata?.todo" class="todo-list-container">
+          <div class="todo-list-title">📝 Todo List:</div>
+          <div class="todo-list markdown-body" v-html="renderMarkdown(message.metadata.todo)"></div>
+        </div>
+      </div>
+      <div class="message-text" v-else-if="message.type === 'thought'">
         <em>"{{ message.content }}"</em>
       </div>
       <div class="message-text markdown-body" v-else-if="message.type === 'final_answer'" v-html="renderMarkdown(message.content)"></div>
@@ -238,6 +246,96 @@ function formatJson(data: any): string {
   font-style: italic;
   font-size: 0.95rem;
   line-height: 1.5;
+}
+
+/* Planning 메시지 */
+.message-planning {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+  border-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.message-planning:hover {
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
+}
+
+.message-planning .message-header {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.message-planning .planning-badge {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 1rem;
+  display: inline-block;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.message-planning .planning-content {
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 0.75rem;
+  background: rgba(59, 130, 246, 0.05);
+  border-radius: 8px;
+  border-left: 4px solid #3b82f6;
+  margin-bottom: 1rem;
+}
+
+.message-planning .todo-list-container {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 2px solid rgba(59, 130, 246, 0.2);
+}
+
+.message-planning .todo-list-title {
+  font-weight: 600;
+  color: #3b82f6;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.message-planning .todo-list {
+  padding: 1rem;
+  background: rgba(59, 130, 246, 0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+/* Todo list 체크박스 스타일링 */
+.message-planning .todo-list :deep(ul) {
+  list-style: none;
+  padding-left: 0;
+}
+
+.message-planning .todo-list :deep(li) {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+}
+
+.message-planning .todo-list :deep(li:last-child) {
+  border-bottom: none;
+}
+
+.message-planning .todo-list :deep(input[type="checkbox"]) {
+  margin-right: 0.5rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
+.message-planning .todo-list :deep(input[type="checkbox"]:checked + label) {
+  text-decoration: line-through;
+  opacity: 0.6;
+  color: var(--text-secondary);
 }
 
 /* 액션 메시지 */
@@ -815,7 +913,8 @@ function formatJson(data: any): string {
   }
   
   .message-thought .message-text,
-  .message-final_answer .message-text {
+  .message-final_answer .message-text,
+  .message-planning .planning-content {
     font-size: 0.85rem;
     line-height: 1.5;
   }

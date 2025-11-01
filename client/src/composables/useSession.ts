@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, readonly } from 'vue'
 import { useRouter } from 'vue-router'
 import type { Message } from '../types/Message'
 import type { Session, ConnectionState, StreamEventData } from '../types/Session'
@@ -15,6 +15,7 @@ export function useSession() {
   const messages = ref<Message[]>([])
   const selectedModel = ref<string>('')
   const availableModels = ref<string[]>([])
+  const currentTodo = ref<string | null>(null)  // Planning step의 todo
   
   // Session state
   const currentSessionId = ref<string | null>(null)
@@ -229,6 +230,18 @@ export function useSession() {
   function handleStreamEvent(data: StreamEventData) {
     if (data.type === 'start') {
       addMessage('start', data.query || '시작', { query: data.query })
+    } else if (data.type === 'planning') {
+      // Planning 이벤트 처리
+      addMessage('planning', data.content || '', {
+        todo: data.todo
+      })
+      
+      // Todo 업데이트
+      if (data.todo) {
+        currentTodo.value = data.todo
+      }
+      
+      status.value = '📋 계획 수립중...'
     } else if (data.type === 'end') {
       closeStream()
       addMessage('end', '완료', {})
@@ -431,6 +444,7 @@ export function useSession() {
     currentSessionId,
     activeSession,
     connectionState,
+    currentTodo: readonly(currentTodo),
     
     // Computed
     isSessionActive,

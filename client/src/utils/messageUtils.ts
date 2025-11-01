@@ -2,6 +2,7 @@ import type { MessageType } from '../types/Message'
 
 export function getMessageIcon(type: MessageType): string {
   const icons = {
+    planning: '📋',
     thought: '🧠',
     action: '⚡',
     observation: '👁️',
@@ -17,6 +18,7 @@ export function getMessageIcon(type: MessageType): string {
 
 export function getMessageTitle(type: MessageType): string {
   const titles = {
+    planning: '작업 계획',
     thought: '사고과정',
     action: '도구 실행',
     observation: '실행 결과',

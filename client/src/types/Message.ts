@@ -1,5 +1,5 @@
 export interface Message {
-  type: 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'token' | 'start' | 'end' | 'subtask_result'
+  type: 'planning' | 'thought' | 'action' | 'observation' | 'final_answer' | 'error' | 'token' | 'start' | 'end' | 'subtask_result'
   content: string
   metadata?: MessageMetadata
   timestamp: Date
@@ -17,6 +17,7 @@ export interface MessageMetadata {
   query?: string
   source_type?: string
   original_content?: string
+  todo?: string  // Planning step의 todo markdown
 }
 
 export interface ToolResult {

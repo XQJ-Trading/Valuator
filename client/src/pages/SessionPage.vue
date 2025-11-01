@@ -6,6 +6,9 @@
       <h1>🔄 Session</h1>
     </div>
 
+    <!-- Todo List Panel -->
+    <TodoList v-if="currentTodo" :todo="currentTodo" />
+
     <!-- Session Control -->
     <SessionControl
       :currentSessionId="currentSessionId"
@@ -41,6 +44,7 @@ import { useRouter } from 'vue-router'
 import SessionControl from '../components/SessionControl.vue'
 import StatusBar from '../components/StatusBar.vue'
 import MessagesContainer from '../components/MessagesContainer.vue'
+import TodoList from '../components/TodoList.vue'
 import { useSession } from '../composables/useSession'
 
 interface Props {
@@ -59,6 +63,7 @@ const {
   connectionState,
   isSessionActive,
   sessionProgress,
+  currentTodo,
   reconnectToSession,
   reconnect,
   terminateSession,

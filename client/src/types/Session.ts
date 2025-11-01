@@ -20,7 +20,7 @@ export interface SessionEvent {
 }
 
 export interface StreamEventData {
-  type: 'start' | 'thought' | 'action' | 'observation' | 'final_answer' | 'end' | 'error' | 'token'
+  type: 'start' | 'planning' | 'thought' | 'action' | 'observation' | 'final_answer' | 'end' | 'error' | 'token'
   content?: string
   message?: string
   tool?: string
@@ -29,6 +29,7 @@ export interface StreamEventData {
   tool_output?: any
   error?: string
   query?: string
+  todo?: string  // Planning step의 todo markdown
   metadata?: any
 }
 

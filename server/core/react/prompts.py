@@ -1,6 +1,6 @@
 """ReAct prompt templates"""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .state import ReActState, ReActStep, ReActStepType
 
@@ -39,11 +39,13 @@ You MUST follow these rules for every response.
 -   Strive to solve the problem in the fewest steps possible.
 """
 
-    THOUGHT_PROMPT = """**Original Query:** {original_query}
+    THOUGHT_PROMPT = """**Current Todo List:**
+{todo}
 
 **Task:**
-1.  Analyze the original query and formulate a concise plan for your next immediate action.
-2.  Provide ONLY your thought process. Do not include the action itself.
+1.  Review the todo list above and determine which task you should work on next.
+2.  Analyze the current progress and formulate a concise plan for your next immediate action.
+3.  Provide ONLY your thought process. Do not include the action itself.
 
 You have completed {thought_steps}/{max_thought_cycles} thought cycles. Use the remaining cycles effectively.
 
@@ -88,6 +90,25 @@ Provide the final, comprehensive answer to the original query.
 
 **Final Answer:**"""
 
+    PLANNING_PROMPT = """**Original Query:** {original_query}
+
+**Task:**
+{task_instruction}
+
+**Current Progress:**
+{history_summary}
+
+**Todo Planning:**
+Provide a structured todo list in markdown format. Use this format:
+```markdown
+- [x] Task 1: Description (completed)
+- [ ] Task 2: Description
+    - [ ] Task 2.1: Description
+- [ ] Task 3: Description
+```
+
+**Planning:**"""
+
     @classmethod
     def format_system_prompt(
         cls, available_tools: List[Dict[str, Any]], current_date: str
@@ -103,10 +124,23 @@ Provide the final, comprehensive answer to the original query.
     @classmethod
     def format_thought_prompt(cls, state: ReActState, max_thought_cycles: int) -> str:
         """Format prompt for thought step"""
+        from ..utils.logger import logger
+
         thought_steps = len(state.get_steps_by_type(ReActStepType.THOUGHT))
 
+        # Planning step에서 현재 todo 가져오기 (항상 존재해야 함)
+        current_todo = state.get_current_todo()
+
+        if not current_todo:
+            # 이론적으로는 발생하지 않아야 하지만, 안전장치
+            logger.warning(
+                f"No todo found in planning steps for query: {state.original_query}"
+            )
+            # 임시로 빈 todo 사용 (프롬프트는 계속 진행)
+            current_todo = "No todo list available yet."
+
         return cls.THOUGHT_PROMPT.format(
-            original_query=state.original_query,
+            todo=current_todo,
             thought_steps=thought_steps,
             max_thought_cycles=max_thought_cycles,
         )
@@ -160,6 +194,66 @@ Provide the final, comprehensive answer to the original query.
         """Format prompt for final answer"""
         return cls.FINAL_ANSWER_PROMPT.format(original_query=state.original_query)
 
+    @classmethod
+    def format_planning_prompt(
+        cls,
+        state: ReActState,
+        is_initial: bool = False,
+    ) -> str:
+        """Format prompt for planning step"""
+        # History summary 생성 (최근 몇 개 step만)
+        recent_steps = state.steps[-10:] if len(state.steps) > 10 else state.steps
+        history_summary = cls._format_history(recent_steps)
+
+        # Task instruction 선택
+        if is_initial:
+            task_instruction = (
+                "Create a comprehensive todo list breaking down the entire task into manageable steps. "
+                "Focus on structuring the overall approach and identifying key milestones."
+            )
+        else:
+            task_instruction = (
+                "Review and update the todo list based on progress so far. "
+                "Mark completed tasks and adjust remaining tasks if needed."
+            )
+
+        return cls.PLANNING_PROMPT.format(
+            original_query=state.original_query,
+            task_instruction=task_instruction,
+            history_summary=history_summary or "No previous steps.",
+        )
+
+    @staticmethod
+    def extract_todo_from_planning(content: str) -> Optional[str]:
+        """Extract todo markdown from planning content"""
+        import re
+
+        # Markdown code block에서 todo 추출
+        code_block_pattern = r"```markdown\n(.*?)\n```"
+        match = re.search(code_block_pattern, content, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+
+        # Code block 없이 직접 markdown 형식으로 작성된 경우
+        # - [ ] 또는 - [x] 패턴으로 시작하는 라인들 추출
+        lines = content.split("\n")
+        todo_lines = []
+        in_todo_section = False
+
+        for line in lines:
+            if re.match(r"^\s*[-*]\s*\[[ x]\]", line):
+                in_todo_section = True
+                todo_lines.append(line)
+            elif in_todo_section and line.strip() == "":
+                break
+            elif in_todo_section:
+                todo_lines.append(line)
+
+        if todo_lines:
+            return "\n".join(todo_lines).strip()
+
+        return None
+
     @staticmethod
     def format_context(context: Dict[str, Any]) -> str:
         """Format context information"""
@@ -180,7 +274,9 @@ Provide the final, comprehensive answer to the original query.
 
         formatted = []
         for i, step in enumerate(steps, 1):
-            if step.step_type == ReActStepType.THOUGHT:
+            if step.step_type == ReActStepType.PLANNING:
+                formatted.append(f"Planning {i}: {step.content}")
+            elif step.step_type == ReActStepType.THOUGHT:
                 formatted.append(f"Thought {i}: {step.content}")
             elif step.step_type == ReActStepType.ACTION:
                 action_text = f"Action {i}: {step.content}"
@@ -205,7 +301,10 @@ Provide the final, comprehensive answer to the original query.
         max_thought_cycles: int = 10,
     ) -> str:
         """Get prompt for specific step type"""
-        if step_type == ReActStepType.THOUGHT:
+        if step_type == ReActStepType.PLANNING:
+            planning_steps = len(state.get_steps_by_type(ReActStepType.PLANNING))
+            return cls.format_planning_prompt(state, is_initial=(planning_steps == 0))
+        elif step_type == ReActStepType.THOUGHT:
             return cls.format_thought_prompt(state, max_thought_cycles)
         elif step_type == ReActStepType.ACTION:
             return cls.format_action_prompt(state, available_tools)
@@ -255,6 +354,7 @@ Provide the final, comprehensive answer to the original query.
 
         # Remove common prefixes if they exist
         prefixes_to_remove = [
+            "Planning:",
             "Thought:",
             "Action:",
             "Observation:",
@@ -263,6 +363,7 @@ Provide the final, comprehensive answer to the original query.
             "Your action:",
             "Your observation:",
             "Your final answer:",
+            "Your planning:",
         ]
 
         for prefix in prefixes_to_remove:
@@ -272,6 +373,7 @@ Provide the final, comprehensive answer to the original query.
 
         # Return a dict with the content for all possible types
         return {
+            "planning": content,
             "thought": content,
             "action": content,
             "observation": content,

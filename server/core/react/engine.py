@@ -87,7 +87,15 @@ class ReActEngine:
 
                 next_step_type = self._determine_next_step(state)
 
-                if next_step_type == ReActStepType.THOUGHT:
+                if next_step_type == ReActStepType.PLANNING:
+                    await self._planning_step(state)
+                    last = state.get_last_step()
+                    yield {
+                        "type": "planning",
+                        "content": last.content,
+                        "todo": last.todo,
+                    }
+                elif next_step_type == ReActStepType.THOUGHT:
                     await self._thought_step(state)
                     last = state.get_last_step()
                     yield {"type": "thought", "content": last.content}
@@ -178,22 +186,42 @@ class ReActEngine:
     def _determine_next_step(self, state: ReActState) -> ReActStepType:
         """Determine what type of step should come next"""
         if not state.steps:
-            return ReActStepType.THOUGHT
+            return ReActStepType.PLANNING  # 첫 step은 planning
 
         last_step = state.get_last_step()
 
-        if last_step.step_type == ReActStepType.THOUGHT:
+        if last_step.step_type == ReActStepType.PLANNING:
+            return ReActStepType.THOUGHT
+        elif last_step.step_type == ReActStepType.THOUGHT:
             return ReActStepType.ACTION
         elif last_step.step_type == ReActStepType.ACTION:
             return ReActStepType.OBSERVATION
         elif last_step.step_type == ReActStepType.OBSERVATION:
-            # Check if we should continue or provide final answer
-            if self._should_provide_final_answer(state):
+            # N사이클마다 planning, 아니면 thought 또는 final_answer
+            if self._should_do_planning(state):
+                return ReActStepType.PLANNING
+            elif self._should_provide_final_answer(state):
                 return ReActStepType.FINAL_ANSWER
             else:
                 return ReActStepType.THOUGHT
         else:
             return ReActStepType.FINAL_ANSWER
+
+    def _should_do_planning(self, state: ReActState) -> bool:
+        """Determine if we should do planning (N cycles)"""
+        from ..utils.config import config
+
+        # Planning interval 설정 (config에서 가져오기)
+        planning_interval = config.react_planning_interval
+
+        # Observation step 개수로 사이클 수 계산
+        observation_steps = len(state.get_steps_by_type(ReActStepType.OBSERVATION))
+
+        # 첫 번째 observation 이후부터 interval마다 planning
+        if observation_steps == 0:
+            return False
+
+        return observation_steps % planning_interval == 0
 
     def _should_provide_final_answer(self, state: ReActState) -> bool:
         """Determine if we have enough information for final answer"""
@@ -277,6 +305,50 @@ class ReActEngine:
                 return True
 
         return False
+
+    async def _planning_step(self, state: ReActState):
+        """Execute planning step"""
+        logger.debug("Executing planning step")
+
+        # 초기 planning인지 판단
+        planning_steps = len(state.get_steps_by_type(ReActStepType.PLANNING))
+        is_initial = planning_steps == 0
+
+        # Planning prompt 생성
+        planning_prompt = self.prompts.format_planning_prompt(
+            state, is_initial=is_initial
+        )
+
+        # Generate response
+        response = await self.api_session.send_message(planning_prompt)
+
+        # Parse planning response
+        parsed = self.prompts.parse_response(response.content)
+        planning_content = parsed.get("planning", response.content.strip())
+
+        # Extract todo markdown
+        todo_markdown = self.prompts.extract_todo_from_planning(planning_content)
+
+        # Store planning step
+        state.add_planning(
+            content=planning_content,
+            todo=todo_markdown,
+        )
+
+        # Log step with API query
+        if self.enable_logging:
+            api_query = planning_prompt
+            react_logger.log_step(
+                "planning",
+                planning_content,
+                api_query=api_query,
+                api_response=response.content,
+                metadata={"todo": todo_markdown} if todo_markdown else None,
+            )
+
+        logger.debug(f"Planning: {planning_content[:100]}...")
+        if todo_markdown:
+            logger.debug(f"Todo extracted: {todo_markdown[:100]}...")
 
     async def _thought_step(self, state: ReActState):
         """Execute thought step"""

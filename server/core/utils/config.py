@@ -45,6 +45,7 @@ class Config(BaseSettings):
     # ReAct Engine Configuration
     react_max_retries: int = Field(default=3, alias="REACT_MAX_RETRIES")
     react_max_thought_cycles: int = Field(default=5, alias="REACT_MAX_THOUGHT_CYCLES")
+    react_planning_interval: int = Field(default=3, alias="REACT_PLANNING_INTERVAL")
 
     # Tool Configuration
     code_execution_timeout: int = Field(default=30, alias="CODE_EXECUTION_TIMEOUT")

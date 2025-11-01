@@ -11,6 +11,7 @@ from pydantic import BaseModel
 class ReActStepType(Enum):
     """Types of ReAct steps"""
 
+    PLANNING = "planning"
     THOUGHT = "thought"
     ACTION = "action"
     OBSERVATION = "observation"
@@ -30,6 +31,7 @@ class ReActStep:
     tool_output: Optional[Any] = None
     error: Optional[str] = None
     tool_result: Optional[Any] = None  # Complete ToolResult object
+    todo: Optional[str] = None  # Markdown string for planning steps
 
 
 class ReActState(BaseModel):
@@ -95,6 +97,35 @@ class ReActState(BaseModel):
         )
         self.add_step(step)
 
+    def add_planning(
+        self,
+        content: str,
+        todo: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Add a planning step with todo"""
+        step = ReActStep(
+            step_type=ReActStepType.PLANNING,
+            content=content,
+            todo=todo,
+            metadata=metadata or {},
+        )
+        self.add_step(step)
+
+    def get_current_todo(self) -> Optional[str]:
+        """Get the most recent todo from planning steps"""
+        planning_steps = self.get_steps_by_type(ReActStepType.PLANNING)
+        if not planning_steps:
+            return None
+
+        # 가장 최근 planning step의 todo 반환
+        last_planning = planning_steps[-1]
+        return getattr(last_planning, "todo", None)
+
+    def has_planning(self) -> bool:
+        """Check if any planning step exists"""
+        return len(self.get_steps_by_type(ReActStepType.PLANNING)) > 0
+
     def set_final_answer(self, answer: str):
         """Set the final answer and mark as completed"""
         step = ReActStep(step_type=ReActStepType.FINAL_ANSWER, content=answer)
@@ -125,7 +156,12 @@ class ReActState(BaseModel):
         formatted = f"Query: {self.original_query}\n\n"
 
         for i, step in enumerate(self.steps, 1):
-            if step.step_type == ReActStepType.THOUGHT:
+            if step.step_type == ReActStepType.PLANNING:
+                formatted += f"Planning {i}: {step.content}\n"
+                if step.todo:
+                    formatted += f"Todo: {step.todo}\n"
+                formatted += "\n"
+            elif step.step_type == ReActStepType.THOUGHT:
                 formatted += f"Thought {i}: {step.content}\n\n"
             elif step.step_type == ReActStepType.ACTION:
                 formatted += f"Action {i}: {step.content}\n"
@@ -156,6 +192,7 @@ class ReActState(BaseModel):
                     "tool_input": step.tool_input,
                     "tool_output": step.tool_output,
                     "error": step.error,
+                    "todo": step.todo,
                 }
                 for step in self.steps
             ],
@@ -191,6 +228,7 @@ class ReActState(BaseModel):
                 tool_input=step_data.get("tool_input"),
                 tool_output=step_data.get("tool_output"),
                 error=step_data.get("error"),
+                todo=step_data.get("todo"),
             )
             state.steps.append(step)
 

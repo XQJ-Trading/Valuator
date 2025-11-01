@@ -28,6 +28,7 @@ class SessionEvent:
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     query: Optional[str] = None
+    todo: Optional[str] = None  # Markdown string for planning events
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary - compatible with v1 chat stream format"""
@@ -49,6 +50,8 @@ class SessionEvent:
             result["metadata"] = self.metadata
         if self.query:
             result["query"] = self.query
+        if self.todo:
+            result["todo"] = self.todo
 
         # v1 호환성을 위해 timestamp 추가 (없으면 생략)
         if self.timestamp:
@@ -70,6 +73,7 @@ class SessionData:
     events: list[SessionEvent] = field(default_factory=list)
     subscriber_count: int = 0
     error: Optional[str] = None
+    todo: Optional[str] = None  # Markdown string for todo list
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary - compatible with v1 chat stream format"""
@@ -108,4 +112,5 @@ class SessionData:
             "event_count": len(self.events),
             "subscriber_count": self.subscriber_count,
             "error": self.error,
+            "todo": self.todo,
         }

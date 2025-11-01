@@ -202,7 +202,13 @@ class SessionManager:
                 error=event.get("error"),
                 metadata=event.get("metadata"),
                 query=event.get("query"),
+                todo=event.get("todo"),
             )
+
+            # Planning event인 경우 SessionData.todo 업데이트
+            if event.get("type") == "planning" and event.get("todo"):
+                session.todo = event.get("todo")
+                logger.debug(f"Updated session {session_id} todo")
         else:
             event_obj = event
 

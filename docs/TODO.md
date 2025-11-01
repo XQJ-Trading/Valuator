@@ -3,7 +3,9 @@
 ## Server
 
 ### Core
-* planning Step
+* stabilize planning Step
+* fix string related error on code execution
+* multi-attribute prompt component
 
 ### Feature
 * Task Rewrite

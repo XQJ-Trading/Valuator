@@ -12,16 +12,26 @@ Valuator/
 │   │   ├── models/             # LLM 모델 연동
 │   │   ├── react/              # ReAct 엔진
 │   │   ├── tools/              # 도구 구현
+│   │   ├── examples/           # 예제 코드
 │   │   └── utils/              # 유틸리티
 │   ├── repositories/           # 데이터 저장소 패턴
 │   ├── adapters/              # 외부 시스템 어댑터
+│   ├── services/              # 비즈니스 로직 서비스
+│   │   └── session/           # 세션 관리 서비스
 │   └── main.py                # FastAPI 서버 진입점
 ├── client/                    # 프론트엔드 (Vue.js)
 │   ├── src/                   
 │   │   ├── components/        # Vue 컴포넌트
 │   │   ├── pages/             # 페이지 컴포넌트
-│   │   └── composables/       # Vue Composables
-│   └── package.json
+│   │   ├── composables/       # Vue Composables
+│   │   ├── router/            # 라우터 설정
+│   │   ├── styles/            # 스타일 변수
+│   │   ├── types/             # TypeScript 타입 정의
+│   │   └── utils/             # 유틸리티 함수
+│   ├── package.json
+│   └── vite.config.ts         # Vite 설정
+├── docs/                      # 문서
+│   └── ADR/                   # 아키텍처 결정 기록
 └── logs/                      # 로그 및 세션 데이터
 ```
 
@@ -74,6 +84,7 @@ Valuator/
   - 도메인 모델 (Agent, Tools, Models)
   - ReAct 엔진 구현
   - LLM 연동 및 도구 관리
+  - 예제 코드 및 데모
   
 - **server/repositories**: 데이터 저장소 패턴
   - 파일 기반 저장소
@@ -82,12 +93,18 @@ Valuator/
 - **server/adapters**: 외부 시스템 연동
   - 히스토리 관리
   - API 어댑터
+  
+- **server/services**: 비즈니스 로직 서비스
+  - 세션 관리 (생성, 실행, 상태 관리)
+  - 세션 러너 및 서비스 레이어
 
 ### 프론트엔드 아키텍처
 
-- **Vue 3 + Composition API**
+- **Vue 3 + Composition API + TypeScript**
 - **실시간 채팅 인터페이스**
 - **히스토리 관리**
+- **세션 관리**
+- **라우팅 시스템**
 - **반응형 디자인**
 
 ## 🔧 개발 가이드

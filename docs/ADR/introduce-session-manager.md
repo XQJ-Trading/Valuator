@@ -93,9 +93,9 @@ graph TB
 ```python
 # 세션 생명주기
 Session State: CREATED → RUNNING → COMPLETED/FAILED
-  ├── CREATED: 초기 생성 후 작업 큐 추가
-  ├── RUNNING: 백그라운드 실행 중
-  └── COMPLETED/FAILED: 히스토리에 저장
+  ├── CREATED: 초기 생성 후 비동기 작업 스케줄링
+  ├── RUNNING: 백그라운드 실행 중 (SessionManager가 상태 추적)
+  └── COMPLETED/FAILED: SessionManager.cleanup_session() 시 히스토리에 저장
 ```
 
 **책임:**
@@ -103,50 +103,55 @@ Session State: CREATED → RUNNING → COMPLETED/FAILED
 - 상태 추적 (created_at, completed_at, event_count)
 - 이벤트 스트림 버퍼링
 - 재연결 시 이벤트 재전송
+- 세션 완료 시 히스토리 저장 및 메모리 정리
 
 #### BackgroundTaskRunner - 독립적 작업 실행
 ```python
-# 메인 스레드와 분리된 별도 워커
-Worker Thread: 무한 루프로 세션 작업 실행
-  ├── 큐에서 세션 꺼내기
-  ├── ReActEngine으로 실행
-  ├── 이벤트를 SessionManager에 저장
-  └── 완료 후 히스토리에 저장
+# 세션별 비동기 태스크 실행
+asyncio.create_task(solve_in_background(session_id, query, model))
+  ├── SessionManager.update_session_status(..., RUNNING)
+  ├── AIAgent.solve_stream(...) 이벤트 수신
+  ├── SessionManager.add_event(...)으로 스트리밍
+  ├── 종료 이벤트 추가 및 상태 COMPLETED 전환
+  └── SessionManager.cleanup_session(...)으로 히스토리에 저장
 ```
 
 **특징:**
-- API 응답성과 무관하게 계속 실행
+- API 응답성과 무관하게 계속 실행 (클라이언트 연결과 분리)
 - 네트워크 연결 끊김 무시
-- 작업 진행 상황을 SessionManager에 저장
+- 작업 진행 상황을 SessionManager에 저장 후 SSE 구독자에게 전달
 - 스트림 구독자가 없어도 계속 실행
+- 현재 구현은 전용 워커 큐 대신 `asyncio` 태스크 기반 (독립 워커 풀은 향후 과제)
 
 #### SessionService - 오케스트레이션
 ```python
 # 비즈니스 로직 레이어
-create_session()
-  ├── 세션 생성 (SessionManager)
-  ├── 작업 큐 추가 (BackgroundTaskRunner)
-  └── session_id 반환
+start_session()
+  ├── SessionManager.create_session(...)
+  ├── asyncio.create_task(BackgroundTaskRunner.solve_in_background(...))
+  └── SessionData 반환 (session_id 포함)
 
-subscribe_stream(session_id)
-  ├── 활성 세션인 경우: 실시간 이벤트 SSE
-  └── 완료된 세션인 경우: 히스토리에서 로드 후 SSE
+subscribe_to_session(session_id)
+  └── SessionManager.subscribe_to_session(...) 위임 (활성 세션만 지원)
+
+get_session(session_id)
+  └── 현재는 메모리 내 활성 세션만 반환 (히스토리 fallback TODO)
 ```
 
 ### 2. API 엔드포인트 설계
 
 | 메서드 | 엔드포인트 | 역할 |
 |--------|----------|------|
-| POST | `/api/v1/sessions` | 새 세션 생성 → 백그라운드 실행 시작 |
-| GET | `/api/v1/sessions` | 활성 세션 목록 |
-| GET | `/api/v1/sessions/{id}` | 세션 상태 조회 (활성/완료 자동 선택) |
-| GET | `/api/v1/sessions/{id}/stream` | SSE 스트림 구독 (재연결 가능) |
-| DELETE | `/api/v1/sessions/{id}` | 세션 종료 |
+| POST | `/api/v1/sessions` | 새 세션 생성 → 백그라운드 asyncio 태스크 시작 |
+| GET | `/api/v1/sessions` | 활성 세션 목록 (메모리에 존재하는 세션만) |
+| GET | `/api/v1/sessions/{id}` | 활성 세션 상태 조회 (완료된 세션은 `/api/v1/history/{id}` 이용) |
+| GET | `/api/v1/sessions/{id}/stream` | 활성 세션 SSE 스트림 (이전 이벤트부터 재전송, 완료 시 스트림 종료) |
+| DELETE | `/api/v1/sessions/{id}` | 활성 세션 종료 및 정리 |
 
 **핵심 특징:**
-- `POST /sessions`: **블로킹 없음** → 즉시 반환
-- `GET /sessions/{id}/stream`: **언제든 재연결** → 이전 이벤트부터 재전송
-- 활성/완료 세션 자동 통합
+- `POST /sessions`: **블로킹 없음** → 즉시 session_id 반환
+- `GET /sessions/{id}/stream`: 활성 세션 동안 재연결 시 이전 이벤트부터 재전송
+- 완료된 세션 조회/스트리밍은 `/api/v1/history` 계열 엔드포인트 사용 (향후 통합 예정)
 
 ### 3. 프론트엔드 아키텍처
 
@@ -213,7 +218,7 @@ flowchart TD
 2. **확장성 개선**
    - 스트림 구독자 수와 무관하게 작업 실행
    - 여러 클라이언트가 같은 세션 구독 가능
-   - 백그라운드 작업 큐로 병렬 처리 가능
+  - 세션별 비동기 태스크로 병렬 실행 가능
 
 3. **사용자 경험 향상**
    - 진행 중인 작업 목록 실시간 확인
@@ -333,6 +338,7 @@ client/src/
   - Models (데이터 구조)
 
 ### Phase 2: 최적화 (권장)
+- [ ] 세션 조회 시 히스토리 fallback 구현 (`/api/v1/sessions/{id}` → history 자동 조회)
 - [ ] 이벤트 버퍼 크기 제한 (설정 가능)
 - [ ] 세션 타임아웃 정책 (자동 정리)
 - [ ] 메트릭 수집 (Prometheus)
@@ -354,7 +360,7 @@ client/src/
 ## Questions & Decisions Log
 
 **Q: 왜 외부 큐 시스템(Celery)을 쓰지 않나?**
-A: 현재 규모에서는 스레드 기반 워커로 충분하고, 운영 복잡도를 낮추기 위해
+A: 현재 규모에서는 `asyncio` 기반 비동기 태스크로 충분하고, 운영 복잡도를 낮추기 위해
 
 **Q: SSE가 연결을 잃으면 어떻게 되나?**
 A: EventSource 클라이언트에서 자동 재연결 시도 (최대 3회), 실패 시 수동 재연결 버튼
@@ -364,5 +370,5 @@ A: 타임스탐프 기반 (`chat_YYYYMMDD_HHMMSS`) + 진행 중인 세션은 메
 
 ---
 
-**Last Updated**: 2025-10-26 (Phase 1 구현 완료, 세션 모듈화 적용)
-**Version**: 1.1.0
+**Last Updated**: 2025-10-31 (asyncio 기반 세션 실행 및 API 현황 반영)
+**Version**: 1.2.0

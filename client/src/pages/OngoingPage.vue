@@ -80,6 +80,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useSession } from '../composables/useSession'
 import type { Session } from '../types/Session'
 
 interface OngoingSession extends Session {
@@ -88,13 +89,16 @@ interface OngoingSession extends Session {
 
 const router = useRouter()
 
+const {
+  fetchActiveSessions: fetchSessionsFromComposable
+} = useSession()
+
 const activeSessions = ref<OngoingSession[]>([])
 const loading = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
 const refreshInterval = ref(5)
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
 let refreshTimer: number | null = null
 
 onMounted(() => {
@@ -133,11 +137,8 @@ async function fetchActiveSessions() {
   error.value = ''
 
   try {
-    const res = await fetch(`${API_BASE}/api/v1/sessions`)
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
-
-    const data = await res.json()
-    activeSessions.value = data.sessions || []
+    const sessions = await fetchSessionsFromComposable()
+    activeSessions.value = sessions || []
   } catch (err: any) {
     console.error('Failed to fetch active sessions:', err)
     error.value = `세션 조회 실패: ${err.message}`

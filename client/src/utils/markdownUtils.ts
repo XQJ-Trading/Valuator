@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
+import taskLists from 'markdown-it-task-lists'
 
 const md = new MarkdownIt({
   html: false,
@@ -21,7 +22,7 @@ const md = new MarkdownIt({
       .replace(/>/g, '&gt;')
     return `<pre class="hljs"><code>${escaped}</code></pre>`
   }
-})
+}).use(taskLists)
 
 export function renderMarkdown(content: string): string {
   const unsafe = md.render(content || '')

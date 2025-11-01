@@ -311,31 +311,44 @@ function formatJson(data: any): string {
 }
 
 /* Todo list 체크박스 스타일링 */
-.message-planning .todo-list :deep(ul) {
+.message-planning .todo-list :deep(ul),
+.message-planning .todo-list :deep(ul.contains-task-list) {
   list-style: none;
   padding-left: 0;
 }
 
-.message-planning .todo-list :deep(li) {
+.message-planning .todo-list :deep(li),
+.message-planning .todo-list :deep(li.task-list-item) {
   padding: 0.5rem 0;
   border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
 }
 
-.message-planning .todo-list :deep(li:last-child) {
+.message-planning .todo-list :deep(li:last-child),
+.message-planning .todo-list :deep(li.task-list-item:last-child) {
   border-bottom: none;
 }
 
 .message-planning .todo-list :deep(input[type="checkbox"]) {
-  margin-right: 0.5rem;
+  margin-top: 0.2rem;
   width: 1.1rem;
   height: 1.1rem;
   cursor: pointer;
+  flex-shrink: 0;
+  accent-color: #3b82f6;
 }
 
-.message-planning .todo-list :deep(input[type="checkbox"]:checked + label) {
+.message-planning .todo-list :deep(li.task-list-item input[type="checkbox"]:checked ~ *) {
   text-decoration: line-through;
   opacity: 0.6;
   color: var(--text-secondary);
+}
+
+/* 체크박스가 체크된 경우 텍스트 스타일 */
+.message-planning .todo-list :deep(li.task-list-item:has(input[type="checkbox"]:checked)) {
+  opacity: 0.7;
 }
 
 /* 액션 메시지 */
@@ -867,6 +880,46 @@ function formatJson(data: any): string {
 
 .message-subtask-result .subtask-content :deep(*) {
   color: var(--text-primary) !important;
+}
+
+/* 서브태스크 결과의 Todo list 스타일링 */
+.message-subtask-result .subtask-content :deep(ul.contains-task-list),
+.message-subtask-result .subtask-content :deep(ul) {
+  list-style: none;
+  padding-left: 0;
+}
+
+.message-subtask-result .subtask-content :deep(li.task-list-item),
+.message-subtask-result .subtask-content :deep(li) {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(168, 85, 247, 0.1);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.message-subtask-result .subtask-content :deep(li.task-list-item:last-child),
+.message-subtask-result .subtask-content :deep(li:last-child) {
+  border-bottom: none;
+}
+
+.message-subtask-result .subtask-content :deep(input[type="checkbox"]) {
+  margin-top: 0.2rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  accent-color: #a855f7;
+}
+
+.message-subtask-result .subtask-content :deep(li.task-list-item input[type="checkbox"]:checked ~ *) {
+  text-decoration: line-through;
+  opacity: 0.6;
+  color: var(--text-secondary);
+}
+
+.message-subtask-result .subtask-content :deep(li.task-list-item:has(input[type="checkbox"]:checked)) {
+  opacity: 0.7;
 }
 
 .message-subtask-result .subtask-source {

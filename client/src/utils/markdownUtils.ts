@@ -25,5 +25,16 @@ const md = new MarkdownIt({
 
 export function renderMarkdown(content: string): string {
   const unsafe = md.render(content || '')
-  return DOMPurify.sanitize(unsafe)
+  const sanitized = DOMPurify.sanitize(unsafe)
+  
+  // 테이블을 스크롤 가능한 wrapper로 감싸기
+  const wrapped = sanitized.replace(
+    /<table>/g,
+    '<div class="table-wrapper"><table>'
+  ).replace(
+    /<\/table>/g,
+    '</table></div>'
+  )
+  
+  return wrapped
 }

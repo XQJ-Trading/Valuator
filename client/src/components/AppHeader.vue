@@ -9,6 +9,10 @@
       </router-link>
       
       <nav class="nav-menu">
+        <router-link to="/ongoing" class="nav-btn">
+          <span class="nav-icon">🔄</span>
+          Ongoing
+        </router-link>
         <router-link to="/history" class="nav-btn">
           <span class="nav-icon">📚</span>
           History

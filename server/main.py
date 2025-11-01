@@ -311,24 +311,35 @@ async def get_session(session_id: str):
     Get session details (세션 상태 조회)
     - 활성 세션(메모리)이 있으면 먼저 반환
     - 없으면 자동으로 히스토리에서 조회
-    - 히스토리에 있으면 redirect, 없으면 404
+    - 히스토리에 있으면 redirect 필드 포함, 없으면 404
 
     Args:
         session_id: Session ID
 
     Returns:
-        Session details or redirect response
+        Session details or redirect information
     """
     if session_service is None:
         raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     try:
-        # SessionService의 get_session은 자동으로 활성/완료 세션 통합 조회
+        # 1. 먼저 활성 세션(메모리)에서 조회
         session = await session_service.get_session(session_id)
         if session is not None:
             return session.to_dict()
 
-        # 세션을 찾을 수 없으면 404
+        # 2. 활성 세션이 없으면 히스토리에서 조회
+        if history_repository is not None:
+            history_session = await history_repository.get_session(session_id)
+            if history_session is not None:
+                # 히스토리에 있으면 redirect 정보 포함해서 반환
+                return {
+                    "redirect": f"/history/{session_id}",
+                    "session_id": session_id,
+                    "status": "completed"
+                }
+
+        # 3. 어디에도 없으면 404
         raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
     except HTTPException:
         raise

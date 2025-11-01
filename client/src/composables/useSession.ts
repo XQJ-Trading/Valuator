@@ -5,6 +5,7 @@ import type { Session, ConnectionState, StreamEventData } from '../types/Session
 
 export function useSession() {
   const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+  const router = useRouter()
   
   // State
   const query = ref('')
@@ -366,6 +367,14 @@ export function useSession() {
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
 
       const data = await res.json()
+      
+      // redirect 필드가 있으면 리다이렉트
+      if (data.redirect) {
+        console.log(`[Session] Redirecting to history: ${data.redirect}`)
+        await router.push(data.redirect)
+        return null
+      }
+      
       return data
     } catch (err) {
       console.error('세션 상태 조회 실패:', err)
@@ -380,6 +389,12 @@ export function useSession() {
 
     try {
       const sessionData = await fetchSessionStatus(sessionId)
+      
+      // fetchSessionStatus가 리다이렉트를 처리했으면 null 반환
+      if (sessionData === null) {
+        return
+      }
+
       if (!sessionData) {
         throw new Error('세션을 찾을 수 없습니다')
       }

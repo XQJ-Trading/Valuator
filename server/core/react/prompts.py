@@ -99,7 +99,7 @@ Provide the final, comprehensive answer to the original query.
 {history_summary}
 
 **Todo Planning:**
-Provide a structured todo list in markdown format. Use this format:
+Provide a structured todo list in markdown format:
 ```markdown
 - [x] Task 1: Description (completed)
 - [ ] Task 2: Description
@@ -208,12 +208,14 @@ Provide a structured todo list in markdown format. Use this format:
         # Task instruction 선택
         if is_initial:
             task_instruction = (
-                "Create a comprehensive todo list breaking down the entire task into manageable steps. "
-                "Focus on structuring the overall approach and identifying key milestones."
+                "Create a comprehensive todo list breaking down the task into manageable steps. "
+                "Adjust detail level based on query complexity (simple = concise, complex = detailed with subtasks). "
+                "Focus on structuring the approach and identifying key milestones."
             )
         else:
             task_instruction = (
                 "Review and update the todo list based on progress so far. "
+                "Concisely summarize tasks that are already completed or clearly in the past. "
                 "Mark completed tasks and adjust remaining tasks if needed."
             )
 

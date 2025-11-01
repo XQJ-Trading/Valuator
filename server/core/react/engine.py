@@ -343,7 +343,6 @@ class ReActEngine:
                 planning_content,
                 api_query=api_query,
                 api_response=response.content,
-                metadata={"todo": todo_markdown} if todo_markdown else None,
             )
 
         logger.debug(f"Planning: {planning_content[:100]}...")

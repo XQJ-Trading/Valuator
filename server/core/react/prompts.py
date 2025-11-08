@@ -34,6 +34,7 @@ You MUST follow these rules for every response.
 
 **General Guidelines:**
 -   Be methodical. Analyze the results of each action before planning the next one.
+-   Print <next/> when you are ready to move on to the next task.
 -   If a tool fails, analyze the error and try a different approach. Do not repeat the same failed action.
 -   Break down complex problems into smaller, manageable steps.
 -   Strive to solve the problem in the fewest steps possible.
@@ -43,7 +44,7 @@ You MUST follow these rules for every response.
 {todo}
 
 **Task:**
-1.  Review the todo list above and determine which task you should work on next.
+1.  Read the original query and the todo list above.
 2.  Analyze the current progress and formulate a concise plan for your next immediate action.
 3.  Provide ONLY your thought process. Do not include the action itself.
 
@@ -99,13 +100,16 @@ Provide the final, comprehensive answer to the original query.
 {history_summary}
 
 **Todo Planning:**
-Provide a structured todo list in markdown format:
+Provide a structured todo list in markdown format with 3-5 concise tasks. Keep each task description brief and focused:
 ```markdown
-- [x] Task 1: Description (completed)
-- [ ] Task 2: Description
-    - [ ] Task 2.1: Description
-- [ ] Task 3: Description
+- [x] Task 1: Short description (completed)
+- [ ] Task 2: Short description
+- [ ] Task 3: Short description
+- [ ] Task 4: Short description
+- [ ] Task 5: Short description
 ```
+
+**Important:** Limit to 3-5 tasks maximum. Keep descriptions concise (one short phrase per task).
 
 **Planning:**"""
 
@@ -208,15 +212,18 @@ Provide a structured todo list in markdown format:
         # Task instruction 선택
         if is_initial:
             task_instruction = (
-                "Create a comprehensive todo list breaking down the task into manageable steps. "
-                "Adjust detail level based on query complexity (simple = concise, complex = detailed with subtasks). "
-                "Focus on structuring the approach and identifying key milestones."
+                "Create a concise todo list with 3-5 short tasks. "
+                "Break down the task into key steps only. "
+                "Keep each task description brief (one short phrase). "
+                "Focus on the essential milestones, not detailed subtasks."
             )
         else:
             task_instruction = (
                 "Review and update the todo list based on progress so far. "
-                "Concisely summarize tasks that are already completed or clearly in the past. "
-                "Mark completed tasks and adjust remaining tasks if needed."
+                "Keep it to 3-5 tasks maximum. "
+                "Concisely summarize completed tasks. "
+                "Mark completed tasks and adjust remaining tasks if needed. "
+                "Keep all descriptions brief."
             )
 
         return cls.PLANNING_PROMPT.format(

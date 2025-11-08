@@ -352,8 +352,9 @@ class GeminiModel:
                 top_p=config.top_p,
                 top_k=config.top_k,
                 streaming=True,
+                stop=["<next/>"],  # Stop sequence for task completion marker
             )
-            logger.info(f"Initialized Gemini model: {self.model_name}")
+            logger.info(f"Initialized Gemini model: {self.model_name} with stop sequence: <next/>")
         except Exception as e:
             logger.error(f"Failed to initialize Gemini model: {e}")
             raise

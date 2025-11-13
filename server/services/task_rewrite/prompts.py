@@ -19,6 +19,7 @@ class TaskRewritePrompts:
 5. Maintain the original intent and meaning
 6. Ensure logical flow and progression
 7. Use professional, clear language
+8. Match the output length and level of detail to the richness of the input. Short inputs should produce concise outputs, while longer or more detailed inputs should yield proportionally thorough, expanded outputs. Avoid outputs that are dramatically shorter or longer than the input justifies.
 
 **Output Format:**
 - Use hierarchical numbering (1., 1.a., 1.b., 2., 2.a., etc.)

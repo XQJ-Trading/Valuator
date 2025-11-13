@@ -17,6 +17,27 @@
           <span class="nav-icon">📚</span>
           History
         </router-link>
+        <div 
+          class="nav-dropdown"
+          @mouseenter="showRewriteMenu = true"
+          @mouseleave="showRewriteMenu = false"
+        >
+          <button class="nav-btn nav-btn-dropdown">
+            <span class="nav-icon">✏️</span>
+            Rewrite
+            <span class="dropdown-arrow">▼</span>
+          </button>
+          <div v-if="showRewriteMenu" class="dropdown-menu">
+            <router-link to="/rewrite" class="dropdown-item" @click="showRewriteMenu = false">
+              <span class="dropdown-icon">✨</span>
+              Rewrite
+            </router-link>
+            <router-link to="/rewrite/history" class="dropdown-item" @click="showRewriteMenu = false">
+              <span class="dropdown-icon">📋</span>
+              History
+            </router-link>
+          </div>
+        </div>
         <button @click="handleNewSession" class="nav-btn">
           <span class="nav-icon">✨</span>
           New Session
@@ -27,11 +48,15 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 interface Emits {
   (e: 'newSession'): void
 }
 
 const emit = defineEmits<Emits>()
+
+const showRewriteMenu = ref(false)
 
 function handleNewSession() {
   emit('newSession')
@@ -126,6 +151,73 @@ function handleNewSession() {
 }
 
 .nav-icon {
+  font-size: 0.9rem;
+}
+
+/* 드롭다운 메뉴 */
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-btn-dropdown {
+  position: relative;
+}
+
+.dropdown-arrow {
+  font-size: 0.7rem;
+  margin-left: 0.25rem;
+  transition: transform 0.2s;
+}
+
+.nav-dropdown:hover .dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background: white;
+  border-radius: var(--border-radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  overflow: hidden;
+  z-index: 1000;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: var(--transition);
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--primary-color);
+}
+
+.dropdown-icon {
   font-size: 0.9rem;
 }
 

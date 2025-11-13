@@ -14,7 +14,13 @@ from .core.agent.react_agent import AIAgent
 from .core.utils.config import config
 from .core.utils.logger import logger
 from .repositories import FileSessionRepository, MongoSessionRepository
+from .repositories.task_rewrite_repository import (
+    FileTaskRewriteRepository,
+    MongoTaskRewriteRepository,
+    TaskRewriteRepository,
+)
 from .services.session import SessionService
+from .services.task_rewrite.service import TaskRewriteService
 
 
 # Initialize history repository for server (separate from ReactLogger)
@@ -37,21 +43,45 @@ def create_history_repository():
         return FileSessionRepository("logs/server_history")
 
 
+# Initialize task rewrite repository
+def create_task_rewrite_repository() -> TaskRewriteRepository:
+    """Create task rewrite repository instance"""
+    if config.mongodb_enabled and config.mongodb_uri:
+        try:
+            return MongoTaskRewriteRepository(
+                mongodb_uri=config.mongodb_uri,
+                database=config.mongodb_database,
+                collection="task_rewrite",
+            )
+        except Exception as e:
+            print(f"Failed to initialize MongoDB repository for task rewrite: {e}")
+            print("Falling back to file repository")
+            return FileTaskRewriteRepository("logs/task_rewrite")
+    else:
+        return FileTaskRewriteRepository("logs/task_rewrite")
+
+
 # Global instances
 history_repository = None
 session_service: Optional[SessionService] = None
+task_rewrite_service: Optional[TaskRewriteService] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global history_repository, session_service
+    global history_repository, session_service, task_rewrite_service
     history_repository = create_history_repository()
     print(f"History repository initialized: {type(history_repository).__name__}")
 
     # Initialize session service
     session_service = SessionService(history_repository=history_repository)
     print(f"SessionService initialized")
+
+    # Initialize task rewrite service
+    task_rewrite_repository = create_task_rewrite_repository()
+    task_rewrite_service = TaskRewriteService(repository=task_rewrite_repository)
+    print(f"TaskRewriteService initialized")
 
     yield
 
@@ -79,6 +109,22 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     query: str
     model: Optional[str] = None
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, v):
+        if v is not None and v not in config.supported_models:
+            raise ValueError(
+                f"Unsupported model: {v}. "
+                f"Supported models are: {', '.join(config.supported_models)}"
+            )
+        return v
+
+
+class TaskRewriteRequest(BaseModel):
+    task: str
+    model: Optional[str] = None
+    custom_prompt: Optional[str] = None
 
     @field_validator("model")
     @classmethod
@@ -506,4 +552,153 @@ async def list_active_sessions(limit: int = 20, offset: int = 0):
         logger.error(f"Error listing sessions: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to list sessions: {str(e)}"
+        )
+
+
+# ============================================================================
+# TASK REWRITE API
+# ============================================================================
+
+
+@app.post("/api/v1/task-rewrite")
+async def rewrite_task(request: TaskRewriteRequest):
+    """
+    Rewrite a task text using LLM
+
+    Args:
+        request: TaskRewriteRequest containing task, optional model and custom_prompt
+
+    Returns:
+        Rewritten task with metadata
+    """
+    if task_rewrite_service is None:
+        raise HTTPException(
+            status_code=500, detail="TaskRewriteService not initialized"
+        )
+
+    try:
+        # Use default model if not specified
+        model = request.model or config.agent_model
+
+        # Rewrite the task
+        history = await task_rewrite_service.rewrite_task(
+            task=request.task,
+            model=model,
+            custom_prompt=request.custom_prompt,
+        )
+
+        return {
+            "rewrite_id": history.rewrite_id,
+            "original_task": history.original_task,
+            "rewritten_task": history.rewritten_task,
+            "model": history.model,
+            "created_at": history.created_at.isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error rewriting task: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to rewrite task: {str(e)}"
+        )
+
+
+@app.get("/api/v1/task-rewrite/history")
+async def get_task_rewrite_history(limit: int = 10, offset: int = 0):
+    """
+    Get list of task rewrite history with pagination
+
+    Args:
+        limit: Maximum number of rewrites to return (default: 10)
+        offset: Number of rewrites to skip (default: 0)
+
+    Returns:
+        List of rewrite summaries
+    """
+    if task_rewrite_service is None:
+        raise HTTPException(
+            status_code=500, detail="TaskRewriteService not initialized"
+        )
+
+    try:
+        rewrites = await task_rewrite_service.list_rewrites(limit=limit, offset=offset)
+        return {
+            "rewrites": [rewrite.to_dict() for rewrite in rewrites],
+            "total": len(rewrites),
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving task rewrite history: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve history: {str(e)}"
+        )
+
+
+@app.get("/api/v1/task-rewrite/{rewrite_id}")
+async def get_task_rewrite_detail(rewrite_id: str):
+    """
+    Get detailed information for a specific rewrite
+
+    Args:
+        rewrite_id: ID of the rewrite to retrieve
+
+    Returns:
+        Full rewrite data
+    """
+    if task_rewrite_service is None:
+        raise HTTPException(
+            status_code=500, detail="TaskRewriteService not initialized"
+        )
+
+    try:
+        rewrite = await task_rewrite_service.get_rewrite(rewrite_id)
+
+        if rewrite is None:
+            raise HTTPException(
+                status_code=404, detail=f"Rewrite not found: {rewrite_id}"
+            )
+
+        return rewrite.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving rewrite: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve rewrite: {str(e)}"
+        )
+
+
+@app.delete("/api/v1/task-rewrite/{rewrite_id}")
+async def delete_task_rewrite(rewrite_id: str):
+    """
+    Delete a specific rewrite
+
+    Args:
+        rewrite_id: ID of the rewrite to delete
+
+    Returns:
+        Success message
+    """
+    if task_rewrite_service is None:
+        raise HTTPException(
+            status_code=500, detail="TaskRewriteService not initialized"
+        )
+
+    try:
+        success = await task_rewrite_service.delete_rewrite(rewrite_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=404, detail=f"Rewrite not found: {rewrite_id}"
+            )
+
+        return {
+            "message": f"Rewrite deleted successfully: {rewrite_id}",
+            "rewrite_id": rewrite_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting rewrite: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete rewrite: {str(e)}"
         )

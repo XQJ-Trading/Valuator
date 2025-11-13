@@ -48,4 +48,3 @@ class TaskRewriteHistory:
             created_at=created_at,
             metadata=data.get("metadata", {}),
         )
-

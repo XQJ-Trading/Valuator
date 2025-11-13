@@ -13,9 +13,10 @@ from .adapters import HistoryAdapter
 from .core.agent.react_agent import AIAgent
 from .core.utils.config import config
 from .core.utils.logger import logger
-from .repositories import FileSessionRepository, MongoSessionRepository
-from .repositories.task_rewrite_repository import (
+from .repositories import (
+    FileSessionRepository,
     FileTaskRewriteRepository,
+    MongoSessionRepository,
     MongoTaskRewriteRepository,
     TaskRewriteRepository,
 )
@@ -63,6 +64,7 @@ def create_task_rewrite_repository() -> TaskRewriteRepository:
 
 # Global instances
 history_repository = None
+task_rewrite_repository = None
 session_service: Optional[SessionService] = None
 task_rewrite_service: Optional[TaskRewriteService] = None
 
@@ -70,7 +72,7 @@ task_rewrite_service: Optional[TaskRewriteService] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global history_repository, session_service, task_rewrite_service
+    global history_repository, task_rewrite_repository, session_service, task_rewrite_service
     history_repository = create_history_repository()
     print(f"History repository initialized: {type(history_repository).__name__}")
 
@@ -85,8 +87,28 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown (if needed)
-    # Add any cleanup code here
+    # Shutdown: Close MongoDB connections if applicable
+    logger.info("Shutting down application...")
+
+    # Close task rewrite repository MongoDB connection
+    if task_rewrite_repository and isinstance(
+        task_rewrite_repository, MongoTaskRewriteRepository
+    ):
+        try:
+            task_rewrite_repository.close()
+            logger.info("Task rewrite MongoDB connection closed")
+        except Exception as e:
+            logger.error(f"Error closing task rewrite MongoDB connection: {e}")
+
+    # Close history repository MongoDB connection
+    if history_repository and isinstance(history_repository, MongoSessionRepository):
+        try:
+            history_repository.close()
+            logger.info("History MongoDB connection closed")
+        except Exception as e:
+            logger.error(f"Error closing history MongoDB connection: {e}")
+
+    logger.info("Application shutdown complete")
 
 
 app = FastAPI(title="AI Agent Server", version="1.5.0", lifespan=lifespan)
@@ -382,7 +404,7 @@ async def get_session(session_id: str):
                 return {
                     "redirect": f"/history/{session_id}",
                     "session_id": session_id,
-                    "status": "completed"
+                    "status": "completed",
                 }
 
         # 3. 어디에도 없으면 404
@@ -596,9 +618,7 @@ async def rewrite_task(request: TaskRewriteRequest):
         }
     except Exception as e:
         logger.error(f"Error rewriting task: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to rewrite task: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to rewrite task: {str(e)}")
 
 
 @app.get("/api/v1/task-rewrite/history")

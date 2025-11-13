@@ -50,9 +50,7 @@ Output:
 **Now, transform the following task:**"""
 
     @classmethod
-    def format_prompt(
-        cls, task: str, custom_prompt: Optional[str] = None
-    ) -> str:
+    def format_prompt(cls, task: str, custom_prompt: Optional[str] = None) -> str:
         """
         Format the complete prompt for task rewriting
 
@@ -71,14 +69,3 @@ Output:
             prompt = f"{cls.BASE_PROMPT}\n\n{task}"
 
         return prompt
-
-    @classmethod
-    def update_base_prompt(cls, new_prompt: str):
-        """
-        Update the base prompt (for dynamic rule modification)
-
-        Args:
-            new_prompt: New base prompt text
-        """
-        cls.BASE_PROMPT = new_prompt
-

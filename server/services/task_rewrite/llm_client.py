@@ -67,7 +67,7 @@ class TaskRewriteLLMClient:
         Raises:
             Exception: If LLM call fails
         """
-        from ..task_rewrite.prompts import TaskRewritePrompts
+        from .prompts import TaskRewritePrompts
 
         # Format the prompt
         prompt = TaskRewritePrompts.format_prompt(task, custom_prompt)
@@ -91,4 +91,3 @@ class TaskRewriteLLMClient:
         except Exception as e:
             logger.error(f"Failed to rewrite task with LLM: {e}")
             raise
-

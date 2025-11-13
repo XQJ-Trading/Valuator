@@ -418,7 +418,9 @@ class MongoTaskRewriteRepository(TaskRewriteRepository):
                 return False
 
         except Exception as e:
-            logger.error(f"Failed to delete task rewrite {rewrite_id} from MongoDB: {e}")
+            logger.error(
+                f"Failed to delete task rewrite {rewrite_id} from MongoDB: {e}"
+            )
             return False
 
     def close(self):
@@ -426,4 +428,3 @@ class MongoTaskRewriteRepository(TaskRewriteRepository):
         if self.client:
             self.client.close()
             logger.info("MongoDB connection closed")
-

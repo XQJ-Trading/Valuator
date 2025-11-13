@@ -115,4 +115,3 @@ class TaskRewriteService:
             True if deleted, False if not found
         """
         return await self.repository.delete_rewrite(rewrite_id)
-

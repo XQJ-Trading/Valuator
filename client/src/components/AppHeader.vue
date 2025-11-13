@@ -18,37 +18,36 @@
           History
         </router-link>
         <div 
+          ref="dropdownRef"
           class="nav-dropdown"
-          @mouseenter="showRewriteMenu = true"
-          @mouseleave="showRewriteMenu = false"
         >
-          <button class="nav-btn nav-btn-dropdown">
+          <a href="#" class="nav-btn nav-btn-dropdown" @click.prevent="toggleRewriteMenu">
             <span class="nav-icon">✏️</span>
             Rewrite
-            <span class="dropdown-arrow">▼</span>
-          </button>
+            <span class="dropdown-arrow" :class="{ 'arrow-open': showRewriteMenu }">▼</span>
+          </a>
           <div v-if="showRewriteMenu" class="dropdown-menu">
-            <router-link to="/rewrite" class="dropdown-item" @click="showRewriteMenu = false">
+            <router-link to="/rewrite" class="dropdown-item" @click="closeRewriteMenu">
               <span class="dropdown-icon">✨</span>
               Rewrite
             </router-link>
-            <router-link to="/rewrite/history" class="dropdown-item" @click="showRewriteMenu = false">
+            <router-link to="/rewrite/history" class="dropdown-item" @click="closeRewriteMenu">
               <span class="dropdown-icon">📋</span>
               History
             </router-link>
           </div>
         </div>
-        <button @click="handleNewSession" class="nav-btn">
+        <a href="/" class="nav-btn" @click="handleNewSession">
           <span class="nav-icon">✨</span>
           New Session
-        </button>
+        </a>
       </nav>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 interface Emits {
   (e: 'newSession'): void
@@ -57,10 +56,41 @@ interface Emits {
 const emit = defineEmits<Emits>()
 
 const showRewriteMenu = ref(false)
+const dropdownRef = ref<HTMLElement | null>(null)
 
-function handleNewSession() {
+function toggleRewriteMenu() {
+  showRewriteMenu.value = !showRewriteMenu.value
+}
+
+function closeRewriteMenu() {
+  showRewriteMenu.value = false
+}
+
+function handleClickOutside(event: MouseEvent) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
+    closeRewriteMenu()
+  }
+}
+
+function handleNewSession(event: MouseEvent) {
+  // cmd + click (Mac) 또는 ctrl + click (Windows/Linux) 감지
+  if (event.metaKey || event.ctrlKey) {
+    // 새 탭에서 열기 - 기본 동작 사용
+    return // a태그의 기본 동작(href="/")이 새 탭에서 열림
+  }
+  
+  // 일반 클릭: 기본 동작 방지하고 기존 로직 실행
+  event.preventDefault()
   emit('newSession')
 }
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
 </script>
 
 <style scoped>
@@ -135,7 +165,7 @@ function handleNewSession() {
   transition: var(--transition);
   font-size: 0.85rem;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
-  text-decoration: none; /* router-link 기본 스타일 제거 */
+  text-decoration: none; /* a태그 기본 스타일 제거 */
   font-family: inherit; /* 폰트 통일 */
 }
 
@@ -167,16 +197,17 @@ function handleNewSession() {
   font-size: 0.7rem;
   margin-left: 0.25rem;
   transition: transform 0.2s;
+  display: inline-block;
 }
 
-.nav-dropdown:hover .dropdown-arrow {
+.dropdown-arrow.arrow-open {
   transform: rotate(180deg);
 }
 
 .dropdown-menu {
   position: absolute;
   top: calc(100% + 0.5rem);
-  right: 0;
+  left: 0;
   background: white;
   border-radius: var(--border-radius);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);

@@ -3,6 +3,9 @@ import ChatPage from '../pages/ChatPage.vue'
 import HistoryPage from '../pages/HistoryPage.vue'
 import OngoingPage from '../pages/OngoingPage.vue'
 import SessionPage from '../pages/SessionPage.vue'
+import TaskRewritePage from '../pages/TaskRewritePage.vue'
+import TaskRewriteHistoryPage from '../pages/TaskRewriteHistoryPage.vue'
+import TaskRewriteDetailPage from '../pages/TaskRewriteDetailPage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -47,6 +50,31 @@ const router = createRouter({
       props: true,
       meta: {
         title: 'AI Agent - Session Detail'
+      }
+    },
+    {
+      path: '/rewrite',
+      name: 'task-rewrite',
+      component: TaskRewritePage,
+      meta: {
+        title: 'AI Agent - Task Rewrite'
+      }
+    },
+    {
+      path: '/rewrite/history',
+      name: 'task-rewrite-history',
+      component: TaskRewriteHistoryPage,
+      meta: {
+        title: 'AI Agent - Task Rewrite History'
+      }
+    },
+    {
+      path: '/rewrite/history/:id',
+      name: 'task-rewrite-detail',
+      component: TaskRewriteDetailPage,
+      props: true,
+      meta: {
+        title: 'AI Agent - Task Rewrite Detail'
       }
     }
   ]

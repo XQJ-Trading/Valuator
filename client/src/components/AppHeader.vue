@@ -17,25 +17,80 @@
           <span class="nav-icon">📚</span>
           History
         </router-link>
-        <button @click="handleNewSession" class="nav-btn">
+        <div 
+          ref="dropdownRef"
+          class="nav-dropdown"
+        >
+          <a href="#" class="nav-btn nav-btn-dropdown" @click.prevent="toggleRewriteMenu">
+            <span class="nav-icon">✏️</span>
+            Rewrite
+            <span class="dropdown-arrow" :class="{ 'arrow-open': showRewriteMenu }">▼</span>
+          </a>
+          <div v-if="showRewriteMenu" class="dropdown-menu">
+            <router-link to="/rewrite" class="dropdown-item" @click="closeRewriteMenu">
+              <span class="dropdown-icon">✨</span>
+              Rewrite
+            </router-link>
+            <router-link to="/rewrite/history" class="dropdown-item" @click="closeRewriteMenu">
+              <span class="dropdown-icon">📋</span>
+              History
+            </router-link>
+          </div>
+        </div>
+        <a href="/" class="nav-btn" @click="handleNewSession">
           <span class="nav-icon">✨</span>
           New Session
-        </button>
+        </a>
       </nav>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
+
 interface Emits {
   (e: 'newSession'): void
 }
 
 const emit = defineEmits<Emits>()
 
-function handleNewSession() {
+const showRewriteMenu = ref(false)
+const dropdownRef = ref<HTMLElement | null>(null)
+
+function toggleRewriteMenu() {
+  showRewriteMenu.value = !showRewriteMenu.value
+}
+
+function closeRewriteMenu() {
+  showRewriteMenu.value = false
+}
+
+function handleClickOutside(event: MouseEvent) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
+    closeRewriteMenu()
+  }
+}
+
+function handleNewSession(event: MouseEvent) {
+  // cmd + click (Mac) 또는 ctrl + click (Windows/Linux) 감지
+  if (event.metaKey || event.ctrlKey) {
+    // 새 탭에서 열기 - 기본 동작 사용
+    return // a태그의 기본 동작(href="/")이 새 탭에서 열림
+  }
+  
+  // 일반 클릭: 기본 동작 방지하고 기존 로직 실행
+  event.preventDefault()
   emit('newSession')
 }
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
 </script>
 
 <style scoped>
@@ -110,7 +165,7 @@ function handleNewSession() {
   transition: var(--transition);
   font-size: 0.85rem;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
-  text-decoration: none; /* router-link 기본 스타일 제거 */
+  text-decoration: none; /* a태그 기본 스타일 제거 */
   font-family: inherit; /* 폰트 통일 */
 }
 
@@ -126,6 +181,74 @@ function handleNewSession() {
 }
 
 .nav-icon {
+  font-size: 0.9rem;
+}
+
+/* 드롭다운 메뉴 */
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-btn-dropdown {
+  position: relative;
+}
+
+.dropdown-arrow {
+  font-size: 0.7rem;
+  margin-left: 0.25rem;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.dropdown-arrow.arrow-open {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  background: white;
+  border-radius: var(--border-radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  overflow: hidden;
+  z-index: 1000;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: var(--transition);
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--primary-color);
+}
+
+.dropdown-icon {
   font-size: 0.9rem;
 }
 

@@ -47,10 +47,12 @@ class SessionManager:
         # CC = centiseconds (0.01 second precision)
         centiseconds = timestamp.microsecond // 10000
         time_part = timestamp.strftime("chat_%Y%m%d_%H%M%S")
-        
+
         # Generate random hash (8 characters)
-        random_hash = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        
+        random_hash = "".join(
+            random.choices(string.ascii_lowercase + string.digits, k=8)
+        )
+
         session_id = f"{time_part}_{centiseconds:02d}_{random_hash}"
 
         session = SessionData(

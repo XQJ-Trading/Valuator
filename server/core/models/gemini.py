@@ -184,7 +184,7 @@ class GeminiChatSession:
 
         # Rate limiting - 70% 임계값 체크 및 대기
         rate_limiter = get_rate_limiter()
-        model_name = getattr(self.model, 'model_name', None) or 'unknown'
+        model_name = getattr(self.model, "model_name", None) or "unknown"
         await rate_limiter.wait_if_needed(model_name)
 
         response = await self.model.agenerate(
@@ -212,7 +212,7 @@ class GeminiChatSession:
         if usage:
             total_tokens = self._extract_total_tokens(usage)
             if total_tokens > 0:
-                model_name = getattr(self.model, 'model_name', None) or 'unknown'
+                model_name = getattr(self.model, "model_name", None) or "unknown"
                 rate_limiter.record_usage(model_name, total_tokens)
 
         # save log of gemini_low_level_request as file IO
@@ -223,7 +223,9 @@ class GeminiChatSession:
                 filepath = os.path.join("logs", "gemini_low_level_request", filename)
 
                 # 요청 데이터 구성
-                model_name = getattr(self.model, 'model_name', None) or getattr(self.model, 'model', 'unknown')
+                model_name = getattr(self.model, "model_name", None) or getattr(
+                    self.model, "model", "unknown"
+                )
                 request_data = {
                     "timestamp": timestamp,
                     "model": model_name,
@@ -238,7 +240,11 @@ class GeminiChatSession:
                         ),
                         "top_p": getattr(self.model, "top_p", None),
                         "top_k": getattr(self.model, "top_k", None),
-                        "thinking_level": getattr(self.model.llm, "thinking_level", None) if hasattr(self.model, "llm") else None,
+                        "thinking_level": (
+                            getattr(self.model.llm, "thinking_level", None)
+                            if hasattr(self.model, "llm")
+                            else None
+                        ),
                     },
                 }
 
@@ -270,8 +276,8 @@ class GeminiChatSession:
 
         self.history.append(AIMessage(content=content))
 
-        model_name = getattr(self.model, 'model_name', None) or 'unknown'
-        
+        model_name = getattr(self.model, "model_name", None) or "unknown"
+
         return GeminiResponse(
             content=content,
             usage=usage,
@@ -327,7 +333,9 @@ class GeminiChatSession:
 class GeminiModel:
     """Gemini model wrapper for AI Agent"""
 
-    def __init__(self, model_name: Optional[str] = None, thinking_level: Optional[str] = None):
+    def __init__(
+        self, model_name: Optional[str] = None, thinking_level: Optional[str] = None
+    ):
         """
         Initialize Gemini model
 

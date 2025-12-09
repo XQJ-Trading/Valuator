@@ -31,7 +31,11 @@ class BackgroundTaskRunner:
         logger.info("BackgroundTaskRunner initialized")
 
     async def solve_in_background(
-        self, session_id: str, query: str, model: Optional[str] = None, thinking_level: Optional[str] = None
+        self,
+        session_id: str,
+        query: str,
+        model: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> None:
         """
         Solve a query in the background and update session with events

@@ -25,7 +25,9 @@ class TaskRewriteLLMClient:
 
         self._model_cache: dict[str, GeminiDirectModel] = {}
 
-    def _get_model(self, model_name: str, thinking_level: Optional[str] = None) -> GeminiDirectModel:
+    def _get_model(
+        self, model_name: str, thinking_level: Optional[str] = None
+    ) -> GeminiDirectModel:
         """
         Get or create a model instance (with caching)
 
@@ -38,7 +40,7 @@ class TaskRewriteLLMClient:
         """
         # Create cache key including thinking_level
         cache_key = f"{model_name}:{thinking_level or 'none'}"
-        
+
         if cache_key not in self._model_cache:
             # Always use direct API
             self._model_cache[cache_key] = GeminiDirectModel(
@@ -49,7 +51,9 @@ class TaskRewriteLLMClient:
                 thinking_level=thinking_level,
                 streaming=False,
             )
-            logger.debug(f"Created Direct API LLM client for model: {model_name}, thinking_level: {thinking_level}")
+            logger.debug(
+                f"Created Direct API LLM client for model: {model_name}, thinking_level: {thinking_level}"
+            )
 
         return self._model_cache[cache_key]
 
@@ -78,12 +82,12 @@ class TaskRewriteLLMClient:
         # Validate task is not empty
         if not task or not task.strip():
             raise ValueError("Task cannot be empty")
-        
+
         from .prompts import TaskRewritePrompts
 
         # Format the prompt
         prompt = TaskRewritePrompts.format_prompt(task, custom_prompt)
-        
+
         # Validate prompt is not empty
         if not prompt or not prompt.strip():
             raise ValueError("Prompt cannot be empty")
@@ -95,12 +99,17 @@ class TaskRewriteLLMClient:
             logger.info(f"Calling LLM for task rewrite (model: {model})")
             # Convert string prompt to LangChain HumanMessage
             from langchain_core.messages import HumanMessage
+
             messages = [HumanMessage(content=prompt)]
-            
+
             # Validate messages before sending
-            if not messages or not messages[0].content or not messages[0].content.strip():
+            if (
+                not messages
+                or not messages[0].content
+                or not messages[0].content.strip()
+            ):
                 raise ValueError("Message content cannot be empty")
-            
+
             response = await llm.ainvoke(messages)
 
             # Extract text from response

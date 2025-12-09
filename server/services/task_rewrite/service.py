@@ -55,7 +55,10 @@ class TaskRewriteService:
 
             # Call LLM to rewrite the task
             rewritten_task = await self.llm_client.rewrite_task(
-                task=task, custom_prompt=custom_prompt, model=model, thinking_level=thinking_level
+                task=task,
+                custom_prompt=custom_prompt,
+                model=model,
+                thinking_level=thinking_level,
             )
 
             # Create history record

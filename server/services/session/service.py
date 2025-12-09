@@ -37,7 +37,10 @@ class SessionService:
     # ========================================================================
 
     async def start_session(
-        self, query: str, model: Optional[str] = None, thinking_level: Optional[str] = None
+        self,
+        query: str,
+        model: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> SessionData:
         """
         Create and start a new session with background task

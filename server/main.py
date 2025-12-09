@@ -374,7 +374,9 @@ async def create_session(request: ChatRequest):
     try:
         # Create and start session (SessionService handles background task)
         session = await session_service.start_session(
-            query=request.query, model=request.model, thinking_level=request.thinking_level
+            query=request.query,
+            model=request.model,
+            thinking_level=request.thinking_level,
         )
 
         logger.info(f"Created session: {session.session_id}")

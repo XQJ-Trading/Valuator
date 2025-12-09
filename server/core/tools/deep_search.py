@@ -16,8 +16,8 @@ from typing import Any, Dict, List
 from dotenv import load_dotenv
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 
+from ..models.gemini_direct import GeminiDirectModel
 from ..utils.config import config
 from ..utils.logger import logger
 from .base import BaseTool, ToolResult
@@ -63,14 +63,17 @@ class QueryRewriter:
             self.available = False
         else:
             try:
-                self.llm = ChatGoogleGenerativeAI(
+                # Always use direct API
+                self.llm = GeminiDirectModel(
                     model=llm_config.get("model", config.agent_model),
+                    google_api_key=api_key,
                     temperature=0.1,
-                    max_tokens=500,
-                    api_key=api_key,
+                    max_output_tokens=500,
+                    thinking_level=None,  # Deep search uses default (no thinking level)
+                    streaming=False,
                 )
+                logger.info("QueryRewriter initialized with Direct API")
                 self.available = True
-                logger.info("QueryRewriter initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize QueryRewriter: {e}")
                 self.llm = None
@@ -142,14 +145,17 @@ class QueryDecomposer:
             self.available = False
         else:
             try:
-                self.llm = ChatGoogleGenerativeAI(
+                # Always use direct API
+                self.llm = GeminiDirectModel(
                     model=llm_config.get("model", config.agent_model),
+                    google_api_key=api_key,
                     temperature=0.1,
-                    max_tokens=600,
-                    api_key=api_key,
+                    max_output_tokens=600,
+                    thinking_level=None,  # Deep search uses default (no thinking level)
+                    streaming=False,
                 )
+                logger.info("QueryDecomposer initialized with Direct API")
                 self.available = True
-                logger.info("QueryDecomposer initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize QueryDecomposer: {e}")
                 self.llm = None
@@ -426,14 +432,17 @@ class SearchResultSynthesizer:
             self.available = False
         else:
             try:
-                self.llm = ChatGoogleGenerativeAI(
+                # Always use direct API
+                self.llm = GeminiDirectModel(
                     model=llm_config.get("model", config.agent_model),
+                    google_api_key=api_key,
                     temperature=0.1,
-                    max_tokens=1500,
-                    api_key=api_key,
+                    max_output_tokens=1500,
+                    thinking_level=None,  # Deep search uses default (no thinking level)
+                    streaming=False,
                 )
+                logger.info("SearchResultSynthesizer initialized with Direct API")
                 self.available = True
-                logger.info("SearchResultSynthesizer initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize SearchResultSynthesizer: {e}")
                 self.llm = None

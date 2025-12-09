@@ -19,6 +19,7 @@ class AIAgent:
         self,
         model_name: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ):
         """
         Initialize AI Agent with ReAct capabilities
@@ -26,10 +27,11 @@ class AIAgent:
         Args:
             model_name: Name of the Gemini model to use
             system_prompt: System prompt for the agent
+            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
         """
         self.model_name = model_name or config.agent_model
         self.system_prompt = system_prompt or self._get_default_system_prompt()
-        self.model = GeminiModel(self.model_name)
+        self.model = GeminiModel(self.model_name, thinking_level=thinking_level)
 
         # Initialize ReAct components
         self._initialize_react_components()

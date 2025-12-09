@@ -7,13 +7,12 @@ import time
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 from ..utils.config import config
 from ..utils.logger import logger
+from .gemini_direct import GeminiDirectModel
 
 
 class GlobalGeminiRateLimiter:
@@ -34,24 +33,17 @@ class GlobalGeminiRateLimiter:
 
         # 모델별 TPM 제한 (Token per Minute)
         self.model_limits = {
-            "gemini-2.5-pro": 2_000_000,
-            "gemini-2.5-flash": 1_000_000,
             # 기본값 (모델명 매칭이 안될 경우)
             "default": 1_000_000,
         }
 
         # 모델별 토큰 사용 이력: [(timestamp, tokens), ...]
-        self.usage_history = {"gemini-2.5-pro": [], "gemini-2.5-flash": []}
+        self.usage_history = {}
 
     def _get_model_key(self, model_name: str) -> str:
         """모델명을 정규화하여 키로 사용"""
-        model_name = model_name.lower()
-        if "2.5-pro" in model_name or "2.5pro" in model_name:
-            return "gemini-2.5-pro"
-        elif "2.5-flash" in model_name or "2.5flash" in model_name:
-            return "gemini-2.5-flash"
-        else:
-            return "gemini-2.5-flash"  # 기본값으로 Flash 사용
+        # Gemini 3 모델만 지원
+        return "default"
 
     def _cleanup_old_records(self, model_key: str, current_time: float):
         """1분 이상 된 기록들을 정리"""
@@ -185,20 +177,21 @@ class GeminiChatSession:
         self.history: List[BaseMessage] = initial_messages
 
     async def send_message(
-        self, message: str, callbacks: Optional[List[AsyncCallbackHandler]] = None
+        self, message: str, callbacks: Optional[List] = None
     ) -> GeminiResponse:
         """Send a message in the session and get a response"""
         self.history.append(HumanMessage(content=message))
 
         # Rate limiting - 70% 임계값 체크 및 대기
         rate_limiter = get_rate_limiter()
-        await rate_limiter.wait_if_needed(self.model.model)
+        model_name = getattr(self.model, 'model_name', None) or 'unknown'
+        await rate_limiter.wait_if_needed(model_name)
 
         response = await self.model.agenerate(
             messages=[self.history], callbacks=callbacks
         )
 
-        # Prefer AIMessage fields if available (LangChain wraps usage there)
+        # Extract content from response
         generation = response.generations[0][0]
         message_obj = getattr(generation, "message", None)
         if message_obj and getattr(message_obj, "content", None) is not None:
@@ -206,7 +199,7 @@ class GeminiChatSession:
         else:
             content = _normalize_content(getattr(generation, "text", ""))
 
-        # Extract usage from AIMessage.usage_metadata first, then fall back
+        # Extract usage from AIMessage.usage_metadata
         usage = None
         if message_obj is not None:
             usage = getattr(message_obj, "usage_metadata", None)
@@ -219,7 +212,8 @@ class GeminiChatSession:
         if usage:
             total_tokens = self._extract_total_tokens(usage)
             if total_tokens > 0:
-                rate_limiter.record_usage(self.model.model, total_tokens)
+                model_name = getattr(self.model, 'model_name', None) or 'unknown'
+                rate_limiter.record_usage(model_name, total_tokens)
 
         # save log of gemini_low_level_request as file IO
         if config.gemini_low_level_request_logging:
@@ -229,9 +223,10 @@ class GeminiChatSession:
                 filepath = os.path.join("logs", "gemini_low_level_request", filename)
 
                 # 요청 데이터 구성
+                model_name = getattr(self.model, 'model_name', None) or getattr(self.model, 'model', 'unknown')
                 request_data = {
                     "timestamp": timestamp,
-                    "model": self.model.model,
+                    "model": model_name,
                     "messages": [
                         {"type": msg.__class__.__name__, "content": msg.content}
                         for msg in self.history
@@ -243,6 +238,7 @@ class GeminiChatSession:
                         ),
                         "top_p": getattr(self.model, "top_p", None),
                         "top_k": getattr(self.model, "top_k", None),
+                        "thinking_level": getattr(self.model.llm, "thinking_level", None) if hasattr(self.model, "llm") else None,
                     },
                 }
 
@@ -274,10 +270,12 @@ class GeminiChatSession:
 
         self.history.append(AIMessage(content=content))
 
+        model_name = getattr(self.model, 'model_name', None) or 'unknown'
+        
         return GeminiResponse(
             content=content,
             usage=usage,
-            metadata={"model": self.model.model},
+            metadata={"model": model_name},
         )
 
     def _extract_total_tokens(self, usage_metadata: Dict[str, Any]) -> int:
@@ -304,16 +302,15 @@ class GeminiChatSession:
         return input_tokens + output_tokens
 
     async def stream_message(
-        self, message: str, callbacks: Optional[List[AsyncCallbackHandler]] = None
+        self, message: str, callbacks: Optional[List] = None
     ) -> AsyncGenerator[str, None]:
         """Send a message and stream the response"""
         self.history.append(HumanMessage(content=message))
 
         streamed_content = ""
-        # LangChain ChatGoogleGenerativeAI expects nested messages for streaming
         yielded_any = False
         async for chunk in self.model.astream(
-            messages=[self.history], callbacks=callbacks
+            messages=self.history, callbacks=callbacks
         ):
             if hasattr(chunk, "content") and chunk.content:
                 streamed_content += chunk.content
@@ -330,30 +327,36 @@ class GeminiChatSession:
 class GeminiModel:
     """Gemini model wrapper for AI Agent"""
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None, thinking_level: Optional[str] = None):
         """
         Initialize Gemini model
 
         Args:
             model_name: Model name to use (defaults to config value)
+            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
         """
         self.model_name = model_name or config.agent_model
+        self.thinking_level = thinking_level
         self.llm = None
         self._initialize_model()
 
     def _initialize_model(self):
         """Initialize the Gemini model"""
         try:
-            self.llm = ChatGoogleGenerativeAI(
+            # Always use direct Google Generative AI SDK
+            self.llm = GeminiDirectModel(
                 model=self.model_name,
                 google_api_key=config.google_api_key,
                 temperature=config.temperature,
                 max_output_tokens=config.max_tokens,
                 top_p=config.top_p,
                 top_k=config.top_k,
+                thinking_level=self.thinking_level,
                 streaming=True,
             )
-            logger.info(f"Initialized Gemini model: {self.model_name}")
+            logger.info(f"Initialized Gemini Direct API model: {self.model_name}")
+            if self.thinking_level:
+                logger.info(f"Thinking level enabled: {self.thinking_level}")
         except Exception as e:
             logger.error(f"Failed to initialize Gemini model: {e}")
             raise

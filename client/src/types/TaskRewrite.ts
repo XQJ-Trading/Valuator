@@ -12,6 +12,7 @@ export interface TaskRewriteRequest {
   task: string
   model?: string
   custom_prompt?: string
+  thinking_level?: string
 }
 
 export interface TaskRewriteResponse {

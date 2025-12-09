@@ -26,6 +26,23 @@
         </select>
       </div>
 
+      <!-- Thinking Level 선택 섹션 (Gemini 3.0 전용) -->
+      <div class="thinking-section">
+        <label class="thinking-label">
+          <span class="thinking-icon">🧠</span>
+          Thinking Level (Gemini 3.0)
+        </label>
+        <select 
+          :value="thinkingLevel" 
+          @change="$emit('update:thinkingLevel', ($event.target as HTMLSelectElement).value)"
+          class="thinking-select"
+        >
+          <option value="">기본값 (비활성화)</option>
+          <option value="low">Low (빠른 응답)</option>
+          <option value="high">High (깊은 추론)</option>
+        </select>
+      </div>
+
       <!-- Rule 입력 섹션 -->
       <div class="rule-section">
         <label class="rule-label">
@@ -60,12 +77,14 @@ interface Props {
   loading: boolean
   selectedModel: string
   availableModels: string[]
+  thinkingLevel: string
 }
 
 interface Emits {
   (e: 'update:query', value: string): void
   (e: 'update:rule', value: string): void
   (e: 'update:selectedModel', value: string): void
+  (e: 'update:thinkingLevel', value: string): void
   (e: 'send'): void
   (e: 'stream'): void
   (e: 'clear'): void
@@ -199,6 +218,66 @@ function getModelDisplayName(model: string): string {
 }
 
 .model-select option {
+  padding: 0.5rem;
+  background: #ffffff;
+  color: #111827;
+}
+
+/* Thinking Level 선택 섹션 */
+.thinking-section {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.thinking-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.thinking-icon {
+  font-size: 1.1rem;
+}
+
+.thinking-select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #d1d5db;
+  border-radius: var(--border-radius);
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  font-family: inherit;
+  box-sizing: border-box;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.9rem;
+  padding-right: 2.5rem;
+}
+
+.thinking-select:hover {
+  border-color: #7c3aed;
+  background-color: #faf5ff;
+}
+
+.thinking-select:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15);
+  background-color: #ffffff;
+}
+
+.thinking-select option {
   padding: 0.5rem;
   background: #ffffff;
   color: #111827;
@@ -398,12 +477,12 @@ function getModelDisplayName(model: string): string {
     font-size: 0.9rem;
   }
   
-  .model-select, .rule-input {
+  .model-select, .thinking-select, .rule-input {
     padding: 0.65rem;
     font-size: 0.85rem;
   }
   
-  .model-label, .rule-label {
+  .model-label, .thinking-label, .rule-label {
     font-size: 0.85rem;
     margin-bottom: 0.4rem;
   }
@@ -441,12 +520,12 @@ function getModelDisplayName(model: string): string {
     font-size: 0.85rem;
   }
   
-  .model-select, .rule-input {
+  .model-select, .thinking-select, .rule-input {
     padding: 0.6rem;
     font-size: 0.8rem;
   }
   
-  .model-label, .rule-label {
+  .model-label, .thinking-label, .rule-label {
     font-size: 0.8rem;
   }
   

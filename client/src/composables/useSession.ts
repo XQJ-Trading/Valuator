@@ -15,6 +15,7 @@ export function useSession() {
   const messages = ref<Message[]>([])
   const selectedModel = ref<string>('')
   const availableModels = ref<string[]>([])
+  const thinkingLevel = ref<string>('')
   
   // Session state
   const currentSessionId = ref<string | null>(null)
@@ -110,9 +111,10 @@ export function useSession() {
 
     try {
       const queryWithRule = buildQueryWithRule()
-      const requestBody = {
+      const requestBody: any = {
         query: queryWithRule,
-        ...(selectedModel.value && { model: selectedModel.value })
+        ...(selectedModel.value && { model: selectedModel.value }),
+        ...(thinkingLevel.value && { thinking_level: thinkingLevel.value })
       }
 
       const res = await fetch(`${API_BASE}/api/v1/sessions`, {
@@ -428,6 +430,7 @@ export function useSession() {
     messages,
     selectedModel,
     availableModels,
+    thinkingLevel,
     currentSessionId,
     activeSession,
     connectionState,

@@ -5,6 +5,7 @@
       v-model:query="query"
       v-model:rule="rule"
       v-model:selectedModel="selectedModel"
+      v-model:thinkingLevel="thinkingLevel"
       :loading="loading"
       :availableModels="availableModels"
       @send="handleCreateSession"
@@ -36,6 +37,7 @@ const {
   messages,
   selectedModel,
   availableModels,
+  thinkingLevel,
   clearAll,
   createSession
 } = useSession()

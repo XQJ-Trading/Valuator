@@ -89,6 +89,11 @@ class GeminiDirectModel:
             self.model_name = model
             self.streaming_enabled = streaming
             self.thinking_level = thinking_level
+            # Store configuration parameters as instance attributes for inspection
+            self.temperature = temperature
+            self.max_output_tokens = max_output_tokens
+            self.top_p = top_p
+            self.top_k = top_k
 
             logger.info(f"Initialized Gemini Direct Model: {model}")
             if thinking_level:

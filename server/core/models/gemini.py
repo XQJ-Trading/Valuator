@@ -241,9 +241,13 @@ class GeminiChatSession:
                         "top_p": getattr(self.model, "top_p", None),
                         "top_k": getattr(self.model, "top_k", None),
                         "thinking_level": (
-                            getattr(self.model.llm, "thinking_level", None)
-                            if hasattr(self.model, "llm")
-                            else None
+                            getattr(self.model, "thinking_level", None)
+                            if hasattr(self.model, "thinking_level")
+                            else (
+                                getattr(self.model.llm, "thinking_level", None)
+                                if hasattr(self.model, "llm")
+                                else None
+                            )
                         ),
                     },
                 }

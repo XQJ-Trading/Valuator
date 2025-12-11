@@ -25,6 +25,7 @@ class SessionEvent:
     tool: Optional[str] = None
     tool_input: Optional[Dict[str, Any]] = None
     tool_output: Optional[Dict[str, Any]] = None
+    tool_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     query: Optional[str] = None
@@ -43,6 +44,8 @@ class SessionEvent:
             result["tool_input"] = self.tool_input
         if self.tool_output:
             result["tool_output"] = self.tool_output
+        if self.tool_result:
+            result["tool_result"] = self.tool_result
         if self.error:
             result["error"] = self.error
         if self.metadata:

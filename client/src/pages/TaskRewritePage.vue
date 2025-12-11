@@ -36,6 +36,18 @@
 
         <div class="option-group">
           <label class="option-label">
+            <span class="label-icon">🧠</span>
+            Thinking Level (Gemini 3.0)
+          </label>
+          <select v-model="thinkingLevel" class="model-select">
+            <option value="">기본값 (비활성화)</option>
+            <option value="low">Low (빠른 응답)</option>
+            <option value="high">High (깊은 추론)</option>
+          </select>
+        </div>
+
+        <div class="option-group">
+          <label class="option-label">
             <span class="label-icon">⚙️</span>
             커스텀 프롬프트 (선택사항)
           </label>
@@ -105,6 +117,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
 const taskInput = ref('')
 const customPrompt = ref('')
 const selectedModel = ref('gemini-flash-latest')
+const thinkingLevel = ref('')
 const availableModels = ref<string[]>([])
 const result = ref('')
 
@@ -133,7 +146,8 @@ async function handleRewrite() {
   const response = await rewriteTask({
     task: taskInput.value.trim(),
     model: selectedModel.value,
-    custom_prompt: customPrompt.value.trim() || undefined
+    custom_prompt: customPrompt.value.trim() || undefined,
+    thinking_level: thinkingLevel.value || undefined
   })
 
   if (response) {
@@ -163,6 +177,7 @@ function handleRewriteAgain() {
 function clearAll() {
   taskInput.value = ''
   customPrompt.value = ''
+  thinkingLevel.value = ''
   result.value = ''
 }
 

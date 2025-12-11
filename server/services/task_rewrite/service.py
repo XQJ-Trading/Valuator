@@ -33,6 +33,7 @@ class TaskRewriteService:
         task: str,
         model: str = "gemini-flash-latest",
         custom_prompt: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> TaskRewriteHistory:
         """
         Rewrite a task and save to history
@@ -41,6 +42,7 @@ class TaskRewriteService:
             task: Original task text
             model: Gemini model name
             custom_prompt: Optional custom prompt
+            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
 
         Returns:
             TaskRewriteHistory instance
@@ -53,7 +55,10 @@ class TaskRewriteService:
 
             # Call LLM to rewrite the task
             rewritten_task = await self.llm_client.rewrite_task(
-                task=task, custom_prompt=custom_prompt, model=model
+                task=task,
+                custom_prompt=custom_prompt,
+                model=model,
+                thinking_level=thinking_level,
             )
 
             # Create history record

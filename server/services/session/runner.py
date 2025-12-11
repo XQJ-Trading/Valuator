@@ -31,7 +31,11 @@ class BackgroundTaskRunner:
         logger.info("BackgroundTaskRunner initialized")
 
     async def solve_in_background(
-        self, session_id: str, query: str, model: Optional[str] = None
+        self,
+        session_id: str,
+        query: str,
+        model: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> None:
         """
         Solve a query in the background and update session with events
@@ -42,6 +46,7 @@ class BackgroundTaskRunner:
             session_id: Session ID
             query: User query
             model: Model to use (optional)
+            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
         """
         logger.info(f"Starting background task for session: {session_id}")
 
@@ -52,7 +57,7 @@ class BackgroundTaskRunner:
             )
 
             # Create agent
-            agent = AIAgent(model_name=model)
+            agent = AIAgent(model_name=model, thinking_level=thinking_level)
 
             # Stream events from agent and publish as dict
             async for event_dict in agent.solve_stream(query):

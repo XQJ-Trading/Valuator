@@ -131,6 +131,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     query: str
     model: Optional[str] = None
+    thinking_level: Optional[str] = None
 
     @field_validator("model")
     @classmethod
@@ -141,12 +142,22 @@ class ChatRequest(BaseModel):
                 f"Supported models are: {', '.join(config.supported_models)}"
             )
         return v
+
+    @field_validator("thinking_level")
+    @classmethod
+    def validate_thinking_level(cls, v):
+        if v is not None and v.lower() not in ("high", "low"):
+            raise ValueError(
+                f"Invalid thinking_level: {v}. Must be 'high', 'low', or None."
+            )
+        return v.lower() if v else None
 
 
 class TaskRewriteRequest(BaseModel):
     task: str
     model: Optional[str] = None
     custom_prompt: Optional[str] = None
+    thinking_level: Optional[str] = None
 
     @field_validator("model")
     @classmethod
@@ -157,6 +168,15 @@ class TaskRewriteRequest(BaseModel):
                 f"Supported models are: {', '.join(config.supported_models)}"
             )
         return v
+
+    @field_validator("thinking_level")
+    @classmethod
+    def validate_thinking_level(cls, v):
+        if v is not None and v.lower() not in ("high", "low"):
+            raise ValueError(
+                f"Invalid thinking_level: {v}. Must be 'high', 'low', or None."
+            )
+        return v.lower() if v else None
 
 
 @app.get("/health")
@@ -354,7 +374,9 @@ async def create_session(request: ChatRequest):
     try:
         # Create and start session (SessionService handles background task)
         session = await session_service.start_session(
-            query=request.query, model=request.model
+            query=request.query,
+            model=request.model,
+            thinking_level=request.thinking_level,
         )
 
         logger.info(f"Created session: {session.session_id}")
@@ -607,6 +629,7 @@ async def rewrite_task(request: TaskRewriteRequest):
             task=request.task,
             model=model,
             custom_prompt=request.custom_prompt,
+            thinking_level=request.thinking_level,
         )
 
         return {

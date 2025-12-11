@@ -37,7 +37,10 @@ class SessionService:
     # ========================================================================
 
     async def start_session(
-        self, query: str, model: Optional[str] = None
+        self,
+        query: str,
+        model: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> SessionData:
         """
         Create and start a new session with background task
@@ -45,6 +48,7 @@ class SessionService:
         Args:
             query: User query
             model: Model to use
+            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
 
         Returns:
             Created session
@@ -56,7 +60,9 @@ class SessionService:
 
         # Start background task
         asyncio.create_task(
-            self.background_runner.solve_in_background(session.session_id, query, model)
+            self.background_runner.solve_in_background(
+                session.session_id, query, model, thinking_level
+            )
         )
 
         logger.info(f"Started session: {session.session_id}")

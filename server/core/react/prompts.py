@@ -60,10 +60,6 @@ Based on your last thought, execute ONE tool action.
 -   Refer to the system prompt for the exact format and rules
 -   Do NOT add any extra text or explanations
 
-**For complex queries requiring multiple searches:**
-- Use deep_search for deep analysis that automatically decomposes and executes multiple searches based on query complexity
-- Use web_search for simple, direct searches
-
 **Action:**"""
 
     OBSERVATION_PROMPT = """**Tool Execution Result:**

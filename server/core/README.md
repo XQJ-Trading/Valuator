@@ -128,7 +128,7 @@ asyncio.run(main())
 | 변수명 | 설명 | 기본값 |
 |--------|------|--------|
 | `GOOGLE_API_KEY` | Google API 키 | 필수 |
-| `AGENT_MODEL` | 사용할 모델명 | `gemini-2.0-flash-exp` |
+| `AGENT_MODEL` | 사용할 모델명 | `gemini-3-flash-preview` |
 | `TEMPERATURE` | 창의성 수준 | `0.7` |
 | `MAX_TOKENS` | 최대 토큰 수 | `2048` |
 | `MAX_MEMORY_SIZE` | 최대 메모리 크기 | `100` |

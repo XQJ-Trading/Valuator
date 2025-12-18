@@ -61,7 +61,7 @@ class TaskRewriteLLMClient:
         self,
         task: str,
         custom_prompt: Optional[str] = None,
-        model: str = "gemini-flash-latest",
+        model: str = config.agent_model,
         thinking_level: Optional[str] = None,
     ) -> str:
         """

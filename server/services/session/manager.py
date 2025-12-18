@@ -71,6 +71,21 @@ class SessionManager:
         logger.info(f"Created session: {session_id}")
         return session
 
+    def schedule_cleanup(self, session_id: str, delay_seconds: int = 60):
+        """
+        Schedule cleanup of a session after a grace period.
+
+        Args:
+            session_id: Session ID
+            delay_seconds: Grace period before cleanup
+        """
+
+        async def _delayed_cleanup():
+            await asyncio.sleep(delay_seconds)
+            await self.cleanup_session(session_id)
+
+        asyncio.create_task(_delayed_cleanup())
+
     async def get_session(self, session_id: str) -> Optional[SessionData]:
         """
         Get active session from memory

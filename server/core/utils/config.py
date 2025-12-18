@@ -27,11 +27,11 @@ class Config(BaseSettings):
     # Agent Configuration
     agent_name: str = Field(default="AIAgent", alias="AGENT_NAME")
     agent_version: str = Field(default="2.0.0", alias="AGENT_VERSION")
-    agent_model: str = Field(default="gemini-flash-latest", alias="AGENT_MODEL")
+    agent_model: str = Field(default="gemini-3-flash-preview", alias="AGENT_MODEL")
 
     # Supported Models Configuration (as string, parsed to list)
     supported_models_str: str = Field(
-        default="gemini-flash-latest,gemini-pro-latest",
+        default="gemini-3-flash-preview,gemini-3-pro-preview,gemini-flash-latest,gemini-pro-latest",
         alias="SUPPORTED_MODELS",
         description="Comma-separated list of supported model names",
     )
@@ -70,12 +70,22 @@ class Config(BaseSettings):
     def supported_models(self) -> List[str]:
         """Parse supported models from comma-separated string"""
         if not self.supported_models_str or self.supported_models_str.strip() == "":
-            return ["gemini-flash-latest", "gemini-pro-latest"]
+            return [
+                "gemini-3-flash-preview",
+                "gemini-3-pro-preview",
+                "gemini-flash-latest",
+                "gemini-pro-latest",
+            ]
 
         # Clean up the string and split by comma
         models_str = self.supported_models_str.strip().strip("[]").strip('"').strip("'")
         if not models_str:
-            return ["gemini-flash-latest", "gemini-pro-latest"]
+            return [
+                "gemini-3-flash-preview",
+                "gemini-3-pro-preview",
+                "gemini-flash-latest",
+                "gemini-pro-latest",
+            ]
 
         # Split by comma and clean up each item
         models = [

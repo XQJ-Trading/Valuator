@@ -1,9 +1,8 @@
-"""Direct Google Generative AI SDK integration (without LangChain wrapper)"""
+"""Direct Google Gemini integration via google-genai (Gemini 3.x only)"""
 
 import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import google.generativeai as genai
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import Generation, LLMResult
 
@@ -15,13 +14,7 @@ from ..utils.message_converter import (
 
 
 class GeminiDirectModel:
-    """
-    Direct Google Generative AI SDK wrapper
-
-    This class provides a LangChain-compatible interface while using
-    Google's Generative AI SDK directly, allowing better control and
-    access to latest features like thinking parameter.
-    """
+    """Direct Google Gemini SDK wrapper (google-genai only)"""
 
     def __init__(
         self,
@@ -49,58 +42,38 @@ class GeminiDirectModel:
             streaming: Whether to support streaming
             **kwargs: Additional parameters
         """
-        # Configure API key
-        genai.configure(api_key=google_api_key)
+        self.model_name = model
+        self.streaming_enabled = streaming
+        self.temperature = temperature
+        self.max_output_tokens = max_output_tokens
+        self.top_p = top_p
+        self.top_k = top_k
 
-        # Validate thinking_level if provided
-        # Note: thinking_level is not supported in google.generativeai SDK
-        # It requires google.genai SDK (newer version)
-        if thinking_level is not None:
-            thinking_level_lower = thinking_level.lower()
-            if thinking_level_lower not in ("high", "low"):
-                raise ValueError(
-                    f"Invalid thinking_level: '{thinking_level}'. "
-                    f"Must be 'high', 'low', or None. "
-                    f"Note: thinking_level is only supported for Gemini 3.0 models."
-                )
-            thinking_level = thinking_level_lower
-            # Warn that thinking_level is not supported in current SDK
-            logger.warning(
-                f"thinking_level '{thinking_level}' is requested but not supported in google.generativeai SDK. "
-                f"To use thinking_level, upgrade to google.genai SDK. "
-                f"Continuing without thinking_level..."
+        normalized_thinking = self._normalize_thinking_level(thinking_level)
+
+        self._init_google_genai(
+            model=model,
+            google_api_key=google_api_key,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            top_p=top_p,
+            top_k=top_k,
+            normalized_thinking=normalized_thinking,
+        )
+
+    def _convert_to_content_objects(self, contents_dict: List[Dict[str, Any]]):
+        from google.genai import types as genai_types
+
+        converted = []
+        for item in contents_dict:
+            parts = [
+                p if isinstance(p, genai_types.Part) else genai_types.Part(text=str(p))
+                for p in item.get("parts", [])
+            ]
+            converted.append(
+                genai_types.Content(role=item.get("role", "user"), parts=parts)
             )
-            # Set to None to avoid errors
-            thinking_level = None
-
-        # Build generation config (thinking_level is not supported in GenerationConfig)
-        generation_config = {
-            "temperature": temperature,
-            "max_output_tokens": max_output_tokens,
-            "top_p": top_p,
-            "top_k": top_k,
-        }
-
-        # Create model instance
-        try:
-            self.model = genai.GenerativeModel(
-                model_name=model, generation_config=generation_config
-            )
-            self.model_name = model
-            self.streaming_enabled = streaming
-            self.thinking_level = thinking_level
-            # Store configuration parameters as instance attributes for inspection
-            self.temperature = temperature
-            self.max_output_tokens = max_output_tokens
-            self.top_p = top_p
-            self.top_k = top_k
-
-            logger.info(f"Initialized Gemini Direct Model: {model}")
-            if thinking_level:
-                logger.info(f"  - Thinking level: {thinking_level}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini Direct Model: {e}")
-            raise
+        return converted
 
     async def agenerate(
         self,
@@ -127,9 +100,14 @@ class GeminiDirectModel:
         contents = langchain_to_google_messages(message_list)
 
         try:
-            # Make API call in thread pool (Google SDK is synchronous)
-            # Note: thinking_level is not supported in google.generativeai SDK
-            response = await asyncio.to_thread(self.model.generate_content, contents)
+            # Make API call in thread pool (SDK is synchronous)
+            content_objects = self._convert_to_content_objects(contents)
+            response = await asyncio.to_thread(
+                self._genai_client.models.generate_content,
+                model=self.model_name,
+                contents=content_objects,
+                config=self._generation_config,
+            )
 
             # Convert response to LangChain format
             ai_message = google_to_langchain_message(response, extract_thinking=True)
@@ -187,7 +165,13 @@ class GeminiDirectModel:
         try:
             # Generate with streaming in thread pool
             def _generate_stream():
-                return self.model.generate_content(contents, stream=True)
+                content_objects = self._convert_to_content_objects(contents)
+                return self._genai_client.models.generate_content(
+                    model=self.model_name,
+                    contents=content_objects,
+                    config=self._generation_config,
+                    stream=True,
+                )
 
             response_stream = await asyncio.to_thread(_generate_stream)
 
@@ -221,8 +205,13 @@ class GeminiDirectModel:
 
         try:
             # Make API call
-            # Note: thinking_level is not supported in google.generativeai SDK
-            response = await asyncio.to_thread(self.model.generate_content, contents)
+            content_objects = self._convert_to_content_objects(contents)
+            response = await asyncio.to_thread(
+                self._genai_client.models.generate_content,
+                model=self.model_name,
+                contents=content_objects,
+                config=self._generation_config,
+            )
 
             # Convert and return
             ai_message = google_to_langchain_message(response, extract_thinking=True)
@@ -231,6 +220,87 @@ class GeminiDirectModel:
         except Exception as e:
             logger.error(f"Error in Gemini Direct Model ainvoke: {e}")
             raise
+
+    def _normalize_thinking_level(self, thinking_level: Optional[str]) -> Optional[str]:
+        """Validate and normalize thinking level."""
+        if thinking_level is None:
+            return None
+
+        normalized = thinking_level.lower()
+        if normalized not in ("high", "low"):
+            raise ValueError(
+                f"Invalid thinking_level: '{thinking_level}'. "
+                f"Must be 'high', 'low', or None."
+            )
+        return normalized
+
+    def _build_thinking_config(self, genai_types, thinking_level: Optional[str]):
+        """Build thinking config for google-genai if requested."""
+        if not thinking_level:
+            return None
+
+        budget_tokens = 4000 if thinking_level == "low" else 12000
+
+        try:
+            return genai_types.ThinkingConfig(budget_tokens=budget_tokens)
+        except Exception as e:
+            logger.warning(
+                f"Failed to apply thinking_level '{thinking_level}': {e}. "
+                "Continuing without thinking config."
+            )
+            return None
+
+    def _init_google_genai(
+        self,
+        model: str,
+        google_api_key: str,
+        temperature: float,
+        max_output_tokens: int,
+        top_p: float,
+        top_k: int,
+        normalized_thinking: Optional[str],
+    ):
+        try:
+            from google import genai as google_genai
+            from google.genai import types as genai_types
+        except ImportError as e:
+            raise ImportError(
+                "google-genai is required for Gemini 3.x models. "
+                "Install with `pip install google-genai`."
+            ) from e
+
+        thinking_config = self._build_thinking_config(
+            genai_types=genai_types, thinking_level=normalized_thinking
+        )
+
+        generation_kwargs = {
+            "temperature": temperature,
+            "max_output_tokens": max_output_tokens,
+            "top_p": top_p,
+            "top_k": top_k,
+        }
+
+        supports_thinking = "thinking" in getattr(
+            genai_types.GenerateContentConfig, "model_fields", {}
+        )
+        if thinking_config and supports_thinking:
+            generation_kwargs["thinking"] = thinking_config
+        elif thinking_config:
+            logger.warning(
+                "Thinking config requested but this google-genai version "
+                "does not support the 'thinking' field. Skipping."
+            )
+
+        self._genai_client = google_genai.Client(api_key=google_api_key)
+        self._generation_config = genai_types.GenerateContentConfig(
+            **generation_kwargs
+        )
+        self.thinking_level = normalized_thinking if "thinking" in generation_kwargs else None
+        logger.info(f"Initialized Gemini (google-genai) model: {model}")
+        if self.thinking_level:
+            logger.info(f"  - Thinking level: {self.thinking_level}")
+        elif normalized_thinking:
+            logger.info("Thinking level requested but not applied.")
 
 
 class GeminiDirectChatModel:

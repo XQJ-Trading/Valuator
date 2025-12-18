@@ -69,11 +69,18 @@ export function useSession() {
       availableModels.value = data.models || []
       if (!selectedModel.value && data.default) {
         selectedModel.value = data.default
+      } else if (!selectedModel.value && availableModels.value.length > 0) {
+        selectedModel.value = availableModels.value[0]
       }
     } catch (error) {
       console.error('모델 목록을 가져오는데 실패했습니다:', error)
-      availableModels.value = ['gemini-flash-latest', 'gemini-pro-latest']
-      selectedModel.value = 'gemini-flash-latest'
+      availableModels.value = [
+        'gemini-3-flash-preview',
+        'gemini-3-pro-preview',
+        'gemini-flash-latest',
+        'gemini-pro-latest'
+      ]
+      selectedModel.value = availableModels.value[0]
     }
   }
 

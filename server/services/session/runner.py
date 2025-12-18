@@ -79,7 +79,8 @@ class BackgroundTaskRunner:
                 session_id, SessionStatus.COMPLETED
             )
 
-            await self.session_manager.cleanup_session(session_id)
+            # Delay cleanup so clients can still subscribe to finished sessions
+            self.session_manager.schedule_cleanup(session_id, delay_seconds=60)
 
         except Exception as e:
             logger.error(f"Error in background task for session {session_id}: {e}")

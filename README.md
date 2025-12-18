@@ -43,6 +43,7 @@ Valuator/
    ```bash
    pip install -r requirements.txt
    ```
+   - Gemini 3.x 모델 지원을 위해 `google-genai`가 requirements에 포함되어 있습니다.
 
 2. **환경 변수 설정**
    
@@ -87,7 +88,7 @@ Valuator/
 - **실시간 스트리밍**: Server-Sent Events를 통한 실시간 응답
 - **세션 관리**: 대화 기록 저장 및 조회 (파일/MongoDB)
 - **모델 선택**: Gemini 3.0 모델 지원
-- **🆕 Gemini3 Direct API**: Google Generative AI SDK 직접 사용
+- **🆕 Gemini3 Direct API**: google-genai SDK로 최신 Gemini 3.x 모델 직접 호출
 - **🆕 Thinking Level**: Gemini3의 추론 깊이 제어 (high/low)
 - **Task Rewrite**: LLM을 활용한 작업 재작성 기능
 
@@ -140,7 +141,7 @@ Valuator/
 
 ### 개요
 
-LangChain 래퍼 대신 Google Generative AI SDK를 직접 사용하여 Gemini3의 최신 기능을 활용합니다.
+ LangChain 래퍼 대신 Google AI Python SDK(`google-genai`)를 직접 사용하여 Gemini3의 최신 기능을 활용합니다. (구 모델은 `google-generativeai` 경로 유지)
 
 ### 주요 이점
 

@@ -3,6 +3,7 @@
 import uuid
 from typing import Optional
 
+from ...core.utils.config import config
 from ...core.utils.logger import logger
 from .llm_client import TaskRewriteLLMClient
 from .models import TaskRewriteHistory
@@ -31,7 +32,7 @@ class TaskRewriteService:
     async def rewrite_task(
         self,
         task: str,
-        model: str = "gemini-flash-latest",
+        model: str = config.agent_model,
         custom_prompt: Optional[str] = None,
         thinking_level: Optional[str] = None,
     ) -> TaskRewriteHistory:

@@ -82,13 +82,10 @@ def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMe
     elif hasattr(response, "candidates") and response.candidates:
         candidate = response.candidates[0]
         if hasattr(candidate, "content") and candidate.content:
-            if hasattr(candidate.content, "parts") and candidate.content.parts:
+            parts = getattr(candidate.content, "parts", None)
+            if parts is not None:
                 content = "".join(
-                    [
-                        part.text
-                        for part in candidate.content.parts
-                        if hasattr(part, "text")
-                    ]
+                    [part.text for part in parts if hasattr(part, "text")]
                 )
 
     # Extract usage metadata
@@ -147,13 +144,14 @@ def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMe
         candidate = response.candidates[0]
         if hasattr(candidate, "finish_reason"):
             metadata["finish_reason"] = str(candidate.finish_reason)
-        if hasattr(candidate, "safety_ratings"):
+        safety_ratings = getattr(candidate, "safety_ratings", None)
+        if safety_ratings is not None:
             metadata["safety_ratings"] = [
                 {
                     "category": str(rating.category),
                     "probability": str(rating.probability),
                 }
-                for rating in candidate.safety_ratings
+                for rating in safety_ratings
             ]
 
     if metadata:

@@ -116,7 +116,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
 
 const taskInput = ref('')
 const customPrompt = ref('')
-const selectedModel = ref('gemini-flash-latest')
+const selectedModel = ref('')
 const thinkingLevel = ref('')
 const availableModels = ref<string[]>([])
 const result = ref('')
@@ -129,12 +129,22 @@ async function fetchModels() {
     const res = await fetch(`${API_BASE}/api/v1/models`)
     const data = await res.json()
     availableModels.value = data.models || []
-    if (data.default && !selectedModel.value) {
+    if (!selectedModel.value && data.default) {
       selectedModel.value = data.default
+    } else if (!selectedModel.value && availableModels.value.length > 0) {
+      selectedModel.value = availableModels.value[0]
     }
   } catch (e) {
     console.error('Failed to fetch models:', e)
-    availableModels.value = ['gemini-flash-latest', 'gemini-pro-latest']
+    availableModels.value = [
+      'gemini-3-flash-preview',
+      'gemini-3-pro-preview',
+      'gemini-flash-latest',
+      'gemini-pro-latest'
+    ]
+    if (!selectedModel.value) {
+      selectedModel.value = availableModels.value[0]
+    }
   }
 }
 
@@ -184,6 +194,8 @@ function clearAll() {
 // 모델 표시 이름 변환
 function getModelDisplayName(model: string): string {
   const displayNames: Record<string, string> = {
+    'gemini-3-flash-preview': 'Gemini 3 Flash (빠른 응답)',
+    'gemini-3-pro-preview': 'Gemini 3 Pro (고성능)',
     'gemini-flash-latest': 'Gemini Flash (빠른 응답)',
     'gemini-pro-latest': 'Gemini Pro (고성능)'
   }
@@ -485,4 +497,3 @@ onMounted(() => {
   }
 }
 </style>
-

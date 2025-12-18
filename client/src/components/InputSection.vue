@@ -96,6 +96,8 @@ defineEmits<Emits>()
 // 모델 표시 이름 변환 함수
 function getModelDisplayName(model: string): string {
   const displayNames: Record<string, string> = {
+    'gemini-3-flash-preview': 'Gemini 3 Flash (빠른 응답)',
+    'gemini-3-pro-preview': 'Gemini 3 Pro (고성능)',
     'gemini-flash-latest': 'Gemini Flash (빠른 응답)',
     'gemini-pro-latest': 'Gemini Pro (고성능)'
   }

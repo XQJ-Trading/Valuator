@@ -141,7 +141,7 @@ Valuator/
 
 ### 개요
 
- LangChain 래퍼 대신 Google AI Python SDK(`google-genai`)를 직접 사용하여 Gemini3의 최신 기능을 활용합니다. (구 모델은 `google-generativeai` 경로 유지)
+ LangChain 래퍼 대신 Google AI Python SDK(`google-genai`)를 직접 사용하여 Gemini3의 최신 기능을 활용합니다.
 
 ### 주요 이점
 

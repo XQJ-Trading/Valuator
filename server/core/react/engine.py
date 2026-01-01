@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 import yaml
 
-from ..models.gemini import GeminiChatSession, GeminiModel
+from ..models.gemini_direct import GeminiChatSession, GeminiModel
 from ..tools.base import ToolRegistry, ToolResult
 from ..utils.logger import logger
 from ..utils.react_logger import react_logger

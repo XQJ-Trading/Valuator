@@ -2,7 +2,7 @@
 
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from ..models.gemini import GeminiModel
+from ..models.gemini_direct import GeminiModel
 from ..react.engine import ReActEngine
 from ..tools.base import ToolRegistry
 from ..tools.react_tool import CodeExecutorTool, FileSystemTool, PerplexitySearchTool

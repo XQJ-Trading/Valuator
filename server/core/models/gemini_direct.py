@@ -1,16 +1,206 @@
 """Direct Google Gemini integration via google-genai (Gemini 3.x only)"""
 
 import asyncio
+import json
+import os
+import time
+from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import Generation, LLMResult
+from pydantic import BaseModel, Field
 
+from ..utils.config import config
 from ..utils.logger import logger
 from ..utils.message_converter import (
     google_to_langchain_message,
     langchain_to_google_messages,
 )
+
+
+def _save_raw_api_log(
+    request_data: Dict[str, Any],
+    response_data: Dict[str, Any],
+    model_name: str,
+) -> None:
+    """Save raw API request and response to file"""
+    if not config.gemini_low_level_request_logging:
+        return
+
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"request_response_{timestamp}.json"
+        filepath = os.path.join("logs", "gemini_low_level_request", filename)
+
+        full_data = {
+            "timestamp": timestamp,
+            "model": model_name,
+            "request": request_data,
+            "response": response_data,
+        }
+
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(full_data, f, ensure_ascii=False, indent=2, default=str)
+
+        logger.debug(f"Raw API 요청/응답을 파일로 저장했습니다: {filepath}")
+    except Exception as e:
+        logger.warning(f"Raw API 로그 저장 실패: {e}")
+
+
+class GlobalGeminiRateLimiter:
+    """전역 Gemini API Rate Limiter - API key 단위로 TPM 제한을 관리"""
+
+    _instance = None
+    _lock = asyncio.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if hasattr(self, "_initialized"):
+            return
+        self._initialized = True
+
+        # 모델별 TPM 제한 (Token per Minute)
+        self.model_limits = {
+            # 기본값 (모델명 매칭이 안될 경우)
+            "default": 1_000_000,
+        }
+
+        # 모델별 토큰 사용 이력: [(timestamp, tokens), ...]
+        self.usage_history = {}
+
+    def _get_model_key(self, model_name: str) -> str:
+        """모델명을 정규화하여 키로 사용"""
+        # Gemini 3 모델만 지원
+        return "default"
+
+    def _cleanup_old_records(self, model_key: str, current_time: float):
+        """1분 이상 된 기록들을 정리"""
+        minute_ago = current_time - 60.0
+        if model_key not in self.usage_history:
+            self.usage_history[model_key] = []
+
+        self.usage_history[model_key] = [
+            (timestamp, tokens)
+            for timestamp, tokens in self.usage_history[model_key]
+            if timestamp > minute_ago
+        ]
+
+    def _get_current_usage(self, model_key: str, current_time: float) -> int:
+        """현재 1분간의 토큰 사용량 계산"""
+        self._cleanup_old_records(model_key, current_time)
+        return sum(tokens for _, tokens in self.usage_history[model_key])
+
+    async def wait_if_needed(self, model_name: str):
+        """현재 사용량이 70% 초과시 대기"""
+        async with self._lock:
+            model_key = self._get_model_key(model_name)
+            current_time = time.time()
+            limit = self.model_limits.get(model_key, self.model_limits["default"])
+
+            current_usage = self._get_current_usage(model_key, current_time)
+            threshold = int(limit * 0.7)  # 70% 임계값
+
+            if current_usage > threshold:
+                # 가장 오래된 기록의 시간을 찾아서 대기 시간 계산
+                if self.usage_history[model_key]:
+                    oldest_timestamp = min(
+                        timestamp for timestamp, _ in self.usage_history[model_key]
+                    )
+                    wait_time = max(0, 60.0 - (current_time - oldest_timestamp))
+
+                    if wait_time > 0:
+                        usage_percentage = (current_usage / limit) * 100
+                        logger.info(
+                            f"🕐 70% 임계값 초과 대기중 - 모델: {model_name}, "
+                            f"현재 사용량: {current_usage:,}/{limit:,} ({usage_percentage:.1f}%), "
+                            f"임계값: {threshold:,}, 대기 시간: {wait_time:.1f}초"
+                        )
+                        await asyncio.sleep(wait_time)
+
+    def record_usage(self, model_name: str, tokens_used: int):
+        """API 호출 후 실제 토큰 사용량을 기록"""
+        if tokens_used <= 0:
+            return
+
+        model_key = self._get_model_key(model_name)
+        current_time = time.time()
+
+        if model_key not in self.usage_history:
+            self.usage_history[model_key] = []
+
+        self.usage_history[model_key].append((current_time, tokens_used))
+
+        # 기록 정리
+        self._cleanup_old_records(model_key, current_time)
+
+        # 현재 사용량 로깅
+        current_usage = sum(tokens for _, tokens in self.usage_history[model_key])
+        limit = self.model_limits.get(model_key, self.model_limits["default"])
+        usage_percentage = (current_usage / limit) * 100
+
+        logger.debug(
+            f"📊 토큰 사용량 기록 - 모델: {model_name}, "
+            f"사용: {tokens_used:,}, 1분간 총 사용량: {current_usage:,}/{limit:,} "
+            f"({usage_percentage:.1f}%)"
+        )
+
+
+def get_rate_limiter() -> GlobalGeminiRateLimiter:
+    """전역 rate limiter 인스턴스를 반환"""
+    return GlobalGeminiRateLimiter()
+
+
+def _normalize_content(value: Any) -> str:
+    """Normalize model content to a plain string.
+
+    Handles cases where LangChain returns content as a list of parts.
+    """
+    if isinstance(value, str):
+        return value
+    # List of parts (dicts or objects). Attempt to extract text fields.
+    if isinstance(value, (list, tuple)):
+        parts: list[str] = []
+        for item in value:
+            # Common shapes: {"type": "text", "text": "..."}
+            try:
+                if isinstance(item, dict):
+                    if "text" in item and isinstance(item["text"], str):
+                        parts.append(item["text"])
+                    elif "content" in item and isinstance(item["content"], str):
+                        parts.append(item["content"])
+                    else:
+                        # Fallback stringification
+                        parts.append(str(item))
+                else:
+                    # Object with .text or .content attr
+                    text_attr = getattr(item, "text", None)
+                    if isinstance(text_attr, str):
+                        parts.append(text_attr)
+                    else:
+                        content_attr = getattr(item, "content", None)
+                        if isinstance(content_attr, str):
+                            parts.append(content_attr)
+                        else:
+                            parts.append(str(item))
+            except Exception:
+                parts.append(str(item))
+        return "".join(parts)
+    # Fallback
+    return str(value)
+
+
+class GeminiResponse(BaseModel):
+    """Response model for Gemini"""
+
+    content: str = Field(..., description="Response content")
+    usage: Optional[Dict[str, Any]] = Field(None, description="Token usage information")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
 
 
 class GeminiDirectModel:
@@ -99,7 +289,22 @@ class GeminiDirectModel:
         # Convert messages to Google API format
         contents = langchain_to_google_messages(message_list)
 
+        # Rate limiting - 70% 임계값 체크 및 대기
+        rate_limiter = get_rate_limiter()
+        await rate_limiter.wait_if_needed(self.model_name)
+
         try:
+            # Prepare request data for logging
+            request_data = {
+                "contents": contents,
+                "generation_config": {
+                    "temperature": self.temperature,
+                    "max_output_tokens": self.max_output_tokens,
+                    "top_p": self.top_p,
+                    "top_k": self.top_k,
+                },
+            }
+
             # Make API call in thread pool (SDK is synchronous)
             content_objects = self._convert_to_content_objects(contents)
             response = await asyncio.to_thread(
@@ -109,8 +314,56 @@ class GeminiDirectModel:
                 config=self._generation_config,
             )
 
+            # Prepare response data for logging
+            response_data = {
+                "text": getattr(response, "text", None),
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": part.text}
+                                for part in candidate.content.parts
+                                if hasattr(part, "text")
+                            ]
+                        },
+                        "finish_reason": str(getattr(candidate, "finish_reason", None)),
+                        "safety_ratings": [
+                            {
+                                "category": str(rating.category),
+                                "probability": str(rating.probability),
+                            }
+                            for rating in (getattr(candidate, "safety_ratings", None) or [])
+                        ],
+                    }
+                    for candidate in (getattr(response, "candidates", None) or [])
+                ],
+                "usage_metadata": {
+                    "prompt_token_count": getattr(
+                        response.usage_metadata, "prompt_token_count", 0
+                    ),
+                    "candidates_token_count": getattr(
+                        response.usage_metadata, "candidates_token_count", 0
+                    ),
+                    "total_token_count": getattr(
+                        response.usage_metadata, "total_token_count", 0
+                    ),
+                }
+                if hasattr(response, "usage_metadata")
+                else None,
+                "prompt_feedback": str(getattr(response, "prompt_feedback", None)),
+            }
+
+            # Save raw API log
+            _save_raw_api_log(request_data, response_data, self.model_name)
+
             # Convert response to LangChain format
             ai_message = google_to_langchain_message(response, extract_thinking=True)
+
+            # Rate limiting - 실제 사용된 토큰 수를 기록
+            if hasattr(ai_message, "usage_metadata") and ai_message.usage_metadata:
+                total_tokens = ai_message.usage_metadata.get("total_tokens", 0)
+                if total_tokens > 0:
+                    rate_limiter.record_usage(self.model_name, total_tokens)
 
             # Create Generation object
             generation = Generation(
@@ -203,7 +456,22 @@ class GeminiDirectModel:
         # Convert messages to Google API format
         contents = langchain_to_google_messages(messages)
 
+        # Rate limiting - 70% 임계값 체크 및 대기
+        rate_limiter = get_rate_limiter()
+        await rate_limiter.wait_if_needed(self.model_name)
+
         try:
+            # Prepare request data for logging
+            request_data = {
+                "contents": contents,
+                "generation_config": {
+                    "temperature": self.temperature,
+                    "max_output_tokens": self.max_output_tokens,
+                    "top_p": self.top_p,
+                    "top_k": self.top_k,
+                },
+            }
+
             # Make API call
             content_objects = self._convert_to_content_objects(contents)
             response = await asyncio.to_thread(
@@ -213,8 +481,57 @@ class GeminiDirectModel:
                 config=self._generation_config,
             )
 
+            # Prepare response data for logging
+            response_data = {
+                "text": getattr(response, "text", None),
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": part.text}
+                                for part in candidate.content.parts
+                                if hasattr(part, "text")
+                            ]
+                        },
+                        "finish_reason": str(getattr(candidate, "finish_reason", None)),
+                        "safety_ratings": [
+                            {
+                                "category": str(rating.category),
+                                "probability": str(rating.probability),
+                            }
+                            for rating in (getattr(candidate, "safety_ratings", None) or [])
+                        ],
+                    }
+                    for candidate in (getattr(response, "candidates", None) or [])
+                ],
+                "usage_metadata": {
+                    "prompt_token_count": getattr(
+                        response.usage_metadata, "prompt_token_count", 0
+                    ),
+                    "candidates_token_count": getattr(
+                        response.usage_metadata, "candidates_token_count", 0
+                    ),
+                    "total_token_count": getattr(
+                        response.usage_metadata, "total_token_count", 0
+                    ),
+                }
+                if hasattr(response, "usage_metadata")
+                else None,
+                "prompt_feedback": str(getattr(response, "prompt_feedback", None)),
+            }
+
+            # Save raw API log
+            _save_raw_api_log(request_data, response_data, self.model_name)
+
             # Convert and return
             ai_message = google_to_langchain_message(response, extract_thinking=True)
+
+            # Rate limiting - 실제 사용된 토큰 수를 기록
+            if hasattr(ai_message, "usage_metadata") and ai_message.usage_metadata:
+                total_tokens = ai_message.usage_metadata.get("total_tokens", 0)
+                if total_tokens > 0:
+                    rate_limiter.record_usage(self.model_name, total_tokens)
+
             return ai_message
 
         except Exception as e:
@@ -393,3 +710,202 @@ class GeminiDirectChatModel:
     def get_history(self) -> List[BaseMessage]:
         """Get conversation history"""
         return self.conversation_history.copy()
+
+
+class GeminiChatSession:
+    """Represents a chat session with the Gemini model"""
+
+    def __init__(self, model, initial_messages: List[BaseMessage]):
+        self.model = model
+        self.history: List[BaseMessage] = initial_messages
+
+    async def send_message(
+        self, message: str, callbacks: Optional[List] = None
+    ) -> GeminiResponse:
+        """Send a message in the session and get a response"""
+        self.history.append(HumanMessage(content=message))
+
+        # Rate limiting - 70% 임계값 체크 및 대기
+        rate_limiter = get_rate_limiter()
+        model_name = getattr(self.model, "model_name", None) or "unknown"
+        await rate_limiter.wait_if_needed(model_name)
+
+        response = await self.model.agenerate(
+            messages=[self.history], callbacks=callbacks
+        )
+
+        # Extract content from response
+        generation = response.generations[0][0]
+        message_obj = getattr(generation, "message", None)
+        if message_obj and getattr(message_obj, "content", None) is not None:
+            content = _normalize_content(message_obj.content)
+        else:
+            content = _normalize_content(getattr(generation, "text", ""))
+
+        # Extract usage from AIMessage.usage_metadata
+        usage = None
+        if message_obj is not None:
+            usage = getattr(message_obj, "usage_metadata", None)
+        if usage is None:
+            gen_info = getattr(generation, "generation_info", None) or {}
+            if isinstance(gen_info, dict):
+                usage = gen_info.get("usage_metadata")
+
+        # Rate limiting - 실제 사용된 토큰 수를 기록
+        if usage:
+            total_tokens = self._extract_total_tokens(usage)
+            if total_tokens > 0:
+                model_name = getattr(self.model, "model_name", None) or "unknown"
+                rate_limiter.record_usage(model_name, total_tokens)
+
+        self.history.append(AIMessage(content=content))
+
+        model_name = getattr(self.model, "model_name", None) or "unknown"
+
+        return GeminiResponse(
+            content=content,
+            usage=usage,
+            metadata={"model": model_name},
+        )
+
+    def _extract_total_tokens(self, usage_metadata: Dict[str, Any]) -> int:
+        """usage metadata에서 총 토큰 사용량 추출"""
+        if not usage_metadata:
+            return 0
+
+        # Google API 형식
+        if "total_token_count" in usage_metadata:
+            return usage_metadata["total_token_count"]
+
+        # LangChain 형식
+        if "total_tokens" in usage_metadata:
+            return usage_metadata["total_tokens"]
+
+        # 분리된 형식에서 합산
+        input_tokens = usage_metadata.get("input_tokens", 0) or usage_metadata.get(
+            "prompt_token_count", 0
+        )
+        output_tokens = usage_metadata.get("output_tokens", 0) or usage_metadata.get(
+            "candidates_token_count", 0
+        )
+
+        return input_tokens + output_tokens
+
+    async def stream_message(
+        self, message: str, callbacks: Optional[List] = None
+    ) -> AsyncGenerator[str, None]:
+        """Send a message and stream the response"""
+        self.history.append(HumanMessage(content=message))
+
+        streamed_content = ""
+        yielded_any = False
+        async for chunk in self.model.astream(
+            messages=self.history, callbacks=callbacks
+        ):
+            if hasattr(chunk, "content") and chunk.content:
+                streamed_content += chunk.content
+                yielded_any = True
+                yield chunk.content
+        # Fallback if provider returned no chunks
+        if not yielded_any:
+            response = await self.send_message(message, callbacks=callbacks)
+            yield response.content
+
+        self.history.append(AIMessage(content=streamed_content))
+
+
+class GeminiModel:
+    """Gemini model wrapper for AI Agent"""
+
+    def __init__(
+        self, model_name: Optional[str] = None, thinking_level: Optional[str] = None
+    ):
+        """
+        Initialize Gemini model
+
+        Args:
+            model_name: Model name to use (defaults to config value)
+            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
+        """
+        self.model_name = model_name or config.agent_model
+        self.thinking_level = thinking_level
+        self.llm = None
+        self._initialize_model()
+
+    def _initialize_model(self):
+        """Initialize the Gemini model"""
+        try:
+            # Always use direct Google Generative AI SDK
+            self.llm = GeminiDirectModel(
+                model=self.model_name,
+                google_api_key=config.google_api_key,
+                temperature=config.temperature,
+                max_output_tokens=config.max_tokens,
+                top_p=config.top_p,
+                top_k=config.top_k,
+                thinking_level=self.thinking_level,
+                streaming=True,
+            )
+            logger.info(f"Initialized Gemini Direct API model: {self.model_name}")
+            if self.thinking_level:
+                logger.info(f"Thinking level enabled: {self.thinking_level}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini model: {e}")
+            raise
+
+    def create_human_message(self, content: str) -> HumanMessage:
+        """Create a human message"""
+        return HumanMessage(content=content)
+
+    def create_ai_message(self, content: str) -> AIMessage:
+        """Create an AI message"""
+        return AIMessage(content=content)
+
+    def format_messages(
+        self,
+        system_prompt: str,
+        conversation_history: List[Dict[str, str]],
+        current_input: str,
+    ) -> List[BaseMessage]:
+        """
+        Format messages for Gemini model
+
+        Args:
+            system_prompt: System prompt for the conversation
+            conversation_history: Previous conversation history
+            current_input: Current user input
+
+        Returns:
+            Formatted list of messages
+        """
+        messages = []
+
+        # Add system prompt as HumanMessage (Gemini doesn't support SystemMessage)
+        if system_prompt and system_prompt.strip():
+            messages.append(self.create_human_message(system_prompt))
+
+        # Add conversation history - filter out empty content
+        for turn in conversation_history:
+            role = turn.get("role")
+            content = turn.get("content", "")
+
+            # Skip empty or whitespace-only content
+            if not content or not content.strip():
+                continue
+
+            if role == "user":
+                messages.append(self.create_human_message(content))
+            elif role == "assistant":
+                messages.append(self.create_ai_message(content))
+
+        # Add current input - only if it has content
+        if current_input and current_input.strip():
+            messages.append(self.create_human_message(current_input))
+
+        return messages
+
+    def start_chat_session(
+        self, initial_messages: List[BaseMessage]
+    ) -> GeminiChatSession:
+        """Starts a new chat session"""
+        return GeminiChatSession(self.llm, initial_messages)

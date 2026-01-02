@@ -9,7 +9,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import yaml
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ..models.gemini import GeminiChatSession, GeminiModel
+from ..models.gemini_direct import GeminiChatSession, GeminiModel
 from ..tools.base import ObservationData, ToolRegistry, ToolResult
 from ..utils.logger import logger
 from ..utils.react_logger import react_logger

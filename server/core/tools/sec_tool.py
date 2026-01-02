@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 
 from .base import BaseTool, ToolResult
-from ..models.gemini import GeminiModel
+from ..models.gemini_direct import GeminiModel
 from ..utils.config import config
 from ..utils.logger import logger
 

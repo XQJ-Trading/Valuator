@@ -1,5 +1,5 @@
 """Models package for AI Agent"""
 
-from .gemini import GeminiModel
+from .gemini_direct import GeminiModel
 
 __all__ = ["GeminiModel"]

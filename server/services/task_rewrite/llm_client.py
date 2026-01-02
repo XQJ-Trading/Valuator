@@ -79,30 +79,22 @@ class TaskRewriteLLMClient:
         Raises:
             Exception: If LLM call fails
         """
-        # Validate task is not empty
         if not task or not task.strip():
             raise ValueError("Task cannot be empty")
 
         from .prompts import TaskRewritePrompts
 
-        # Format the prompt
         prompt = TaskRewritePrompts.format_prompt(task, custom_prompt)
-
-        # Validate prompt is not empty
         if not prompt or not prompt.strip():
             raise ValueError("Prompt cannot be empty")
 
-        # Get model instance
         llm = self._get_model(model, thinking_level)
 
         try:
             logger.info(f"Calling LLM for task rewrite (model: {model})")
-            # Convert string prompt to LangChain HumanMessage
             from langchain_core.messages import HumanMessage
 
             messages = [HumanMessage(content=prompt)]
-
-            # Validate messages before sending
             if (
                 not messages
                 or not messages[0].content
@@ -111,12 +103,7 @@ class TaskRewriteLLMClient:
                 raise ValueError("Message content cannot be empty")
 
             response = await llm.ainvoke(messages)
-
-            # Extract text from response
-            if hasattr(response, "content"):
-                rewritten_task = response.content
-            else:
-                rewritten_task = str(response)
+            rewritten_task = response.content if hasattr(response, "content") else str(response)
 
             logger.info(f"Task rewrite completed (model: {model})")
             return rewritten_task.strip()

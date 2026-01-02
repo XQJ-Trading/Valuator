@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 
 from ...core.agent.react_agent import AIAgent
 from ...core.utils.logger import logger
@@ -36,6 +36,7 @@ class BackgroundTaskRunner:
         query: str,
         model: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Solve a query in the background and update session with events
@@ -60,7 +61,7 @@ class BackgroundTaskRunner:
             agent = AIAgent(model_name=model, thinking_level=thinking_level)
 
             # Stream events from agent and publish as dict
-            async for event_dict in agent.solve_stream(query):
+            async for event_dict in agent.solve_stream(query, context or {}):
                 # Publish event dict directly to session
                 await self.session_manager.add_event(session_id, event_dict)
 

@@ -1,11 +1,11 @@
 """Tools package for AI Agent"""
 
 from .base import BaseTool, ToolResult
+from .context_tool import ContextTool
 from .react_tool import CodeExecutorTool, FileSystemTool, PerplexitySearchTool
 from .sec_tool import SECTool
 from .web_search import WebSearchTool
 from .yfinance_tool import YFinanceBalanceSheetTool
-
 __all__ = [
     "BaseTool",
     "ToolResult",
@@ -15,4 +15,5 @@ __all__ = [
     "CodeExecutorTool",
     "FileSystemTool",
     "SECTool",
+    "ContextTool",
 ]

@@ -1,7 +1,7 @@
 """Session service layer - manages session lifecycle and streaming"""
 
 import asyncio
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from ...core.utils.config import config
 from ...core.utils.logger import logger
@@ -41,6 +41,7 @@ class SessionService:
         query: str,
         model: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> SessionData:
         """
         Create and start a new session with background task
@@ -49,19 +50,20 @@ class SessionService:
             query: User query
             model: Model to use
             thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
+            context: Optional runtime context payload
 
         Returns:
             Created session
         """
         # Create session
         session = await self.session_manager.create_session(
-            query=query, model=model or config.agent_model
+            query=query, model=model or config.agent_model, context=context
         )
 
         # Start background task
         asyncio.create_task(
             self.background_runner.solve_in_background(
-                session.session_id, query, model, thinking_level
+                session.session_id, query, model, thinking_level, context
             )
         )
 

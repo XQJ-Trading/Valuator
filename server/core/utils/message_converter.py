@@ -1,5 +1,6 @@
 """Message converter between LangChain and Google Generative AI formats"""
 
+from collections.abc import Iterable
 from typing import List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 
@@ -64,6 +65,16 @@ def langchain_to_google_messages(messages: List[BaseMessage]) -> List[Dict[str, 
     return contents
 
 
+def _iter_candidate_parts(candidate) -> List[Any]:
+    content = getattr(candidate, "content", None)
+    if not content:
+        return []
+    parts = getattr(content, "parts", None)
+    if not isinstance(parts, Iterable) or isinstance(parts, (str, bytes)):
+        return []
+    return [part for part in parts if part is not None]
+
+
 def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMessage:
     """
     Convert Google Generative AI response to LangChain AIMessage
@@ -78,15 +89,24 @@ def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMe
     # Extract content
     content = ""
     if hasattr(response, "text"):
-        content = response.text
-    elif hasattr(response, "candidates") and response.candidates:
+        content = response.text or ""
+
+    candidate = None
+    parts: List[Any] = []
+    if hasattr(response, "candidates") and response.candidates:
         candidate = response.candidates[0]
-        if hasattr(candidate, "content") and candidate.content:
-            parts = getattr(candidate.content, "parts", None)
-            if parts is not None:
-                content = "".join(
-                    [part.text for part in parts if hasattr(part, "text")]
+        parts = _iter_candidate_parts(candidate)
+        if not content and parts:
+            content = (
+                "".join(
+                    [
+                        part.text
+                        for part in parts
+                        if hasattr(part, "text") and part.text is not None
+                    ]
                 )
+                or ""
+            )
 
     # Extract usage metadata
     usage_metadata = {}
@@ -112,8 +132,7 @@ def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMe
         message.usage_metadata = usage_metadata
 
     # Extract thinking information (Gemini3 feature)
-    if extract_thinking and hasattr(response, "candidates") and response.candidates:
-        candidate = response.candidates[0]
+    if extract_thinking and candidate is not None:
         thinking_data = {}
 
         # Check for thinking-related attributes
@@ -124,8 +143,8 @@ def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMe
             thinking_data["thinking"] = candidate.thinking
 
         # Check in content parts for thinking
-        if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
-            for part in candidate.content.parts:
+        if parts:
+            for part in parts:
                 if hasattr(part, "thinking"):
                     thinking_data["thinking_part"] = part.thinking
                     break
@@ -140,8 +159,7 @@ def google_to_langchain_message(response, extract_thinking: bool = True) -> AIMe
 
     # Add response metadata
     metadata = {}
-    if hasattr(response, "candidates") and response.candidates:
-        candidate = response.candidates[0]
+    if candidate is not None:
         if hasattr(candidate, "finish_reason"):
             metadata["finish_reason"] = str(candidate.finish_reason)
         safety_ratings = getattr(candidate, "safety_ratings", None)

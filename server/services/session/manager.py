@@ -31,13 +31,16 @@ class SessionManager:
     # Session Creation & Lifecycle
     # ========================================================================
 
-    async def create_session(self, query: str, model: str) -> SessionData:
+    async def create_session(
+        self, query: str, model: str, context: Optional[Dict[str, Any]] = None
+    ) -> SessionData:
         """
         Create a new session
 
         Args:
             query: User query
             model: Model to use
+            context: Optional runtime context payload
 
         Returns:
             Created session
@@ -59,6 +62,7 @@ class SessionManager:
             session_id=session_id,
             query=query,
             model=model,
+            context=context or {},
             status=SessionStatus.CREATED,
             created_at=timestamp,
             events=[],

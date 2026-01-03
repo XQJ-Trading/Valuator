@@ -69,6 +69,7 @@ class SessionData:
     model: str
     status: SessionStatus
     created_at: datetime
+    context: Dict[str, Any] = field(default_factory=dict)
     completed_at: Optional[datetime] = None
     events: list[SessionEvent] = field(default_factory=list)
     subscriber_count: int = 0
@@ -102,6 +103,7 @@ class SessionData:
             "duration": duration,  # v1 호환성
             "model": self.model,
             "source": "server_chat",  # v1 호환성
+            "context": self.context,
             # 추가 필드들 (v1에 없지만 유지)
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),

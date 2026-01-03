@@ -51,7 +51,9 @@ class ReActLogger:
             logger.info("Initializing file repository for session logging")
             return FileSessionRepository("logs/react_sessions")
 
-    def start_session(self, query: str) -> str:
+    def start_session(
+        self, query: str, context: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Start a new ReAct session"""
         timestamp = datetime.now()
         session_id = timestamp.strftime("%Y%m%d_%H%M%S_session")
@@ -60,6 +62,7 @@ class ReActLogger:
             "session_id": session_id,
             "timestamp": timestamp.isoformat(),
             "query": query,
+            "context": context or {},
             "steps": [],
             "final_answer": None,
             "success": False,
@@ -83,6 +86,21 @@ class ReActLogger:
     ):
         """Log a ReAct step"""
         if not self.current_session:
+            return
+
+        last_step = (
+            self.current_session["steps"][-1] if self.current_session["steps"] else None
+        )
+        if (
+            last_step
+            and last_step.get("type") == step_type
+            and last_step.get("content") == content
+        ):
+            logger.debug(f"Skipping duplicate {step_type} step")
+            return
+
+        if step_type == "final_answer":
+            self.current_session["final_answer"] = content
             return
 
         step = {
@@ -204,6 +222,7 @@ async def view_session_log_async(session_id: str = None, repository=None):
     print(f"❓ Query: {session.get('query', 'Unknown')}")
     print(f"⏱️  Duration: {session.get('duration', 0)} seconds")
     print(f"✅ Success: {session.get('success', False)}")
+    print(f"🧩 Context: {session.get('context', '')}")
     print("\n🔄 Steps:")
     print("-" * 50)
 

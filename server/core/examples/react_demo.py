@@ -1,6 +1,9 @@
 """AI Agent demonstration examples"""
 
 import asyncio
+import json
+import os
+from typing import Any, Dict, Optional
 
 from ..agent.react_agent import AIAgent
 from ..utils.logger import logger
@@ -13,6 +16,22 @@ class AIAgentDemo:
     def __init__(self):
         """Initialize AI Agent demo"""
         self.agent = AIAgent()
+        self.default_context: Dict[str, Any] = self._load_context_from_env()
+
+    def _load_context_from_env(self) -> Dict[str, Any]:
+        """Load default context from REACT_DEMO_CONTEXT env (JSON object)."""
+        raw = os.getenv("REACT_DEMO_CONTEXT")
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            print("⚠️  REACT_DEMO_CONTEXT must be a JSON object; ignoring.")
+            return {}
+        except Exception as e:
+            print(f"⚠️  Failed to parse REACT_DEMO_CONTEXT: {e}")
+            return {}
 
     async def initialize(self) -> bool:
         """Initialize the demo (agent is already ready)"""
@@ -23,6 +42,8 @@ class AIAgentDemo:
             if self.agent.is_ready():
                 print("✅ AI Agent initialized")
                 print(f"✅ {len(self.agent.get_available_tools())} tools available")
+                if self.default_context:
+                    print("🧩 Context loaded from REACT_DEMO_CONTEXT")
                 return True
             else:
                 print("❌ Agent not ready")
@@ -68,7 +89,7 @@ class AIAgentDemo:
                     continue
 
                 # Run ReAct solving
-                await self._solve_with_react(user_input)
+                await self._solve_with_react(user_input, context=self.default_context)
 
             except KeyboardInterrupt:
                 print("\n\n👋 Demo interrupted. Goodbye!")
@@ -112,7 +133,11 @@ class AIAgentDemo:
             print("-" * 60)
 
             try:
-                await self._solve_with_react(example["query"], show_progress=True)
+                await self._solve_with_react(
+                    example["query"],
+                    show_progress=True,
+                    context=self.default_context,
+                )
 
                 # Wait for user to continue
                 input("\nPress Enter to continue to next example...")
@@ -123,7 +148,12 @@ class AIAgentDemo:
 
         print("\n✅ All examples completed!")
 
-    async def _solve_with_react(self, query: str, show_progress: bool = True):
+    async def _solve_with_react(
+        self,
+        query: str,
+        show_progress: bool = True,
+        context: Optional[Dict[str, Any]] = None,
+    ):
         """Solve a problem using ReAct and display results"""
         if show_progress:
             print("\n🔍 Starting ReAct solving process...")
@@ -138,7 +168,7 @@ class AIAgentDemo:
 
         # Collect events from solve_stream
         events = []
-        async for event in self.agent.solve_stream(query):
+        async for event in self.agent.solve_stream(query, context or {}):
             events.append(event)
 
         # Extract final state from events
@@ -252,7 +282,7 @@ class AIAgentDemo:
             query = demos[capability]
             print(f"\n🎯 Demonstrating {capability.title()} Capability")
             print(f"Query: {query}")
-            await self._solve_with_react(query)
+            await self._solve_with_react(query, context=self.default_context)
         else:
             print(f"❌ Unknown capability: {capability}")
             print(f"Available: {', '.join(demos.keys())}")

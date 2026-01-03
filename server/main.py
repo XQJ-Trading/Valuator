@@ -132,6 +132,9 @@ class ChatRequest(BaseModel):
     query: str
     model: Optional[str] = None
     thinking_level: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    valuation_profile: Optional[str | bool] = None
+    system_context: Optional[str] = None
 
     @field_validator("model")
     @classmethod
@@ -373,10 +376,16 @@ async def create_session(request: ChatRequest):
 
     try:
         # Create and start session (SessionService handles background task)
+        ctx = dict(request.context) if request.context else {}
+        if request.system_context:
+            ctx["system_context"] = request.system_context
+        if request.valuation_profile is not None:
+            ctx["valuation_profile"] = request.valuation_profile
         session = await session_service.start_session(
             query=request.query,
             model=request.model,
             thinking_level=request.thinking_level,
+            context=ctx or None,
         )
 
         logger.info(f"Created session: {session.session_id}")

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -29,9 +30,13 @@ def _save_raw_api_log(
         return
 
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"request_response_{timestamp}.json"
         filepath = os.path.join("logs", "gemini_low_level_request", filename)
+        if os.path.exists(filepath):
+            unique_id = uuid.uuid4().hex
+            filename = f"request_response_{timestamp}_{unique_id}.json"
+            filepath = os.path.join("logs", "gemini_low_level_request", filename)
 
         full_data = {
             "timestamp": timestamp,

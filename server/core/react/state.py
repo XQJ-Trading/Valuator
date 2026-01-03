@@ -43,6 +43,7 @@ class ReActState(BaseModel):
     final_answer: Optional[str] = None
     error: Optional[str] = None
     context: Dict[str, Any] = {}
+    plan: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -124,6 +125,9 @@ class ReActState(BaseModel):
         """Format the step history for display"""
         formatted = f"Query: {self.original_query}\n\n"
 
+        if self.plan:
+            formatted += f"Plan:\n{self.plan}\n\n"
+
         for i, step in enumerate(self.steps, 1):
             if step.step_type == ReActStepType.THOUGHT:
                 formatted += f"Thought {i}: {step.content}\n\n"
@@ -134,6 +138,15 @@ class ReActState(BaseModel):
                     formatted += f"Input: {step.tool_input}\n\n"
             elif step.step_type == ReActStepType.OBSERVATION:
                 formatted += f"Observation {i}: {step.content}\n"
+                if step.tool_output:
+                    if (
+                        isinstance(step.tool_output, dict)
+                        and "context" in step.tool_output
+                    ):
+                        context_content = step.tool_output.get("context", "")
+                        formatted += f"Context: {context_content}\n"
+                    else:
+                        formatted += f"Output: {step.tool_output}\n"
                 if step.error:
                     formatted += f"Error: {step.error}\n"
                 formatted += "\n"
@@ -165,6 +178,7 @@ class ReActState(BaseModel):
             "final_answer": self.final_answer,
             "error": self.error,
             "context": self.context,
+            "plan": self.plan,
         }
 
     @classmethod
@@ -178,6 +192,7 @@ class ReActState(BaseModel):
             final_answer=data.get("final_answer"),
             error=data.get("error"),
             context=data.get("context", {}),
+            plan=data.get("plan"),
         )
 
         # Reconstruct steps
@@ -195,3 +210,7 @@ class ReActState(BaseModel):
             state.steps.append(step)
 
         return state
+
+    def set_plan(self, plan: str):
+        """Store the upfront plan (not counted as a ReAct step)"""
+        self.plan = plan

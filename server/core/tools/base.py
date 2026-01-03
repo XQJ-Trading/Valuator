@@ -1,7 +1,7 @@
 """Base tool implementation for AI Agent"""
 
-import asyncio
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -18,6 +18,18 @@ class ToolResult(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"
     )
+
+
+@dataclass
+class ObservationData:
+    data: Any
+    observation: Optional[str] = None
+    error: Optional[str] = None
+    store_output: bool = True
+    store_result: bool = True
+    skip_llm: bool = False
+    log_query: Optional[str] = None
+    log_response: Optional[str] = None
 
 
 class BaseTool(ABC):

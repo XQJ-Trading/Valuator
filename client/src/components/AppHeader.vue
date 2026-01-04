@@ -37,6 +37,22 @@
             </router-link>
           </div>
         </div>
+        <div 
+          ref="devDropdownRef"
+          class="nav-dropdown"
+        >
+          <a href="#" class="nav-btn nav-btn-dropdown" @click.prevent="toggleDevMenu">
+            <span class="nav-icon">🛠️</span>
+            Developer
+            <span class="dropdown-arrow" :class="{ 'arrow-open': showDevMenu }">▼</span>
+          </a>
+          <div v-if="showDevMenu" class="dropdown-menu">
+            <router-link to="/dev/gemini-logs" class="dropdown-item" @click="closeDevMenu">
+              <span class="dropdown-icon">📋</span>
+              Gemini Logs
+            </router-link>
+          </div>
+        </div>
         <a href="/" class="nav-btn" @click="handleNewSession">
           <span class="nav-icon">✨</span>
           New Session
@@ -57,18 +73,37 @@ const emit = defineEmits<Emits>()
 
 const showRewriteMenu = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const showDevMenu = ref(false)
+const devDropdownRef = ref<HTMLElement | null>(null)
 
 function toggleRewriteMenu() {
   showRewriteMenu.value = !showRewriteMenu.value
+  if (showRewriteMenu.value) {
+    showDevMenu.value = false
+  }
 }
 
 function closeRewriteMenu() {
   showRewriteMenu.value = false
 }
 
+function toggleDevMenu() {
+  showDevMenu.value = !showDevMenu.value
+  if (showDevMenu.value) {
+    showRewriteMenu.value = false
+  }
+}
+
+function closeDevMenu() {
+  showDevMenu.value = false
+}
+
 function handleClickOutside(event: MouseEvent) {
   if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
     closeRewriteMenu()
+  }
+  if (devDropdownRef.value && !devDropdownRef.value.contains(event.target as Node)) {
+    closeDevMenu()
   }
 }
 

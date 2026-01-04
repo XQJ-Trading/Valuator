@@ -6,6 +6,8 @@ import SessionPage from '../pages/SessionPage.vue'
 import TaskRewritePage from '../pages/TaskRewritePage.vue'
 import TaskRewriteHistoryPage from '../pages/TaskRewriteHistoryPage.vue'
 import TaskRewriteDetailPage from '../pages/TaskRewriteDetailPage.vue'
+import GeminiLogsPage from '../pages/GeminiLogsPage.vue'
+import GeminiLogDetailPage from '../pages/GeminiLogDetailPage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -75,6 +77,23 @@ const router = createRouter({
       props: true,
       meta: {
         title: 'AI Agent - Task Rewrite Detail'
+      }
+    },
+    {
+      path: '/dev/gemini-logs',
+      name: 'gemini-logs',
+      component: GeminiLogsPage,
+      meta: {
+        title: 'Developer - Gemini Logs'
+      }
+    },
+    {
+      path: '/dev/gemini-logs/:filename',
+      name: 'gemini-log-detail',
+      component: GeminiLogDetailPage,
+      props: true,
+      meta: {
+        title: 'Developer - Gemini Log Detail'
       }
     }
   ]

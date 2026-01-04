@@ -1,12 +1,14 @@
 import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
 from .adapters import HistoryAdapter
@@ -754,3 +756,287 @@ async def delete_task_rewrite(rewrite_id: str):
         raise HTTPException(
             status_code=500, detail=f"Failed to delete rewrite: {str(e)}"
         )
+
+
+# Developer API Endpoints - Gemini Logs
+
+
+@app.get("/api/v1/dev/gemini-logs")
+async def get_gemini_logs(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    sort: str = Query("newest", regex="^(newest|oldest|size)$"),
+):
+    """
+    Get list of Gemini request/response log files
+
+    Args:
+        limit: Maximum number of files to return (default: 20, max: 100)
+        offset: Number of files to skip (default: 0)
+        search: Search term for filename
+        date_from: Start date filter (YYYYMMDD format)
+        date_to: End date filter (YYYYMMDD format)
+        model: Model name filter
+        sort: Sort order (newest, oldest, size)
+
+    Returns:
+        List of log file metadata
+    """
+    try:
+        logs_dir = Path("logs/gemini_low_level_request")
+        if not logs_dir.exists():
+            return {
+                "files": [],
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+            }
+
+        # Get all JSON files
+        all_files = list(logs_dir.glob("request_response_*.json"))
+        
+        # Parse file metadata
+        file_metadatas = []
+        for filepath in all_files:
+            try:
+                # Extract timestamp from filename: request_response_YYYYMMDD_HHMMSS.json
+                filename = filepath.name
+                if not filename.startswith("request_response_") or not filename.endswith(".json"):
+                    continue
+                
+                timestamp_str = filename.replace("request_response_", "").replace(".json", "")
+                if len(timestamp_str) != 15:  # YYYYMMDD_HHMMSS
+                    continue
+                
+                date_str = timestamp_str[:8]  # YYYYMMDD
+                time_str = timestamp_str[9:]  # HHMMSS
+                
+                # Parse date
+                try:
+                    file_date = datetime.strptime(date_str, "%Y%m%d").date()
+                    file_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                except ValueError:
+                    continue
+                
+                # Get file size
+                file_size = filepath.stat().st_size
+                
+                # Read model from file (lazy loading - only if needed for filtering)
+                file_model = None
+                if model is not None:
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            file_model = data.get("model")
+                    except Exception:
+                        pass
+                
+                file_metadatas.append({
+                    "filename": filename,
+                    "timestamp": timestamp_str,
+                    "date": file_date.isoformat(),
+                    "time": f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}",
+                    "datetime": file_datetime.isoformat(),
+                    "size": file_size,
+                    "size_formatted": _format_file_size(file_size),
+                    "model": file_model,
+                    "filepath": str(filepath),
+                })
+            except Exception as e:
+                logger.warning(f"Failed to parse file {filepath.name}: {e}")
+                continue
+        
+        # Apply filters
+        filtered_files = file_metadatas
+        
+        # Search filter
+        if search:
+            search_lower = search.lower()
+            filtered_files = [
+                f for f in filtered_files
+                if search_lower in f["filename"].lower() or search_lower in f["timestamp"].lower()
+            ]
+        
+        # Date range filter
+        if date_from:
+            try:
+                from_date = datetime.strptime(date_from, "%Y%m%d").date()
+                filtered_files = [f for f in filtered_files if datetime.fromisoformat(f["date"]).date() >= from_date]
+            except ValueError:
+                pass
+        
+        if date_to:
+            try:
+                to_date = datetime.strptime(date_to, "%Y%m%d").date()
+                filtered_files = [f for f in filtered_files if datetime.fromisoformat(f["date"]).date() <= to_date]
+            except ValueError:
+                pass
+        
+        # Model filter
+        if model:
+            # Need to load model from files that weren't loaded yet
+            for f in filtered_files:
+                if f["model"] is None:
+                    try:
+                        filepath = Path(f["filepath"])
+                        with open(filepath, "r", encoding="utf-8") as file:
+                            data = json.load(file)
+                            f["model"] = data.get("model")
+                    except Exception:
+                        pass
+            filtered_files = [f for f in filtered_files if f.get("model") == model]
+        
+        # Sort
+        if sort == "newest":
+            filtered_files.sort(key=lambda x: x["datetime"], reverse=True)
+        elif sort == "oldest":
+            filtered_files.sort(key=lambda x: x["datetime"])
+        elif sort == "size":
+            filtered_files.sort(key=lambda x: x["size"], reverse=True)
+        
+        # Pagination
+        total = len(filtered_files)
+        paginated_files = filtered_files[offset:offset + limit]
+        
+        # Remove filepath from response (not needed on frontend)
+        for f in paginated_files:
+            f.pop("filepath", None)
+            # Load model if not already loaded
+            if f["model"] is None:
+                try:
+                    filepath = logs_dir / f["filename"]
+                    with open(filepath, "r", encoding="utf-8") as file:
+                        data = json.load(file)
+                        f["model"] = data.get("model")
+                except Exception:
+                    f["model"] = "unknown"
+        
+        return {
+            "files": paginated_files,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving Gemini logs: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve Gemini logs: {str(e)}"
+        )
+
+
+@app.get("/api/v1/dev/gemini-logs/{filename}")
+async def get_gemini_log_detail(filename: str):
+    """
+    Get detailed information for a specific Gemini log file
+
+    Args:
+        filename: Name of the log file (e.g., request_response_20260103_203318.json)
+
+    Returns:
+        Full log file data with metadata
+    """
+    try:
+        # Security: Validate filename to prevent directory traversal
+        if not filename.startswith("request_response_") or not filename.endswith(".json"):
+            raise HTTPException(status_code=400, detail="Invalid filename format")
+        
+        # Remove any path components
+        filename = os.path.basename(filename)
+        
+        logs_dir = Path("logs/gemini_low_level_request")
+        filepath = logs_dir / filename
+        
+        if not filepath.exists():
+            raise HTTPException(status_code=404, detail=f"Log file not found: {filename}")
+        
+        # Read file
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Extract metadata
+        timestamp_str = filename.replace("request_response_", "").replace(".json", "")
+        date_str = timestamp_str[:8]
+        time_str = timestamp_str[9:]
+        
+        try:
+            file_date = datetime.strptime(date_str, "%Y%m%d").date()
+            file_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+        except ValueError:
+            file_date = None
+            file_datetime = None
+        
+        file_size = filepath.stat().st_size
+        
+        return {
+            "filename": filename,
+            "metadata": {
+                "timestamp": timestamp_str,
+                "date": file_date.isoformat() if file_date else None,
+                "time": f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}" if len(time_str) == 6 else None,
+                "datetime": file_datetime.isoformat() if file_datetime else None,
+                "size": file_size,
+                "size_formatted": _format_file_size(file_size),
+                "model": data.get("model"),
+            },
+            "data": data,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving Gemini log detail: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve Gemini log: {str(e)}"
+        )
+
+
+@app.get("/api/v1/dev/gemini-logs/{filename}/download")
+async def download_gemini_log(filename: str):
+    """
+    Download a specific Gemini log file
+
+    Args:
+        filename: Name of the log file (e.g., request_response_20260103_203318.json)
+
+    Returns:
+        File download response
+    """
+    try:
+        # Security: Validate filename to prevent directory traversal
+        if not filename.startswith("request_response_") or not filename.endswith(".json"):
+            raise HTTPException(status_code=400, detail="Invalid filename format")
+        
+        # Remove any path components
+        filename = os.path.basename(filename)
+        
+        logs_dir = Path("logs/gemini_low_level_request")
+        filepath = logs_dir / filename
+        
+        if not filepath.exists():
+            raise HTTPException(status_code=404, detail=f"Log file not found: {filename}")
+        
+        return FileResponse(
+            path=str(filepath),
+            filename=filename,
+            media_type="application/json",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading Gemini log: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to download Gemini log: {str(e)}"
+        )
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """Format file size in human-readable format"""
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f}MB"

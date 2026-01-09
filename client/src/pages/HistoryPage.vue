@@ -134,8 +134,9 @@ async function handleReplay(sessionId: string) {
     cleanupReplay = await replaySession(
       sessionId,
       (event) => {
+        const messageType = event.type === 'review' ? 'observation' : event.type
         // subtask_result 태그를 포함한 메시지인지 확인하고 별도 처리
-        if (event.content && (event.type === 'thought' || event.type === 'observation')) {
+        if (event.content && (messageType === 'thought' || messageType === 'observation')) {
           const subtaskMatch = event.content.match(/<subtask_result>(.*?)<\/subtask_result>/s)
           if (subtaskMatch) {
             const subtaskContent = subtaskMatch[1].trim()
@@ -144,7 +145,7 @@ async function handleReplay(sessionId: string) {
             const originalContent = event.content.replace(/<subtask_result>.*?<\/subtask_result>/s, '').trim()
             if (originalContent) {
               const originalMessage: Message = {
-                type: event.type,
+                type: messageType as Message['type'],
                 content: originalContent,
                 metadata: {
                   tool: event.tool,
@@ -164,7 +165,7 @@ async function handleReplay(sessionId: string) {
               type: 'subtask_result',
               content: subtaskContent,
               metadata: {
-                source_type: event.type,
+                source_type: messageType,
                 original_content: originalContent
               },
               timestamp: new Date()
@@ -174,7 +175,7 @@ async function handleReplay(sessionId: string) {
             // 일반 메시지 처리
             let content = event.content || ''
             const message: Message = {
-              type: event.type,
+              type: messageType as Message['type'],
               content: content,
               metadata: {
                 tool: event.tool,
@@ -198,7 +199,7 @@ async function handleReplay(sessionId: string) {
           }
           
           const message: Message = {
-            type: event.type,
+            type: messageType as Message['type'],
             content: content,
             metadata: {
               tool: event.tool,
@@ -218,13 +219,12 @@ async function handleReplay(sessionId: string) {
           replayStatus.value = '🧠 사고중...'
         } else if (event.type === 'action') {
           replayStatus.value = `⚡ ${event.tool || '도구'} 실행중...`
-        } else if (event.type === 'observation') {
+        } else if (event.type === 'observation' || event.type === 'review') {
           replayStatus.value = '👁️ 결과 분석중...'
         } else if (event.type === 'end') {
           replayStatus.value = '재생 완료'
         }
       },
-1
     )
   } catch (e: any) {
     console.error('Replay error:', e)

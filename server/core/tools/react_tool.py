@@ -14,7 +14,7 @@ from langchain_perplexity import ChatPerplexity
 
 from ..utils.config import config
 from ..utils.logger import logger
-from .base import BaseTool, ToolResult
+from .base import BaseTool, ObservationData, ToolResult
 
 
 class ReActBaseTool(BaseTool, ABC):
@@ -417,5 +417,48 @@ class FileSystemTool(ReActBaseTool):
                     },
                 },
                 "required": ["operation", "path"],
+            },
+        }
+
+
+class FinalAnswerTool(ReActBaseTool):
+    """Trigger final answer generation"""
+
+    def __init__(self):
+        super().__init__(
+            name="final_answer",
+            description=(
+                "Generate the final answer. Execute when `<final_answer_ready/>` marker is present."
+            ),
+        )
+
+    async def _execute_impl(self, original_query: str, **kwargs) -> ToolResult:
+        from ..react.prompts import ReActPrompts
+
+        prompt = ReActPrompts.FINAL_ANSWER_PROMPT.format(original_query=original_query)
+        observation = ObservationData(
+            data={"prompt": prompt, "original_query": original_query},
+            observation="final_answer",
+            store_output=True,
+            store_result=False,
+            skip_llm=True,
+            log_query="final_answer",
+            log_response="",
+        )
+        return ToolResult(success=True, result=observation)
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "original_query": {
+                        "type": "string",
+                        "description": "Original query for final answer prompt context",
+                    }
+                },
+                "required": ["original_query"],
             },
         }

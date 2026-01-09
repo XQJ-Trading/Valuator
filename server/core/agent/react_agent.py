@@ -6,7 +6,12 @@ from ..models.gemini_direct import GeminiModel
 from ..react.engine import ReActEngine
 from ..tools.base import ToolRegistry
 from ..tools.context_tool import ContextTool
-from ..tools.react_tool import CodeExecutorTool, FileSystemTool, PerplexitySearchTool
+from ..tools.react_tool import (
+    CodeExecutorTool,
+    FileSystemTool,
+    FinalAnswerTool,
+    PerplexitySearchTool,
+)
 from ..tools.sec_tool import SECTool
 from ..tools.yfinance_tool import YFinanceBalanceSheetTool
 from ..utils.config import config
@@ -51,6 +56,7 @@ class AIAgent:
         self.tool_registry.register(PerplexitySearchTool())
         self.tool_registry.register(CodeExecutorTool())
         self.tool_registry.register(FileSystemTool())
+        self.tool_registry.register(FinalAnswerTool())
         self.tool_registry.register(ContextTool())
         self.tool_registry.register(YFinanceBalanceSheetTool())
         self.tool_registry.register(SECTool())

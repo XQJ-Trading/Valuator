@@ -14,7 +14,7 @@ from ..tools.base import ObservationData, ToolRegistry, ToolResult
 from ..utils.logger import logger
 from ..utils.react_logger import react_logger
 from .prompts import ReActPrompts
-from .state import ReActState, ReActStepType
+from .state import ReActState, ReActStep, ReActStepType
 
 
 @dataclass
@@ -73,6 +73,7 @@ class ReActEngine:
         self.prompts = ReActPrompts()
         self.enable_logging = enable_logging
         self.current_date = None
+        self.system_prompt = ""
         self.api_session: Optional[GeminiChatSession] = None
 
         logger.info(f"Initialized ReAct engine with {len(tool_registry.tools)} tools")
@@ -104,6 +105,7 @@ class ReActEngine:
                 self.current_date,
                 system_context=system_context,
             )
+        self.system_prompt = system_prompt
         initial_messages = self.model.format_messages(system_prompt, [], "")
         self.api_session = self.model.start_chat_session(initial_messages)
 
@@ -147,11 +149,14 @@ class ReActEngine:
                 elif next_step_type == ReActStepType.ACTION:
                     await self._action_step(state)
                     last = state.get_last_step()
+                    stream_content, stream_tool_input = self._format_action_stream(
+                        last
+                    )
                     yield {
                         "type": "action",
-                        "content": last.content,
+                        "content": stream_content,
                         "tool": last.tool_name,
-                        "tool_input": last.tool_input,
+                        "tool_input": stream_tool_input,
                     }
                 elif next_step_type == ReActStepType.OBSERVATION:
                     observation = await self._observation_step(state)
@@ -205,9 +210,11 @@ class ReActEngine:
         elif last_step.step_type == ReActStepType.ACTION:
             return ReActStepType.OBSERVATION
         elif last_step.step_type == ReActStepType.OBSERVATION:
-            if self._should_provide_final_answer(state):
-                return ReActStepType.FINAL_ANSWER
-            return ReActStepType.THOUGHT
+            return (
+                ReActStepType.FINAL_ANSWER
+                if self._should_provide_final_answer(state)
+                else ReActStepType.THOUGHT
+            )
         else:
             return ReActStepType.FINAL_ANSWER
 
@@ -224,17 +231,33 @@ class ReActEngine:
         if thought_steps < 1 or action_steps < 1 or observation_steps < 1:
             return False
 
-        if state.steps:
-            last_content = state.steps[-1].content.lower()
-            if "<next_task_required/>" in last_content:
-                return False
-            if "<final_answer_ready/>" in last_content:
-                logger.info(
-                    "Found explicit completion marker - triggering final answer"
-                )
-                return True
+        if self._last_action_is_final_answer(state):
+            logger.info("final_answer tool called - triggering final answer")
+            return True
 
         return False
+
+    def _is_final_answer_ready(self, content: str) -> bool:
+        if not content:
+            return False
+
+        if "<final_answer_ready/>" in content:
+            return True
+
+        try:
+            parsed = json.loads(content.strip("`").strip())
+            if isinstance(parsed, dict) and parsed.get("tool") == "final_answer":
+                return True
+        except Exception:
+            pass
+
+        return bool(
+            re.search(r'"tool"\s*:\s*"final_answer"', content, re.IGNORECASE)
+        )
+
+    def _last_action_is_final_answer(self, state: ReActState) -> bool:
+        actions = state.get_steps_by_type(ReActStepType.ACTION)
+        return bool(actions and actions[-1].tool_name == "final_answer")
 
     def _detect_infinite_loop(self, state: ReActState) -> bool:
         """Detect if we're in an infinite loop pattern"""
@@ -299,10 +322,13 @@ class ReActEngine:
 
         response = await self.api_session.send_message(planning_prompt)
         plan_text = self._strip_trailing_tool_call(response.content.strip())
+        plan_text = self._sanitize_plan_text(plan_text)
         try:
             if not plan_text:
+                logger.info("ReAct plan empty; skipping plan storage")
                 return None
             state.set_plan(plan_text)
+            logger.info("ReAct plan recorded:\n%s", plan_text)
             if self.enable_logging:
                 react_logger.log_step(
                     "plan",
@@ -327,6 +353,7 @@ class ReActEngine:
         thought_content = parsed.get("thought", response.content.strip())
 
         state.add_thought(thought_content)
+        logger.info("ReAct thought recorded:\n%s", thought_content)
 
         if self.enable_logging:
             react_logger.log_step(
@@ -341,11 +368,41 @@ class ReActEngine:
     async def _action_step(self, state: ReActState):
         """Execute action step"""
         logger.debug("Executing action step")
-
+        last_step = state.get_last_step()
+        if last_step and last_step.step_type == ReActStepType.THOUGHT:
+            if self._is_final_answer_ready(last_step.content):
+                tool_name = "final_answer"
+                tool_input: Dict[str, Any] = {
+                    "original_query": state.original_query
+                }
+                action_content = json.dumps(
+                    {"tool": tool_name, "parameters": tool_input}
+                )
+                state.add_action(
+                    content=action_content,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                )
+                if self.enable_logging:
+                    react_logger.log_step(
+                        "action",
+                        action_content,
+                        tool_name,
+                        tool_input,
+                        api_query="forced_final_answer",
+                        api_response="",
+                    )
+                logger.debug("Action: forced final_answer tool call")
+                return
+        thoughts = state.get_steps_by_type(ReActStepType.THOUGHT)
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         action_prompt = self.prompts.format_action_prompt(
-            state, current_datetime=current_time
+            current_datetime=current_time,
         )
+        if not self.api_session:
+            self.api_session = self.model.start_chat_session(
+                self.model.format_messages(self.system_prompt, [], "")
+            )
         response = await self.api_session.send_message(action_prompt)
         parsed = self.prompts.parse_response(response.content)
         action_content = parsed.get("action", response.content.strip())
@@ -382,6 +439,32 @@ class ReActEngine:
         last_step = state.get_last_step()
         if not last_step or last_step.step_type != ReActStepType.ACTION:
             raise RuntimeError("Observation step requires a preceding action")
+
+        thoughts = state.get_steps_by_type(ReActStepType.THOUGHT)
+        if not thoughts:
+            raise RuntimeError("Observation step requires a prior thought")
+
+        if last_step.tool_name == "final_answer":
+            if "original_query" not in (last_step.tool_input or {}):
+                last_step.tool_input = {
+                    "original_query": state.original_query
+                }
+            
+            tool_result = ToolResult(
+                success=True,
+                result="Final answer phase initiated", 
+                metadata={"final_answer": True}
+            )
+            payload = ObservationPayload(
+                content="Ready to provide final answer.",
+                tool_output="Final answer phase initiated",
+                error=None,
+                tool_result=tool_result,
+                store_output=True,
+                store_result=True
+            )
+            self._record_observation(state, payload)
+            return payload
 
         if not last_step.tool_name:
             if "tool" in last_step.content.lower() and "{" in last_step.content:
@@ -514,15 +597,50 @@ class ReActEngine:
         stripped = text.strip()
         if not stripped:
             return stripped
-        fenced_match = re.search(
-            r"```(?:json)?\s*([\s\S]*?)\s*```\s*$", stripped
-        )
+        fenced_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```\s*$", stripped)
         if fenced_match and '"tool"' in fenced_match.group(1):
-            return stripped[:fenced_match.start()].rstrip()
-        last_brace = stripped.rfind("{")
-        if last_brace != -1 and '"tool"' in stripped[last_brace:]:
-            return stripped[:last_brace].rstrip()
+            return stripped[: fenced_match.start()].rstrip()
+        tool_pos = stripped.rfind('"tool"')
+        if tool_pos != -1:
+            brace_pos = stripped.rfind("{", 0, tool_pos)
+            if brace_pos != -1 and "}" in stripped[brace_pos:]:
+                return stripped[:brace_pos].rstrip()
         return stripped
+
+    def _sanitize_plan_text(self, text: str) -> str:
+        if not text:
+            return text
+
+        marker_re = re.compile(
+            r"^\s*(?:[-*>]\s*)?(?:\*{1,2}|__)?\s*"
+            r"(Thought|Action|Observation|Final\s+Answer)\s*:?",
+            re.IGNORECASE,
+        )
+
+        cleaned_lines: List[str] = []
+        for line in text.splitlines():
+            if marker_re.match(line):
+                break
+            cleaned_lines.append(line)
+
+        return "\n".join(cleaned_lines).strip()
+
+    def _format_action_stream(
+        self, step: Optional[ReActStep]
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        if not step:
+            return "", None
+        if step.tool_name != "final_answer":
+            return step.content, step.tool_input
+
+        content = json.dumps({"tool": "final_answer"})
+        tool_input = None
+        if step.tool_input:
+            tool_input = dict(step.tool_input)
+            if "original_query" in tool_input:
+                tool_input["original_query"] = "<omitted>"
+
+        return content, tool_input
 
     def _prune_planning_history(self) -> None:
         if not self.api_session:

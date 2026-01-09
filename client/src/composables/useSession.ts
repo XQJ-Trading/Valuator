@@ -254,8 +254,9 @@ export function useSession() {
       addMessage('final_answer', data.content || '', {
         metadata: data.metadata
       })
-    } else if (['thought', 'action', 'observation'].includes(data.type)) {
-      addMessage(data.type as any, data.content || '', {
+    } else if (['thought', 'action', 'observation', 'review'].includes(data.type)) {
+      const mappedType = data.type === 'review' ? 'observation' : data.type
+      addMessage(mappedType as Message['type'], data.content || '', {
         tool: data.tool,
         tool_input: data.tool_input,
         tool_result: data.tool_result,
@@ -268,7 +269,7 @@ export function useSession() {
         status.value = '🧠 사고중...'
       } else if (data.type === 'action') {
         status.value = `⚡ ${data.tool || '도구'} 실행중...`
-      } else if (data.type === 'observation') {
+      } else if (data.type === 'observation' || data.type === 'review') {
         status.value = '👁️ 결과 분석중...'
       }
     }

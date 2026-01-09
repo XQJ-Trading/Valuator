@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -724,20 +725,53 @@ class GeminiChatSession:
         self.model = model
         self.history: List[BaseMessage] = initial_messages
 
+    def _is_retryable_error(self, error: Exception) -> bool:
+        status = None
+        for attr in ("code", "status_code", "status", "http_status", "statusCode"):
+            status = getattr(error, attr, None)
+            if status is not None:
+                break
+        if isinstance(status, int) and status in (429, 500, 503):
+            return True
+        message = str(error)
+        return bool(re.search(r"\b(429|500|503)\b", message))
+
     async def send_message(
         self, message: str, callbacks: Optional[List] = None
     ) -> GeminiResponse:
         """Send a message in the session and get a response"""
         self.history.append(HumanMessage(content=message))
 
-        # Rate limiting - 70% 임계값 체크 및 대기
         rate_limiter = get_rate_limiter()
         model_name = getattr(self.model, "model_name", None) or "unknown"
-        await rate_limiter.wait_if_needed(model_name)
+        max_retries = max(0, config.react_max_retries)
+        response = None
+        last_error: Optional[Exception] = None
 
-        response = await self.model.agenerate(
-            messages=[self.history], callbacks=callbacks
-        )
+        for attempt in range(max_retries + 1):
+            await rate_limiter.wait_if_needed(model_name)
+            try:
+                response = await self.model.agenerate(
+                    messages=[self.history], callbacks=callbacks
+                )
+                last_error = None
+                break
+            except Exception as e:
+                last_error = e
+                if not self._is_retryable_error(e) or attempt >= max_retries:
+                    raise
+                backoff = min(8.0, 0.5 * (2**attempt))
+                logger.warning(
+                    "Gemini API error (%s). Retrying in %.2fs (attempt %s/%s)",
+                    e,
+                    backoff,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                await asyncio.sleep(backoff)
+
+        if response is None and last_error is not None:
+            raise last_error
 
         # Extract content from response
         generation = response.generations[0][0]

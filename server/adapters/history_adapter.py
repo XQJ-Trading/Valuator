@@ -99,6 +99,9 @@ class HistoryAdapter:
 
             return event
 
+        elif step_type == "review":
+            return {"type": "review", "content": step.get("content", "")}
+
         elif step_type == "final_answer":
             return {"type": "final_answer", "content": step.get("content", "")}
 

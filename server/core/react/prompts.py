@@ -14,7 +14,7 @@ class ReActPrompts:
 You will proceed in a loop of Thought -> Action -> Observation.
 1.  **Thought**: Analyze the problem, history, and previous observation to form a plan for the next action.
 2.  **Action**: Execute a single, specific action. This MUST be a tool call in the specified JSON format.
-3.  **Observation**: I will provide the result of your action. You will then start the next cycle with a new Thought.
+3.  **Observation**: I will provide the result of your action.
 
 **CRITICAL Response Format:**
 You MUST follow these rules for every response.
@@ -35,30 +35,34 @@ You MUST follow these rules for every response.
 RUNTIME DATA (apply after the rules above):
 -   Available Tools:\n{available_tools}
 -   Today's Date: {current_date}
-{system_context_section}
+{system_context}
 """
 
     PLANNING_PROMPT = """Create a concise, context-grounded execution plan before the ReAct cycle begins.{system_context_block}
--   Use the query and the runtime/system context already provided in the system message; reference relevant items by name instead of pasting them.
--   Make Step 1 a `context_tool` call to load valuation instructions. Describe the call in words only (do NOT output JSON or a tool call). State what you'll do with that context and the immediate next action after loading it.
--   List 3-6 numbered steps with the goal, needed info, and intended tool or reasoning for each.
--   Flag assumptions or missing data to validate early.
--   Keep it executable and brief (<=160 words); no code or JSON.
+-  Use the query and the runtime/system context already provided in the system message; reference relevant items by name instead of pasting them.
+-  Make Step 1 a `context_tool` call to load valuation instructions. Describe the call in words only (do NOT output JSON or a tool call). State what you'll do with that context and the immediate next action after loading it.
+-  Flag assumptions or missing data to validate early.
+-  Keep it executable and brief; no code or JSON.
 
 Today's Date: {current_date}
 
-**Query:** {query}
 **Available Tools:**
 {tools_section}
 
-Return the plan followed by a short "Risks/Assumptions:" list."""
+Return the plan followed by a short "Risks/Assumptions:" list.
+**Query:** {query}
+"""
 
-    THOUGHT_PROMPT = """Follow the rules, then plan the next move only.{plan_block}
-        -   Provide ONLY your thought process. Do not include the action itself.
-        -   Do NOT output JSON or tool calls; describe intended tools in words only.
-        -   For each planned step, verify which context item (or system context) justifies it; if missing, quickly scan context to add the needed evidence or flag the gap.
-        -   If context_tool was used, reference only the relevant parts from previous observations' tool_output rather than repeating the full context.
-        -   Draft a short checklist: Step → evidence source (context/system) → status (found/missing). Keep it tight.
+    THOUGHT_PROMPT = """Follow the rules, then review the latest observation and plan the next move.{plan_block}
+-  Provide ONLY your thought process. Do not include the action itself.
+-  Describe intended tools in words only.
+-  If ready to answer, output `<final_answer_ready/>` only.
+-  Review the observation and include a **Review Point** section:
+   - Alignment: {{full | partial | none}} relative to expected outcomes.
+   - Gaps: Enumerate all missing, incorrect, or incomplete expected items.
+-  For each planned step, verify which context item (or system context) justifies it; if missing, quickly scan context to add the needed evidence or flag the gap.
+-  If context_tool was used, reference only the relevant parts from previous observations' tool_output rather than repeating the full context.
+-  Draft checklist: Step → evidence source (context/system) → status (found/missing). Keep it tight.
 
 **Original Query:** {original_query}
 
@@ -70,27 +74,34 @@ Progress: {thought_steps}/{max_thought_cycles} thought cycles used.
 
 **Response Requirements:**
 -   **For code_executor**: You MUST respond with ```python\nyour_code_here\n``` format ONLY
--   **For all other tools**: You MUST respond with a single, complete, and valid JSON object
-        -   Refer to the system prompt for the exact format and rules
-        -   Do NOT add any extra text or explanations
+-   **For all other tools**: You MUST respond with a single, complete, and **valid JSON object**
+-   **If you are ready to provide the final answer**: Respond with `{{"tool": "final_answer", "parameters": {{}}}}`
+-   Refer to the system prompt for the exact format and rules
 
 Current Time: {current_datetime}
 
 **Action:**"""
 
-    OBSERVATION_PROMPT = """Review the tool result, decide next steps, and include the completion marker.
--   `<next_task_required/>` if more steps are needed.
--   `<final_answer_ready/>` when the solution is done and verified.
--   Run a quick consistency check against prior assumptions (margins, demand, risks) and update the checklist if anything changes.
+    OBSERVATION_PROMPT = """Summarize the tool result only.
 
-**Tool Execution Result:**
--   Success: {success}
--   Output: {output}
--   Error: {error}
+**Tool Execution Result**
+- Success: {success}
+- Output: {output}
+- Error: {error}
 
 **Observation:**"""
 
-    FINAL_ANSWER_PROMPT = """Provide the final, comprehensive answer. When any part of the result is JSON or structured data, convert it into Markdown table(s) with keys as column headers and each object as a row. Keep every field/value intact without dropping or summarizing entries. Avoid null placeholders and keep any surrounding text concise.
+    FINAL_ANSWER_PROMPT = """Write only the final answer.
+
+Follow all instructions and constraints specified in the prompt/context exactly.
+- Ensure hierarchical representation: sections → structures → entity-level elements.
+
+Preserve all fields, values, and entity units exactly as produced.
+Do not summarize, infer missing values, aggregate, correct, or omit any items.
+Ensure units are consistent across the entire output.
+
+Represent top-level objects or arrays as Markdown tables.
+- Use keys as columns and one object per row.
 
 **Original Query:** {original_query}
 
@@ -118,11 +129,15 @@ Current Time: {current_datetime}
         return cls.SYSTEM_PROMPT.format(
             available_tools=tools_desc,
             current_date=current_date,
-            system_context_section=context_section,
+            system_context=context_section,
         )
 
     @classmethod
-    def format_thought_prompt(cls, state: ReActState, max_thought_cycles: int) -> str:
+    def format_thought_prompt(
+        cls,
+        state: ReActState,
+        max_thought_cycles: int,
+    ) -> str:
         """Format prompt for thought step"""
         thought_steps = len(state.get_steps_by_type(ReActStepType.THOUGHT))
         plan_block = ""
@@ -141,7 +156,6 @@ Current Time: {current_datetime}
     @classmethod
     def format_action_prompt(
         cls,
-        state: ReActState,
         current_datetime: str = None,
     ) -> str:
         """Format prompt for action step"""
@@ -174,14 +188,18 @@ Current Time: {current_datetime}
             else:
                 error = "None"
             return cls.OBSERVATION_PROMPT.format(
-                success=success, output=output, error=error
+                success=success,
+                output=output,
+                error=error,
             )
 
         output = "No tool executed"
         error = "None"
 
         return cls.OBSERVATION_PROMPT.format(
-            success=success, output=output, error=error
+            success=success,
+            output=output,
+            error=error,
         )
 
     @classmethod
@@ -265,7 +283,7 @@ Current Time: {current_datetime}
         if step_type == ReActStepType.THOUGHT:
             return cls.format_thought_prompt(state, max_thought_cycles)
         elif step_type == ReActStepType.ACTION:
-            return cls.format_action_prompt(state)
+            return cls.format_action_prompt()
         elif step_type == ReActStepType.OBSERVATION:
             return cls.format_observation_prompt(tool_result)
         elif step_type == ReActStepType.FINAL_ANSWER:
@@ -273,13 +291,28 @@ Current Time: {current_datetime}
         else:
             raise ValueError(f"Unknown step type: {step_type}")
 
+    @staticmethod
+    def _strip_leading_role_label(content: str) -> str:
+        import re
+
+        pattern = re.compile(
+            r"^\s*(?:[-*>]\s*)?(?:\*{1,2}|__)?\s*"
+            r"(Thought|Action|Observation|Final\s+Answer)"
+            r"\s*:?\s*(?:\*{1,2}|__)?\s*",
+            re.IGNORECASE,
+        )
+        match = pattern.match(content)
+        if match:
+            return content[match.end() :].lstrip()
+        return content
+
     @classmethod
     def parse_response(cls, response: str) -> Dict[str, str]:
         """Parse ReAct response - handles both JSON and text responses"""
         import json
 
         # Clean up the response
-        content = response.strip()
+        content = cls._strip_leading_role_label(response.strip())
 
         # Try to parse as JSON first (for action steps)
         if content.startswith("{") and content.endswith("}"):

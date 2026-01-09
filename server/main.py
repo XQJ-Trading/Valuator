@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -796,59 +797,53 @@ async def get_gemini_logs(
                 "offset": offset,
             }
 
-        # Get all JSON files
-        all_files = list(logs_dir.glob("request_response_*.json"))
-        
-        # Parse file metadata
         file_metadatas = []
-        for filepath in all_files:
-            try:
-                # Extract timestamp from filename: request_response_YYYYMMDD_HHMMSS.json
-                filename = filepath.name
-                if not filename.startswith("request_response_") or not filename.endswith(".json"):
-                    continue
-                
-                timestamp_str = filename.replace("request_response_", "").replace(".json", "")
-                if len(timestamp_str) != 15:  # YYYYMMDD_HHMMSS
-                    continue
-                
-                date_str = timestamp_str[:8]  # YYYYMMDD
-                time_str = timestamp_str[9:]  # HHMMSS
-                
-                # Parse date
+
+        def add_metadata(filepath: Path, display_name: str, timestamp_str: str) -> None:
+            file_datetime = _parse_gemini_timestamp(timestamp_str)
+            file_date = file_datetime.date() if file_datetime else None
+            time_str = file_datetime.strftime("%H:%M:%S") if file_datetime else None
+            file_size = filepath.stat().st_size
+            file_model = None
+            if model is not None:
                 try:
-                    file_date = datetime.strptime(date_str, "%Y%m%d").date()
-                    file_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-                except ValueError:
-                    continue
-                
-                # Get file size
-                file_size = filepath.stat().st_size
-                
-                # Read model from file (lazy loading - only if needed for filtering)
-                file_model = None
-                if model is not None:
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            file_model = data.get("model")
-                    except Exception:
-                        pass
-                
-                file_metadatas.append({
-                    "filename": filename,
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        file_model = data.get("model")
+                except Exception:
+                    pass
+
+            file_metadatas.append(
+                {
+                    "filename": display_name,
                     "timestamp": timestamp_str,
-                    "date": file_date.isoformat(),
-                    "time": f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}",
-                    "datetime": file_datetime.isoformat(),
+                    "date": file_date.isoformat() if file_date else None,
+                    "time": time_str,
+                    "datetime": file_datetime.isoformat() if file_datetime else None,
                     "size": file_size,
                     "size_formatted": _format_file_size(file_size),
                     "model": file_model,
                     "filepath": str(filepath),
-                })
-            except Exception as e:
-                logger.warning(f"Failed to parse file {filepath.name}: {e}")
+                }
+            )
+
+        # Session/step logs (new structure)
+        for session_dir in logs_dir.glob("session_*"):
+            if not session_dir.is_dir():
                 continue
+            for step_file in session_dir.glob("step_*.json"):
+                timestamp_str = _extract_step_timestamp(step_file.name)
+                if not timestamp_str:
+                    continue
+                display_name = _encode_session_log_filename(session_dir.name, step_file.name)
+                add_metadata(step_file, display_name, timestamp_str)
+
+        # Legacy flat logs (backward compatibility)
+        for filepath in logs_dir.glob("request_response_*.json"):
+            timestamp_str = _extract_request_response_timestamp(filepath.name)
+            if not timestamp_str:
+                continue
+            add_metadata(filepath, filepath.name, timestamp_str)
         
         # Apply filters
         filtered_files = file_metadatas
@@ -865,14 +860,22 @@ async def get_gemini_logs(
         if date_from:
             try:
                 from_date = datetime.strptime(date_from, "%Y%m%d").date()
-                filtered_files = [f for f in filtered_files if datetime.fromisoformat(f["date"]).date() >= from_date]
+                filtered_files = [
+                    f
+                    for f in filtered_files
+                    if f["date"] and datetime.fromisoformat(f["date"]).date() >= from_date
+                ]
             except ValueError:
                 pass
         
         if date_to:
             try:
                 to_date = datetime.strptime(date_to, "%Y%m%d").date()
-                filtered_files = [f for f in filtered_files if datetime.fromisoformat(f["date"]).date() <= to_date]
+                filtered_files = [
+                    f
+                    for f in filtered_files
+                    if f["date"] and datetime.fromisoformat(f["date"]).date() <= to_date
+                ]
             except ValueError:
                 pass
         
@@ -892,9 +895,9 @@ async def get_gemini_logs(
         
         # Sort
         if sort == "newest":
-            filtered_files.sort(key=lambda x: x["datetime"], reverse=True)
+            filtered_files.sort(key=lambda x: x["datetime"] or "", reverse=True)
         elif sort == "oldest":
-            filtered_files.sort(key=lambda x: x["datetime"])
+            filtered_files.sort(key=lambda x: x["datetime"] or "")
         elif sort == "size":
             filtered_files.sort(key=lambda x: x["size"], reverse=True)
         
@@ -934,21 +937,15 @@ async def get_gemini_log_detail(filename: str):
     Get detailed information for a specific Gemini log file
 
     Args:
-        filename: Name of the log file (e.g., request_response_20260103_203318.json)
+        filename: Log identifier (e.g., request_response_20260103_203318_123456.json
+            or session_20260103_203318_123456__step_0001_20260103_203318_123456.json)
 
     Returns:
         Full log file data with metadata
     """
     try:
-        # Security: Validate filename to prevent directory traversal
-        if not filename.startswith("request_response_") or not filename.endswith(".json"):
-            raise HTTPException(status_code=400, detail="Invalid filename format")
-        
-        # Remove any path components
-        filename = os.path.basename(filename)
-        
         logs_dir = Path("logs/gemini_low_level_request")
-        filepath = logs_dir / filename
+        filepath = _resolve_gemini_log_path(filename, logs_dir)
         
         if not filepath.exists():
             raise HTTPException(status_code=404, detail=f"Log file not found: {filename}")
@@ -958,16 +955,13 @@ async def get_gemini_log_detail(filename: str):
             data = json.load(f)
         
         # Extract metadata
-        timestamp_str = filename.replace("request_response_", "").replace(".json", "")
-        date_str = timestamp_str[:8]
-        time_str = timestamp_str[9:]
-        
-        try:
-            file_date = datetime.strptime(date_str, "%Y%m%d").date()
-            file_datetime = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-        except ValueError:
-            file_date = None
-            file_datetime = None
+        timestamp_str = data.get("timestamp")
+        if not isinstance(timestamp_str, str):
+            timestamp_str = _extract_request_response_timestamp(filepath.name)
+        if not timestamp_str:
+            timestamp_str = _extract_step_timestamp(filepath.name)
+        file_datetime = _parse_gemini_timestamp(timestamp_str) if timestamp_str else None
+        file_date = file_datetime.date() if file_datetime else None
         
         file_size = filepath.stat().st_size
         
@@ -976,7 +970,7 @@ async def get_gemini_log_detail(filename: str):
             "metadata": {
                 "timestamp": timestamp_str,
                 "date": file_date.isoformat() if file_date else None,
-                "time": f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}" if len(time_str) == 6 else None,
+                "time": file_datetime.strftime("%H:%M:%S") if file_datetime else None,
                 "datetime": file_datetime.isoformat() if file_datetime else None,
                 "size": file_size,
                 "size_formatted": _format_file_size(file_size),
@@ -999,21 +993,15 @@ async def download_gemini_log(filename: str):
     Download a specific Gemini log file
 
     Args:
-        filename: Name of the log file (e.g., request_response_20260103_203318.json)
+        filename: Log identifier (e.g., request_response_20260103_203318_123456.json
+            or session_20260103_203318_123456__step_0001_20260103_203318_123456.json)
 
     Returns:
         File download response
     """
     try:
-        # Security: Validate filename to prevent directory traversal
-        if not filename.startswith("request_response_") or not filename.endswith(".json"):
-            raise HTTPException(status_code=400, detail="Invalid filename format")
-        
-        # Remove any path components
-        filename = os.path.basename(filename)
-        
         logs_dir = Path("logs/gemini_low_level_request")
-        filepath = logs_dir / filename
+        filepath = _resolve_gemini_log_path(filename, logs_dir)
         
         if not filepath.exists():
             raise HTTPException(status_code=404, detail=f"Log file not found: {filename}")
@@ -1040,3 +1028,67 @@ def _format_file_size(size_bytes: int) -> str:
         return f"{size_bytes / 1024:.1f}KB"
     else:
         return f"{size_bytes / (1024 * 1024):.1f}MB"
+
+
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _encode_session_log_filename(session_dir: str, step_file: str) -> str:
+    return f"{session_dir}__{step_file}"
+
+
+def _decode_session_log_filename(filename: str) -> Optional[tuple[str, str]]:
+    if "__" not in filename:
+        return None
+    session_part, step_part = filename.split("__", 1)
+    if not session_part or not step_part:
+        return None
+    if not session_part.startswith("session_"):
+        return None
+    if not step_part.startswith("step_") or not step_part.endswith(".json"):
+        return None
+    if not _SAFE_NAME_RE.match(session_part):
+        return None
+    if not _SAFE_NAME_RE.match(step_part):
+        return None
+    return session_part, step_part
+
+
+def _resolve_gemini_log_path(filename: str, logs_dir: Path) -> Path:
+    if filename.startswith("request_response_") and filename.endswith(".json"):
+        safe_name = os.path.basename(filename)
+        return logs_dir / safe_name
+
+    decoded = _decode_session_log_filename(filename)
+    if decoded is None:
+        raise HTTPException(status_code=400, detail="Invalid filename format")
+
+    session_part, step_part = decoded
+    return logs_dir / session_part / step_part
+
+
+def _extract_request_response_timestamp(filename: str) -> Optional[str]:
+    match = re.match(
+        r"^request_response_(\d{8}_\d{6}(?:_\d{6})?)\.json$", filename
+    )
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_step_timestamp(filename: str) -> Optional[str]:
+    match = re.match(r"^step_\d+_(\d{8}_\d{6}(?:_\d{6})?)\.json$", filename)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _parse_gemini_timestamp(timestamp_str: Optional[str]) -> Optional[datetime]:
+    if not timestamp_str:
+        return None
+    for fmt in ("%Y%m%d_%H%M%S_%f", "%Y%m%d_%H%M%S"):
+        try:
+            return datetime.strptime(timestamp_str, fmt)
+        except ValueError:
+            continue
+    return None

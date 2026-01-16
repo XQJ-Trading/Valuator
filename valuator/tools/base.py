@@ -1,5 +1,6 @@
 """Base tool implementation for AI Agent"""
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -89,6 +90,47 @@ class BaseTool(ABC):
             "description": self.description,
             "schema": self.get_schema(),
         }
+
+
+class ReActBaseTool(BaseTool, ABC):
+    def __init__(self, name: str, description: str):
+        super().__init__(name, description)
+        self.execution_count = 0
+        self.success_count = 0
+        self.last_execution = None
+
+    async def execute(self, **kwargs) -> ToolResult:
+        self.execution_count += 1
+        loop = asyncio.get_event_loop()
+        start_time = loop.time()
+
+        try:
+            result = await self._execute_impl(**kwargs)
+            if result.success:
+                self.success_count += 1
+            result.metadata.update(
+                {
+                    "execution_time": loop.time() - start_time,
+                    "execution_count": self.execution_count,
+                    "success_rate": self.success_count / self.execution_count,
+                }
+            )
+            self.last_execution = result
+            return result
+        except Exception as e:
+            self.logger.error(f"Error in {self.name}: {e}")
+            return ToolResult(
+                success=False,
+                result=None,
+                error=str(e),
+                metadata={
+                    "execution_time": loop.time() - start_time,
+                    "execution_count": self.execution_count,
+                },
+            )
+
+    async def _execute_impl(self, **kwargs) -> ToolResult:
+        raise NotImplementedError
 
 
 class ToolRegistry:

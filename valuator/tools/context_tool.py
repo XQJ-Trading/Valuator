@@ -3,8 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .base import ObservationData, ToolResult
-from .react_tool import ReActBaseTool
+from .base import ObservationData, ReActBaseTool, ToolResult
 
 FILE_PATH = Path(__file__).resolve()
 WORKSPACE_ROOT = FILE_PATH.parents[3]

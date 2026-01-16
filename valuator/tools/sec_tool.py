@@ -1,6 +1,6 @@
 import asyncio
-import os
 import re
+from pathlib import Path
 
 import requests
 import pandas as pd
@@ -10,9 +10,9 @@ from ..models.gemini_direct import GeminiModel
 from ..utils.config import config
 from ..utils.logger import logger
 
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-TICKER_PATH = f"{DATA_DIR}/sec_company_tickers.json"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+TICKER_PATH = DATA_DIR / "sec_company_tickers.json"
 
 SEC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; MyResearchBot/1.0; contact: myemail@example.com)",
@@ -21,32 +21,25 @@ SEC_HEADERS = {
 CHUNK_SIZE = 2000
 CHUNK_SYSTEM_PROMPT = (
     "You extract only SEC 10-K details that answer the inquiry. "
-    "Stay within the provided chunk and keep outputs terse."
+    "Stay within the provided chunk, avoid inference, and keep outputs terse. "
+    "If nothing is relevant, reply 'no relevant'."
 )
 CHUNK_PROMPT = (
     "10-K slice:\n"
     "{chunk}\n\n"
     "Retrieve the information from the above 10-K chunk that is needed to answer the query: {query}."
 )
-FINAL_SYSTEM_PROMPT = (
-    "You combine extracted SEC findings into a direct answer. "
-    "Use only the supplied notes and keep the response concise."
-)
-FINAL_PROMPT = (
-    'Based on the extracted notes: {notes}, analyze and answer the query "{query}" from multiple perspectives. '
-    "Use only the provided information, and keep your response clear and concise."
-)
 
 
 def load_ticker_table() -> pd.DataFrame:
-    if os.path.exists(TICKER_PATH):
+    if TICKER_PATH.exists():
         return pd.read_json(TICKER_PATH)
     res = requests.get(
         "https://www.sec.gov/files/company_tickers.json", headers=SEC_HEADERS
     )
     res.raise_for_status()
     df = pd.DataFrame(res.json()).T
-    df.to_json(TICKER_PATH, orient="records", force_ascii=False)
+    df.to_json(str(TICKER_PATH), orient="records", force_ascii=False)
     return df
 
 
@@ -105,6 +98,14 @@ def get_10k_html_link(ticker: str, year: int = 2024) -> str:
 
 
 def fetch_using_readerLLM(ticker: str, url: str) -> list[str]:
+    safe = re.sub(r"[^a-zA-Z0-9]", "", ticker).lower()
+    cache_path = DATA_DIR / f"{safe}-10-k.html"
+    if cache_path.exists():
+        cached = [
+            line for line in cache_path.read_text(encoding="utf-8").splitlines() if line
+        ]
+        if cached:
+            return cached
     res = requests.get(
         f"https://r.jina.ai/{url}",
         params={"X-Engine": "browser", "X-Retain-Images": "none"},
@@ -115,8 +116,7 @@ def fetch_using_readerLLM(ticker: str, url: str) -> list[str]:
         for line in res.text.split("\n")
         if (t := parse_and_clean_markdown_table(line))
     ]
-    with open(f"{DATA_DIR}/{ticker}-10-k.html", "w", encoding="utf-8") as f:
-        f.write("\n".join(text))
+    cache_path.write_text("\n".join(text), encoding="utf-8")
     return text
 
 
@@ -138,7 +138,7 @@ class SECTool(BaseTool):
         self.model = GeminiModel(config.agent_model)
 
     async def _ask_model(self, system_prompt: str, prompt: str) -> str:
-        messages = self.model.format_messages(system_prompt, [], "")
+        messages = self.model.format_messages(system_prompt)
         session = self.model.start_chat_session(messages)
         response = await session.send_message(prompt)
         content = response.content.strip() if response and response.content else ""
@@ -165,14 +165,6 @@ class SECTool(BaseTool):
             and not cleaned.lower().startswith("no relevant")
         ]
 
-    async def _synthesize_findings(self, query: str, findings: list[str]) -> str:
-        if not findings:
-            return "No relevant SEC data found for this inquiry."
-        notes = "\n\n".join(findings)
-        prompt = FINAL_PROMPT.format(query=query, notes=notes)
-        final = await self._ask_model(FINAL_SYSTEM_PROMPT, prompt)
-        return final.strip()
-
     async def execute(self, **kwargs) -> ToolResult:
         ticker = kwargs.get("ticker") or kwargs.get("corp")
         year = kwargs.get("year", 2024)
@@ -184,7 +176,7 @@ class SECTool(BaseTool):
         try:
             lines = fetch_company_data(ticker, year)
             findings = await self._extract_chunks(query, lines)
-            summary = await self._synthesize_findings(query, findings)
+            summary = "\n\n".join(findings)
             return ToolResult(
                 success=True,
                 result={
@@ -218,7 +210,7 @@ class SECTool(BaseTool):
                         "year": {
                             "type": "integer",
                             "description": "10-K filing year (YYYY)",
-                            "default": 2024,
+                            "default": 2025,
                         },
                     },
                     "required": ["ticker", "query"],

@@ -117,7 +117,9 @@ class PerplexitySearchTool(ReActBaseTool):
             return ToolResult(
                 success=False, result=None, error="queries must be a non-empty list"
             )
-        results = await asyncio.gather(*(self._execute_single_search(q) for q in queries))
+        results = await asyncio.gather(
+            *(self._execute_single_search(q) for q in queries)
+        )
         if any(not r.success for r in results):
             return ToolResult(
                 success=False,

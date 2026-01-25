@@ -151,10 +151,17 @@ class HDPS:
             )
             created.append("plan/change_log.md")
         if not self.p("critique/review_rules.md").exists():
-            self.write_atomic(
-                self.p("critique/review_rules.md"),
-                "# Review Rules\n\n- Enforce HDPS laws and role isolation.\n",
-            )
+            src_rules = ROOT / "critique/review_rules.md"
+            if src_rules.exists():
+                self.write_atomic(
+                    self.p("critique/review_rules.md"),
+                    src_rules.read_text(encoding="utf-8"),
+                )
+            else:
+                self.write_atomic(
+                    self.p("critique/review_rules.md"),
+                    "# Review Rules\n\n- Enforce HDPS laws and role isolation.\n",
+                )
             created.append("critique/review_rules.md")
         if not self.p("context/index.json").exists():
             self.write_json("context/index.json", {"knowledge": []})

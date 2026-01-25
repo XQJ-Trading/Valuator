@@ -1,30 +1,34 @@
 import argparse
 import asyncio
 import json
+from .critic import Critic
 from .executor import Executor
 from .gemini3 import Gemini3Client
 from .hdps import HDPS
 from .planner import Planner
 from .sessions import SessionWriter
+from .wiki_builder import WikiBuilder
 
 
 REPORT_SYSTEM_PROMPT = (
-    "You are a quant research analyst. Write a concise, data-backed Markdown report using only the provided artifacts. "
-    "Bottom-up structure: (1) facts per task ID, (2) findings, (3) section conclusions. "
+    "You are a quant research analyst. Use the provided artifacts only. "
+    "Write a data-driven Markdown report in Korean."
 )
 
 REPORT_PROMPT = (
     "User query:\n{query}\n\n"
     "Artifacts:\n{artifacts}\n\n"
-    "Write a concise, data-backed Markdown report.\n"
-    "Rules:\n"
-    "- Keep it concise and information-dense; build from facts to conclusions.\n"
-    "- Cite artifact filenames when referencing facts.\n"
-    "- In Framing, list assumptions/biases, an alternative framing.\n"
-    "- Include counter-scenarios or multiple perspectives where relevant.\n"
-    "- Cover every task ID using only supported facts"
-    "- Write in Korean.\n"
+    "Guidance:\n"
+    "- Reflect the user query; structure sections to match it.\n"
+    "- Use [task/outline] to cover acceptance items as subheadings.\n"
+    "- Blend wiki pages and execution outputs into the main narrative; avoid appendices.\n"
+    "- When using quantitative metrics, cite the source filename inline.\n"
+    "- Keep sections evidence-led with more than one numeric fact and citations.\n"
+    "- If any part of the result is JSON or structured data, render it as Markdown table(s) "
+    "with keys as column headers and each object as a row. Keep every field/value intact "
+    "and keep surrounding text concise.\n"
 )
+INACTIVE = {"REJECT", "BLOCKING"}
 
 
 async def _execute_tasks(
@@ -46,16 +50,74 @@ async def _execute_tasks(
     return [task["id"] for task in tasks]
 
 
-def _load_artifacts(hdps: HDPS, task_ids: list[str]) -> str:
+def _load_wiki_artifacts(hdps: HDPS) -> str:
+    root = hdps.p("output/wiki")
+    index_path = root / "index.json"
+    if not index_path.exists():
+        raise FileNotFoundError("missing wiki index")
+    pages = root / "pages"
+    if not pages.exists():
+        raise FileNotFoundError("missing wiki pages")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    page_meta = index.get("pages", {})
+    root_ids = [pid for pid, meta in page_meta.items() if meta.get("role") == "root"]
+    if not root_ids:
+        raise FileNotFoundError("missing root wiki pages")
     blocks = []
-    for task_id in task_ids:
-        out_dir = hdps.p(f"execution/outputs/{task_id}")
-        for path in sorted(out_dir.glob("*")):
-            if path.name == "artifact_manifest.json" or path.is_dir():
-                continue
+    outline = _load_task_outline(hdps)
+    if outline:
+        blocks.append(f"[task/outline]\n{outline[:4000]}")
+    index = root / "index.md"
+    if index.exists():
+        blocks.append(f"[wiki/index.md]\n{index.read_text(encoding='utf-8')[:4000]}")
+    for page_id in sorted(root_ids):
+        path = pages / f"{page_id}.md"
+        if not path.exists():
+            raise FileNotFoundError(f"missing wiki page: {page_id}")
+        content = path.read_text(encoding="utf-8")
+        blocks.append(f"[wiki/pages/{path.name}]\n{content[:4000]}")
+    tables = root / "tables"
+    if tables.exists():
+        for path in sorted(tables.glob("*.md")):
             content = path.read_text(encoding="utf-8")
-            blocks.append(f"[{task_id}/{path.name}]\n{content[:4000]}")
+            blocks.append(f"[wiki/tables/{path.name}]\n{content[:4000]}")
+    outputs = hdps.p("execution/outputs")
+    if outputs.exists():
+        for task_dir in sorted(outputs.iterdir()):
+            if not task_dir.is_dir():
+                continue
+            for path in sorted(task_dir.iterdir()):
+                if path.is_dir() or path.name == "artifact_manifest.json":
+                    continue
+                content = path.read_text(encoding="utf-8")
+                ext = path.suffix.lower()
+                if ext in {".json", ".csv"}:
+                    content = f"```{ext[1:]}\n{content}\n```"
+                rel = path.relative_to(hdps.p("execution"))
+                blocks.append(f"[execution/{rel}]\n{content[:4000]}")
+    if not blocks:
+        raise FileNotFoundError("missing wiki artifacts")
     return "\n\n".join(blocks)
+
+
+def _load_task_outline(hdps: HDPS) -> str:
+    plan_path = hdps.p("plan/active/decomposition.json")
+    if not plan_path.exists():
+        return ""
+    data = json.loads(plan_path.read_text(encoding="utf-8"))
+    tasks = data.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return ""
+    lines = []
+    for task in tasks:
+        task_id = task.get("id")
+        title = task.get("title")
+        if not task_id or not title:
+            continue
+        lines.append(f"- {task_id}: {title}")
+        for item in task.get("acceptance") or []:
+            lines.append(f"  - {item}")
+    return "\n".join(lines)
 
 
 async def _build_report(client: Gemini3Client, query: str, artifacts: str) -> str:
@@ -77,13 +139,51 @@ async def main(query: str = "") -> None:
     hdps = HDPS(session_id=HDPS().new_session_id())
     hdps.bootstrap()
     planner = Planner(hdps=hdps)
+    critic = Critic(hdps=hdps)
+    wiki = WikiBuilder(hdps=hdps)
     query = query or args.query
+    attempts = hdps.read_json("status.json").get("replan_attempts") or 0
+    max_attempts = 2
     plan = await planner.plan(query)
-    task_ids = await _execute_tasks(plan, hdps)
+    task_ids = []
+    reports = {}
+    while True:
+        active_tasks = [t for t in plan["tasks"] if t.get("status") not in INACTIVE]
+        pending = [t["id"] for t in active_tasks if t["id"] not in task_ids]
+        if pending:
+            task_ids += await _execute_tasks(plan, hdps, task_ids=pending)
+            await wiki.update_for_tasks(plan, query, pending)
+            results = await asyncio.gather(
+                *(critic.review_task_outputs(task_id) for task_id in pending)
+            )
+            for task_id, report in zip(pending, results):
+                reports[task_id] = report
+        current = [reports[t["id"]] for t in active_tasks if t["id"] in reports]
+        replan_reports = [r for r in current if r["verdict"] != "PASS"]
+        if not replan_reports:
+            active_plan = dict(plan)
+            active_plan["tasks"] = active_tasks
+            global_report = await critic.review_global(query, active_plan, current)
+            if global_report["verdict"] == "PASS":
+                await critic.review(
+                    "GLOBAL",
+                    "PASS",
+                    global_report.get("findings"),
+                    global_report.get("required_fixes"),
+                )
+                break
+            replan_reports = [global_report]
+        attempts += 1
+        status = hdps.read_json("status.json")
+        status["replan_attempts"] = attempts
+        hdps.write_json("status.json", status)
+        if attempts >= max_attempts:
+            break
+        plan = await planner.replan(query, plan, replan_reports, attempts)
     final = args.final
     if final is None:
         report_client = Gemini3Client()
-        artifacts = _load_artifacts(hdps, task_ids)
+        artifacts = _load_wiki_artifacts(hdps)
         final = await _build_report(report_client, query, artifacts)
     final = f"작성 시각(UTC): {hdps.now()}\n\n{final}"
     summary = {

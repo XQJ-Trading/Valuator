@@ -29,6 +29,12 @@ class Planner:
         self.tool_router = ToolRouter(self.hdps)
 
     async def plan(self, query: str) -> dict:
+        data = await self._generate_raw(query)
+        return await self._finalize(query, data, f"planner_update:{query}")
+
+    async def _generate_raw(
+        self, query: str, allowed_parents: set[str] | None = None
+    ) -> dict:
         if not query or not query.strip():
             raise ValueError("query is required")
         self.hdps.ensure_required()
@@ -50,17 +56,23 @@ class Planner:
             if isinstance(tasks, list):
                 for task in tasks:
                     task["deps"] = []
-            self._validate(data, require_tool_calls=False)
+                    task.setdefault("status", "PENDING")
+            self._validate(
+                data, require_tool_calls=False, allowed_parents=allowed_parents
+            )
         except Exception as exc:
             self.hdps.append_ndjson(
                 "plan/active/raw_responses.ndjson",
                 {"ts": ts, "error": str(exc)},
             )
             raise
+        return data
+
+    async def _finalize(self, query: str, data: dict, reason: str) -> dict:
         state = await self.state_manager.ensure(query, data.get("tasks", []))
         data = self.tool_router.attach_tool_calls(data, state)
         self._validate(data, require_tool_calls=True)
-        return self._commit(data, f"planner_update:{query}")
+        return self._commit(data, reason)
 
     def _build_prompt(self, goal: str, query: str) -> str:
         return (
@@ -101,7 +113,12 @@ class Planner:
         except json.JSONDecodeError:
             return None
 
-    def _validate(self, data: dict, require_tool_calls: bool) -> None:
+    def _validate(
+        self,
+        data: dict,
+        require_tool_calls: bool,
+        allowed_parents: set[str] | None = None,
+    ) -> None:
         tasks = data.get("tasks")
         if not isinstance(tasks, list) or not tasks:
             raise ValueError("tasks must be a non-empty list")
@@ -144,7 +161,12 @@ class Planner:
             else:
                 if not isinstance(parent_id, str) or not parent_id:
                     raise ValueError(f"level 2+ task requires parent_id: {task_id}")
-                if parent_id not in seen or levels.get(parent_id) != level - 1:
+                if parent_id not in seen:
+                    if not allowed_parents or parent_id not in allowed_parents:
+                        raise ValueError(
+                            f"orphaned or invalid parent linkage: {task_id}"
+                        )
+                elif levels.get(parent_id) != level - 1:
                     raise ValueError(f"orphaned or invalid parent linkage: {task_id}")
             deps = task["deps"]
             if not isinstance(deps, list) or deps:
@@ -164,8 +186,8 @@ class Planner:
                 if not isinstance(out_path, str) or not out_path.startswith(prefix):
                     raise ValueError(f"invalid output path in {task_id}")
             acceptance = task["acceptance"]
-            if not isinstance(acceptance, list) or not acceptance:
-                raise ValueError(f"acceptance must be a non-empty list: {task_id}")
+            if not isinstance(acceptance, list):
+                raise ValueError(f"acceptance must be a list: {task_id}")
             data_sources = task["data_sources"]
             if (
                 not isinstance(data_sources, list)
@@ -237,6 +259,63 @@ class Planner:
         )
         self.hdps.write_json("status.json", status)
         return data
+
+    async def replan(
+        self, query: str, plan: dict, reports: list[dict], attempt: int
+    ) -> dict:
+        if attempt < 1:
+            raise ValueError("attempt must be >= 1")
+        tasks = plan.get("tasks", [])
+        for task in tasks:
+            task.setdefault("status", "PENDING")
+        by_id = {t["id"]: t for t in tasks}
+        feedback = []
+        failed = [
+            r["task_id"]
+            for r in reports
+            if r.get("verdict") != "PASS" and r.get("task_id") in by_id
+        ]
+        for report in reports:
+            task_id = report["task_id"]
+            verdict = report["verdict"]
+            fixes = [
+                f
+                for f in [report.get("required_fixes")]
+                if isinstance(f, str) and f.strip()
+            ]
+            if task_id in by_id and verdict != "PASS":
+                by_id[task_id]["status"] = verdict
+                by_id[task_id]["status_reason"] = fixes
+            if attempt > 1:
+                feedback.append(f"{task_id}: " + "; ".join(fixes or [verdict]))
+                continue
+            feedback.append(f"{task_id}: {verdict}")
+            feedback.extend(f"{task_id}: {fix}" for fix in fixes)
+        rule = (
+            "\n\n[REPLAN_RULES]\n"
+            "Return only new or replacement tasks; do not repeat unchanged tasks. "
+            "Any parent_id must reference a task in PREVIOUS_PLAN or a task defined in this patch."
+        )
+        if failed:
+            rule += (
+                " For each failed task_id, create a replacement task with a new id and new output paths. "
+                "Do not reuse failed task ids.\n"
+                f"Failed: {', '.join(failed)}"
+            )
+        replan_query = (
+            f"{query}\n\n[PREVIOUS_PLAN]\n{json.dumps(plan, ensure_ascii=True)}\n\n"
+            f"[CRITIC_FEEDBACK:attempt={attempt}]\n" + "\n".join(feedback) + rule
+        )
+        patch = await self._generate_raw(replan_query, allowed_parents=set(by_id))
+        for task in patch.get("tasks", []):
+            task_id = task["id"]
+            if task_id in by_id:
+                raise ValueError(f"duplicate task id in replan: {task_id}")
+            by_id[task_id] = task
+            tasks.append(task)
+        data = dict(plan)
+        data["tasks"] = tasks
+        return await self._finalize(query, data, f"replan_update:{query}")
 
     def _snapshot(self, ts: str, reason: str) -> str:
         safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", reason)[:48] or "update"

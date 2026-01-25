@@ -31,12 +31,6 @@ class SessionWriter:
     ) -> str:
         if not user_input:
             raise ValueError("user_input is required")
-        if system_prompt is None:
-            raise ValueError("system_prompt is required")
-        if final is None:
-            raise ValueError("final is required")
-        if not isinstance(summary, dict):
-            raise ValueError("summary must be a dict")
         if not verdict:
             raise ValueError("verdict is required")
         ts = self.hdps.now()
@@ -55,17 +49,23 @@ class SessionWriter:
                 content = artifact.get("content")
                 if not name or content is None:
                     raise ValueError("artifact requires name and content")
-                self.hdps.write_atomic(root / "output" / "artifacts" / name, str(content))
+                self.hdps.write_atomic(
+                    root / "output" / "artifacts" / name, str(content)
+                )
                 artifact_names.append(name)
         if execution_task_ids:
             if not all(isinstance(t, str) and t for t in execution_task_ids):
                 raise ValueError("execution_task_ids must be non-empty strings")
-            artifact_names.extend(self._copy_execution_artifacts(root, execution_task_ids))
+            artifact_names.extend(
+                self._copy_execution_artifacts(root, execution_task_ids)
+            )
         summary = {"session_id": sid, **summary}
         if artifact_names:
             existing = summary.get("artifacts_produced")
             if isinstance(existing, list):
-                summary["artifacts_produced"] = list(dict.fromkeys(existing + artifact_names))
+                summary["artifacts_produced"] = list(
+                    dict.fromkeys(existing + artifact_names)
+                )
             elif existing is None:
                 summary["artifacts_produced"] = artifact_names
         self.hdps.write_atomic(
@@ -86,6 +86,7 @@ class SessionWriter:
             "status": f"{base}/status.json",
             "plan": f"{base}/plan/active/decomposition.json",
             "context_index": f"{base}/context/index.json",
+            "execution": f"{base}/execution",
         }
 
     def _copy_execution_artifacts(self, root, task_ids: list[str]) -> list[str]:
@@ -97,10 +98,10 @@ class SessionWriter:
             for path in src_dir.iterdir():
                 if path.is_dir() or path.name == "artifact_manifest.json":
                     continue
-                dest = root / "output" / "artifacts" / path.name
+                dest = root / "output" / "artifacts" / f"{task_id}_{path.name}"
                 if dest.exists():
                     raise FileExistsError(f"artifact exists: {dest.name}")
                 content = path.read_text(encoding="utf-8")
                 self.hdps.write_atomic(dest, content)
-                names.append(path.name)
+                names.append(dest.name)
         return names

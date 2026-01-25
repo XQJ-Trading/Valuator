@@ -57,14 +57,12 @@ def get_ticker_and_cik(ticker: str) -> tuple[str, str]:
     ticker = re.sub(r"[^a-zA-Z0-9]", "", ticker).lower()
     rows = df[df["ticker"].astype(str).str.lower() == ticker]
     if rows.empty:
-        raise ValueError(
-            f"티커를 찾을 수 없습니다: {ticker}. 티커가 정확한지 확인해주세요."
-        )
+        raise ValueError(f"티커를 찾을 수 없습니다: {ticker}. 티커가 정확한지 확인해주세요.")
     row = rows.iloc[0]
     return ticker, str(row["cik_str"]).zfill(10)
 
 
-def get_10k_html_link(ticker: str, year: int = 2024) -> str:
+def get_10k_html_link(ticker: str, year: int) -> tuple[str, int]:
     ticker, cik = get_ticker_and_cik(ticker)
     logger.info(f"ticker={ticker}, cik={cik}")
     res = requests.get(
@@ -83,17 +81,30 @@ def get_10k_html_link(ticker: str, year: int = 2024) -> str:
         raise ValueError(
             "Mismatch in lengths of 'form', 'reportDate', and 'accessionNumber' fields."
         )
+    candidates = sorted(
+        (
+            (report_date, accession_number)
+            for form, report_date, accession_number in zip(forms, dates, accs)
+            if form == "10-K" and report_date
+        ),
+        reverse=True,
+    )
+    if not candidates:
+        raise ValueError("No 10-K filings found in recent submissions.")
     target_year = str(year)
-    for form, report_date, accession_number in zip(forms, dates, accs):
-        if form != "10-K" or not report_date.startswith(target_year):
-            continue
+    picks = [c for c in candidates if c[0].startswith(target_year)]
+    if not picks:
+        year = int(candidates[0][0][:4])
+        target_year = str(year)
+        picks = [c for c in candidates if c[0].startswith(target_year)]
+    for report_date, accession_number in picks:
         report_date = report_date.replace("-", "")
         acc_no = accession_number.replace("-", "")
         for suffix in ("", "x10k"):
             html_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no}/{ticker}-{report_date}{suffix}.htm"
             r = requests.get(html_url, headers=SEC_HEADERS)
             if r.ok:
-                return html_url
+                return html_url, year
     raise ValueError(f"❌ 10-K report not found for ticker {ticker} in {year}.")
 
 
@@ -120,10 +131,10 @@ def fetch_using_readerLLM(ticker: str, url: str) -> list[str]:
     return text
 
 
-def fetch_company_data(ticker: str, year: int = 2024) -> list[str]:
-    url = get_10k_html_link(ticker, year)
+def fetch_company_data(ticker: str, year: int) -> tuple[list[str], int]:
+    url, used_year = get_10k_html_link(ticker, year)
     logger.info(f"source url: {url}")
-    return fetch_using_readerLLM(ticker, url)
+    return fetch_using_readerLLM(ticker, url), used_year
 
 
 class SECTool(BaseTool):
@@ -131,7 +142,7 @@ class SECTool(BaseTool):
         super().__init__(
             "sec_tool",
             (
-                "Authoritative SEC 10-K retriever (default year 2024). Resolves ticker/CIK and extracts only the filing details relevant to the provided query instead of returning the raw document. "
+                "Authoritative SEC 10-K retriever. Resolves ticker/CIK and extracts only the filing details relevant to the provided query instead of returning the raw document. "
                 "Output includes a concise answer plus chunk-level findings gathered from 2,000-line SEC slices."
             ),
         )
@@ -167,21 +178,23 @@ class SECTool(BaseTool):
 
     async def execute(self, **kwargs) -> ToolResult:
         ticker = kwargs.get("ticker") or kwargs.get("corp")
-        year = kwargs.get("year", 2024)
+        year = kwargs.get("year")
         query = kwargs.get("query")
         if not ticker:
             return ToolResult(success=False, result=None, error="'ticker' is required")
+        if not year:
+            return ToolResult(success=False, result=None, error="'year' is required")
         if not query:
             return ToolResult(success=False, result=None, error="'query' is required")
         try:
-            lines = fetch_company_data(ticker, year)
+            lines, used_year = fetch_company_data(ticker, year)
             findings = await self._extract_chunks(query, lines)
             summary = "\n\n".join(findings)
             return ToolResult(
                 success=True,
                 result={
                     "ticker": ticker,
-                    "year": year,
+                    "year": used_year,
                     "query": query,
                     "summary": summary,
                     "extracts": findings,
@@ -210,10 +223,9 @@ class SECTool(BaseTool):
                         "year": {
                             "type": "integer",
                             "description": "10-K filing year (YYYY)",
-                            "default": 2025,
                         },
                     },
-                    "required": ["ticker", "query"],
+                    "required": ["ticker", "query", "year"],
                 },
             },
         }

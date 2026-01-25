@@ -45,7 +45,9 @@ class Executor:
                     "type": artifact.get("type"),
                 }
             )
-        self.hdps.write_json(f"execution/outputs/{task_id}/artifact_manifest.json", manifest)
+        self.hdps.write_json(
+            f"execution/outputs/{task_id}/artifact_manifest.json", manifest
+        )
         return manifest
 
     def execute_task(self, task_id: str, artifacts: list[dict]) -> dict:
@@ -54,11 +56,15 @@ class Executor:
         if not isinstance(artifacts, list) or not artifacts:
             raise ValueError("artifacts must be a non-empty list")
         plan = self.hdps.read_json("plan/active/decomposition.json")
-        task = next((task for task in plan.get("tasks", []) if task["id"] == task_id), None)
+        task = next(
+            (task for task in plan.get("tasks", []) if task["id"] == task_id), None
+        )
         if not task:
             raise ValueError(f"unknown task_id: {task_id}")
         self.hdps.set_status("Executor", "EXECUTION_START", "EXECUTING", task_id)
-        allowed = {item.get("path") for item in task.get("outputs", []) if item.get("path")}
+        allowed = {
+            item.get("path") for item in task.get("outputs", []) if item.get("path")
+        }
         for artifact in artifacts:
             name = artifact.get("name")
             source = artifact.get("source_path")
@@ -112,10 +118,14 @@ class Executor:
         if not output_path:
             raise ValueError("output_path is required")
         plan = self.hdps.read_json("plan/active/decomposition.json")
-        task = next((task for task in plan.get("tasks", []) if task["id"] == task_id), None)
+        task = next(
+            (task for task in plan.get("tasks", []) if task["id"] == task_id), None
+        )
         if not task:
             raise ValueError(f"unknown task_id: {task_id}")
-        allowed = {item.get("path") for item in task.get("outputs", []) if item.get("path")}
+        allowed = {
+            item.get("path") for item in task.get("outputs", []) if item.get("path")
+        }
         if allowed and output_path not in allowed:
             raise ValueError(f"output_path not in task outputs: {output_path}")
         self.hdps.set_status("Executor", "EXECUTION_START", "EXECUTING", task_id)
@@ -145,6 +155,12 @@ class Executor:
                     "error": result.error,
                 }
             )
+            if (
+                tool.name == "sec_tool"
+                and result.error
+                and "10-K report not found" in result.error
+            ):
+                self.hdps.block(result.error, ["context/state.json:year"])
             raise ValueError(result.error or "tool failed")
         payload = result.result
         if isinstance(payload, ObservationData):

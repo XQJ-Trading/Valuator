@@ -6,7 +6,8 @@ from .hdps import HDPS
 
 STATE_SYSTEM_PROMPT = (
     "Extract task routing metadata only from the query and tasks. "
-    "Output JSON only, no markdown. If unknown, use null."
+    "Output JSON only, no markdown. If unknown, use null. "
+    "If current date is provided and the year is not explicit, choose the most recent completed fiscal year."
 )
 
 STATE_SCHEMA = {
@@ -37,8 +38,15 @@ class StateManager:
     async def ensure(self, query: str, tasks: list[dict]) -> dict:
         existing = self.load()
         if existing:
+            year = existing.get("year")
+            if isinstance(year, int):
+                haystack = f"{query}\n{json.dumps(tasks, ensure_ascii=True)}"
+                if str(year) not in haystack:
+                    existing["year"] = None
+                    self.hdps.write_json("context/state.json", existing)
             return existing
         prompt = (
+            f"Current date (UTC): {self.hdps.now()}\n\n"
             f"User query: {query}\n\n"
             f"Plan tasks: {json.dumps(tasks, ensure_ascii=True)}\n\n"
             "Return JSON with ticker, company, year, min_year."

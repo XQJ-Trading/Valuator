@@ -1,3 +1,3 @@
-from .gemini_direct import GeminiModel
+from .gemini_direct import GeminiClient, GeminiSession
 
-__all__ = ["GeminiModel"]
+__all__ = ["GeminiClient", "GeminiSession"]

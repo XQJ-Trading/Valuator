@@ -3,7 +3,9 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -12,10 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
-from .adapters import HistoryAdapter
-from .core.agent.react_agent import AIAgent
-from .core.utils.config import config
-from .core.utils.logger import logger
+from valuator.core import Engine
+from valuator.utils.config import config
+from valuator.utils.logger import logger
 from .repositories import (
     FileSessionRepository,
     FileTaskRewriteRepository,
@@ -23,20 +24,29 @@ from .repositories import (
     MongoTaskRewriteRepository,
     TaskRewriteRepository,
 )
-from .services.session import SessionService
 from .services.task_rewrite.service import TaskRewriteService
 
 
 # Initialize history repository for server (separate from ReactLogger)
 def create_history_repository():
     """Create history repository instance for server history (separate from ReactLogger)"""
-    if config.mongodb_enabled and config.mongodb_uri:
+    mongodb_enabled = os.getenv("MONGODB_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    mongodb_uri = os.getenv("MONGODB_URI")
+    mongodb_database = os.getenv("MONGODB_DATABASE", "valuator")
+    mongodb_collection = os.getenv("MONGODB_COLLECTION", "sessions")
+
+    if mongodb_enabled and mongodb_uri:
         try:
             # Use different collection for server history
             return MongoSessionRepository(
-                mongodb_uri=config.mongodb_uri,
-                database=config.mongodb_database,
-                collection=f"{config.mongodb_collection}_server_history",
+                mongodb_uri=mongodb_uri,
+                database=mongodb_database,
+                collection=f"{mongodb_collection}_server_history",
             )
         except Exception as e:
             print(f"Failed to initialize MongoDB repository for server history: {e}")
@@ -50,11 +60,20 @@ def create_history_repository():
 # Initialize task rewrite repository
 def create_task_rewrite_repository() -> TaskRewriteRepository:
     """Create task rewrite repository instance"""
-    if config.mongodb_enabled and config.mongodb_uri:
+    mongodb_enabled = os.getenv("MONGODB_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    mongodb_uri = os.getenv("MONGODB_URI")
+    mongodb_database = os.getenv("MONGODB_DATABASE", "valuator")
+
+    if mongodb_enabled and mongodb_uri:
         try:
             return MongoTaskRewriteRepository(
-                mongodb_uri=config.mongodb_uri,
-                database=config.mongodb_database,
+                mongodb_uri=mongodb_uri,
+                database=mongodb_database,
                 collection="task_rewrite",
             )
         except Exception as e:
@@ -63,6 +82,454 @@ def create_task_rewrite_repository() -> TaskRewriteRepository:
             return FileTaskRewriteRepository("logs/task_rewrite")
     else:
         return FileTaskRewriteRepository("logs/task_rewrite")
+
+
+def sessions_to_summaries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for session in sessions:
+        steps = session.get("steps") or []
+        final_answer = str(session.get("final_answer") or "")
+        tools_used = sorted(
+            {
+                str(step.get("tool"))
+                for step in steps
+                if isinstance(step, dict) and isinstance(step.get("tool"), str)
+            }
+        )
+        summaries.append(
+            {
+                "session_id": str(session.get("session_id") or ""),
+                "timestamp": str(
+                    session.get("timestamp")
+                    or session.get("created_at")
+                    or datetime.utcnow().isoformat()
+                ),
+                "query": str(session.get("query") or ""),
+                "final_answer": final_answer,
+                "success": bool(session.get("success", True)),
+                "duration": float(session.get("duration", 0.0)),
+                "step_count": len(steps),
+                "tools_used": tools_used,
+            }
+        )
+    return summaries
+
+
+def session_to_stream_events(session: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = session.get("steps")
+    if isinstance(steps, list) and steps:
+        events: list[dict[str, Any]] = []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            event_type = str(step.get("type") or "observation")
+            content = str(step.get("content") or "")
+            event: dict[str, Any] = {"type": event_type, "content": content}
+            for key in ("tool", "tool_input", "tool_output", "tool_result", "error", "query"):
+                if key in step:
+                    event[key] = step[key]
+            events.append(event)
+        return events
+
+    query = str(session.get("query") or "")
+    final_answer = str(session.get("final_answer") or "")
+    return [
+        {"type": "start", "query": query, "content": query},
+        {"type": "final_answer", "content": final_answer},
+        {"type": "end", "content": "완료"},
+    ]
+
+
+class SessionStatus(str, Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass
+class SessionRecord:
+    session_id: str
+    query: str
+    model: str
+    status: SessionStatus
+    created_at: datetime
+    completed_at: datetime | None = None
+    error: str | None = None
+    steps: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "query": self.query,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "event_count": len(self.steps),
+            "error": self.error,
+            "model": self.model,
+        }
+
+
+@dataclass
+class _RuntimeSession:
+    record: SessionRecord
+    subscribers: list[asyncio.Queue]
+    task: asyncio.Task | None = None
+
+
+class SessionService:
+    def __init__(self, history_repository: Any):
+        self.history_repository = history_repository
+        self._active: dict[str, _RuntimeSession] = {}
+
+    async def start_session(
+        self,
+        *,
+        query: str,
+        model: str | None = None,
+        thinking_level: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> SessionRecord:
+        _ = thinking_level, context
+        session_id = f"S-{datetime.utcnow().strftime('%Y%m%d-%H%M%S%fZ')}"
+        record = SessionRecord(
+            session_id=session_id,
+            query=query,
+            model=model or config.agent_model,
+            status=SessionStatus.RUNNING,
+            created_at=datetime.utcnow(),
+        )
+        runtime = _RuntimeSession(record=record, subscribers=[])
+        runtime.task = asyncio.create_task(self._run(runtime))
+        self._active[session_id] = runtime
+        return record
+
+    async def get_session(self, session_id: str) -> SessionRecord | None:
+        runtime = self._active.get(session_id)
+        return runtime.record if runtime else None
+
+    async def subscribe_to_session(self, session_id: str) -> AsyncGenerator[dict[str, Any], None]:
+        runtime = self._active.get(session_id)
+        if runtime is None:
+            raise ValueError(f"Session not found: {session_id}")
+
+        queue: asyncio.Queue = asyncio.Queue()
+        for event in runtime.record.steps:
+            await queue.put(event)
+        await queue.put(None if runtime.record.status == SessionStatus.RUNNING else "END")
+
+        runtime.subscribers.append(queue)
+        try:
+            while True:
+                item = await queue.get()
+                if item == "END":
+                    break
+                if item is None:
+                    continue
+                yield item
+        finally:
+            if queue in runtime.subscribers:
+                runtime.subscribers.remove(queue)
+
+    async def end_session(self, session_id: str) -> bool:
+        runtime = self._active.get(session_id)
+        if runtime is None:
+            return False
+
+        if runtime.task and not runtime.task.done():
+            runtime.task.cancel()
+            try:
+                await runtime.task
+            except asyncio.CancelledError:
+                pass
+
+        runtime.record.status = SessionStatus.FAILED
+        runtime.record.completed_at = datetime.utcnow()
+        runtime.record.error = "terminated"
+        await self._persist(runtime.record, success=False)
+        await self._finish(session_id)
+        return True
+
+    async def list_sessions(self, limit: int = 20, offset: int = 0) -> list[SessionRecord]:
+        rows = [state.record for state in self._active.values()]
+        rows.sort(key=lambda item: item.created_at, reverse=True)
+        return rows[offset : offset + limit]
+
+    async def _run(self, runtime: _RuntimeSession) -> None:
+        record = runtime.record
+        try:
+            await self._emit(runtime, {"type": "start", "query": record.query, "content": record.query})
+            await self._emit(
+                runtime,
+                {
+                    "type": "thought",
+                    "content": "Valuator pipeline 시작",
+                },
+            )
+
+            engine = Engine.create(session_id=record.session_id, model=record.model)
+            engine.workspace.prepare()
+            engine.workspace.write_user_input(record.query)
+
+            await self._emit(
+                runtime,
+                {
+                    "type": "action",
+                    "stage": "plan",
+                    "content": "Step 1/5 - 계획 수립 중",
+                },
+            )
+            plan = await engine.planner.plan(record.query)
+            await self._emit(
+                runtime,
+                {
+                    "type": "observation",
+                    "stage": "plan",
+                    "content": f"Step 1/5 완료 - task {len(plan.tasks)}개",
+                },
+            )
+
+            final_path: Path | None = None
+            latest_review: dict[str, Any] = {}
+            for round_idx in range(1, engine.max_rounds + 1):
+                engine.workspace.set_round(round_idx)
+                engine.workspace.write_plan(plan)
+
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "action",
+                        "stage": "execute",
+                        "round": round_idx,
+                        "content": f"Step 2/5 - 실행 중 (round {round_idx})",
+                    },
+                )
+                leaf_total = len([task for task in plan.tasks if task.task_type == "leaf"])
+                completed_leaf_count = 0
+                leaf_count_lock = asyncio.Lock()
+
+                async def _on_leaf_start(task: Any) -> None:
+                    await self._emit(
+                        runtime,
+                        {
+                            "type": "action",
+                            "stage": "execute-task",
+                            "round": round_idx,
+                            "task_id": task.id,
+                            "content": f"Leaf 시작 - {task.id}",
+                        },
+                    )
+
+                async def _on_leaf_complete(task: Any, _: dict[str, Any]) -> None:
+                    nonlocal completed_leaf_count
+                    async with leaf_count_lock:
+                        completed_leaf_count += 1
+                        current = completed_leaf_count
+                    await self._emit(
+                        runtime,
+                        {
+                            "type": "observation",
+                            "stage": "execute-task",
+                            "round": round_idx,
+                            "task_id": task.id,
+                            "content": f"Leaf 완료 - {task.id} ({current}/{leaf_total})",
+                        },
+                    )
+
+                execution = await engine.executor.execute(
+                    record.query,
+                    plan,
+                    engine.workspace,
+                    on_leaf_start=_on_leaf_start,
+                    on_leaf_complete=_on_leaf_complete,
+                )
+                completed_leaf_ids = execution.get("leaf_completed_tasks") or []
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "observation",
+                        "stage": "execute",
+                        "round": round_idx,
+                        "content": (
+                            f"Step 2/5 완료 - leaf task {len(completed_leaf_ids)}개 실행"
+                        ),
+                    },
+                )
+
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "action",
+                        "stage": "aggregate",
+                        "round": round_idx,
+                        "content": f"Step 3/5 - 집계 중 (round {round_idx})",
+                    },
+                )
+                async def _on_task_aggregated(task: Any, index: int, total: int) -> None:
+                    await self._emit(
+                        runtime,
+                        {
+                            "type": "observation",
+                            "stage": "aggregate-task",
+                            "round": round_idx,
+                            "task_id": task.id,
+                            "content": f"집계 완료 - {task.id} ({index}/{total})",
+                        },
+                    )
+
+                aggregation = await engine.aggregator.aggregate(
+                    record.query,
+                    plan,
+                    execution,
+                    engine.workspace,
+                    on_task_aggregated=_on_task_aggregated,
+                )
+                final_path = engine.workspace.write_final(aggregation["final_markdown"])
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "observation",
+                        "stage": "aggregate",
+                        "round": round_idx,
+                        "content": "Step 3/5 완료 - 최종 초안 생성",
+                    },
+                )
+
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "action",
+                        "stage": "review",
+                        "round": round_idx,
+                        "content": f"Step 4/5 - 리뷰 중 (round {round_idx})",
+                    },
+                )
+                review = await engine.reviewer.review(plan, execution, aggregation)
+                review["actions"] = engine._require_action_list(review.get("actions"))
+                review_status = "pass" if not review["actions"] else "fail"
+                review["status"] = review_status
+                review["round"] = round_idx
+                engine.workspace.write_review(review)
+                latest_review = review
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "review",
+                        "stage": "review",
+                        "round": round_idx,
+                        "content": (
+                            "Step 4/5 완료 - "
+                            + ("PASS (추가 조치 없음)" if review_status == "pass" else "FAIL (재계획 필요)")
+                        ),
+                    },
+                )
+
+                if review_status == "pass":
+                    break
+                if round_idx >= engine.max_rounds:
+                    break
+
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "action",
+                        "stage": "replan",
+                        "round": round_idx,
+                        "content": f"Step 5/5 - 재계획 중 (round {round_idx})",
+                    },
+                )
+                plan = await engine.planner.replan(plan, review)
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "observation",
+                        "stage": "replan",
+                        "round": round_idx,
+                        "content": f"Step 5/5 완료 - task {len(plan.tasks)}개로 갱신",
+                    },
+                )
+
+            if final_path is None:
+                raise RuntimeError("engine did not produce final artifacts")
+
+            final_markdown = ""
+            if final_path.exists():
+                final_markdown = final_path.read_text(encoding="utf-8").strip()
+            if final_markdown:
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "final_answer",
+                        "content": final_markdown,
+                    },
+                )
+
+            await self._emit(
+                runtime,
+                {
+                    "type": "review",
+                    "stage": "summary",
+                    "content": (
+                        f"최종 상태: {str(latest_review.get('status', 'unknown')).upper()}"
+                        if latest_review
+                        else "최종 상태: UNKNOWN"
+                    ),
+                },
+            )
+            await self._emit(runtime, {"type": "end", "content": "완료"})
+            record.status = SessionStatus.COMPLETED
+            record.completed_at = datetime.utcnow()
+            await self._persist(record, success=True)
+        except Exception as exc:
+            logger.error("Session run failed: %s", exc)
+            record.status = SessionStatus.FAILED
+            record.completed_at = datetime.utcnow()
+            record.error = str(exc)
+            await self._emit(runtime, {"type": "error", "message": str(exc)})
+            await self._persist(record, success=False)
+        finally:
+            await self._finish(record.session_id)
+
+    async def _emit(self, runtime: _RuntimeSession, event: dict[str, Any]) -> None:
+        runtime.record.steps.append(event)
+        for queue in list(runtime.subscribers):
+            await queue.put(event)
+
+    async def _persist(self, record: SessionRecord, *, success: bool) -> None:
+        if self.history_repository is None:
+            return
+        payload = {
+            "session_id": record.session_id,
+            "timestamp": record.created_at.isoformat(),
+            "query": record.query,
+            "steps": record.steps,
+            "final_answer": self._final_answer(record.steps),
+            "success": success,
+            "duration": self._duration_seconds(record),
+            "status": record.status.value,
+            "model": record.model,
+        }
+        await self.history_repository.save_session(payload)
+
+    async def _finish(self, session_id: str) -> None:
+        runtime = self._active.pop(session_id, None)
+        if runtime is None:
+            return
+        for queue in runtime.subscribers:
+            await queue.put("END")
+
+    @staticmethod
+    def _final_answer(steps: list[dict[str, Any]]) -> str:
+        for step in reversed(steps):
+            if step.get("type") == "final_answer":
+                return str(step.get("content") or "")
+        return ""
+
+    @staticmethod
+    def _duration_seconds(record: SessionRecord) -> float:
+        if record.completed_at is None:
+            return 0.0
+        return max(0.0, (record.completed_at - record.created_at).total_seconds())
 
 
 # Global instances
@@ -223,7 +690,7 @@ async def get_history(limit: int = 10, offset: int = 0):
 
     try:
         sessions = await history_repository.list_sessions(limit=limit, offset=offset)
-        summaries = HistoryAdapter.sessions_to_summaries(sessions)
+        summaries = sessions_to_summaries(sessions)
 
         return {
             "sessions": summaries,
@@ -301,7 +768,7 @@ async def replay_session_as_stream(session_id: str):
                 return
 
             # Convert to stream events
-            events = HistoryAdapter.session_to_stream_events(session)
+            events = session_to_stream_events(session)
 
             # Stream events
             for event in events:
@@ -582,7 +1049,11 @@ async def delete_session_endpoint(session_id: str):
 
 
 @app.get("/api/v1/sessions")
-async def list_active_sessions(limit: int = 20, offset: int = 0):
+async def list_active_sessions(
+    limit: int = 20,
+    offset: int = 0,
+    scope: str = Query("active", pattern="^(active|all)$"),
+):
     """
     List active sessions (활성 세션 목록)
 
@@ -597,6 +1068,42 @@ async def list_active_sessions(limit: int = 20, offset: int = 0):
         raise HTTPException(status_code=500, detail="SessionService not initialized")
 
     try:
+        if scope == "all" and history_repository is not None:
+            active = await session_service.list_sessions(limit=limit + offset, offset=0)
+            active_rows = [session.to_dict() for session in active]
+
+            historical = await history_repository.list_sessions(limit=limit + offset, offset=0)
+            summaries = sessions_to_summaries(historical)
+            history_rows = [
+                {
+                    "session_id": item.get("session_id", ""),
+                    "query": item.get("query", ""),
+                    "status": "completed" if item.get("success", False) else "failed",
+                    "created_at": item.get("timestamp"),
+                    "completed_at": item.get("timestamp"),
+                    "event_count": item.get("step_count", 0),
+                }
+                for item in summaries
+            ]
+
+            seen: set[str] = set()
+            sessions: list[dict[str, Any]] = []
+            for row in active_rows + history_rows:
+                session_id = str(row.get("session_id") or "")
+                if not session_id or session_id in seen:
+                    continue
+                seen.add(session_id)
+                sessions.append(row)
+
+            total = len(sessions)
+            sessions = sessions[offset : offset + limit]
+            return {
+                "sessions": sessions,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
         sessions = await session_service.list_sessions(limit=limit, offset=offset)
         return {
             "sessions": [session.to_dict() for session in sessions],
@@ -609,6 +1116,194 @@ async def list_active_sessions(limit: int = 20, offset: int = 0):
         raise HTTPException(
             status_code=500, detail=f"Failed to list sessions: {str(e)}"
         )
+
+
+def _valuator_sessions_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "valuator" / "sessions"
+
+
+def _resolve_valuator_session_dir(session_id: str) -> Path:
+    root = _valuator_sessions_root().resolve()
+    candidate = (root / session_id).resolve()
+    if root not in candidate.parents:
+        raise HTTPException(status_code=400, detail="Invalid session path")
+    if not candidate.exists() or not candidate.is_dir():
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    return candidate
+
+
+def _latest_round_dir(parent: Path) -> tuple[Path | None, int | None]:
+    if not parent.exists():
+        return None, None
+    best_dir: Path | None = None
+    best_round: int | None = None
+    for child in parent.iterdir():
+        if not child.is_dir():
+            continue
+        match = re.fullmatch(r"round-(\d+)", child.name)
+        if not match:
+            continue
+        value = int(match.group(1))
+        if best_round is None or value > best_round:
+            best_round = value
+            best_dir = child
+    return best_dir, best_round
+
+
+def _read_json_or_default(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    if not path.exists():
+        return default
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return default
+
+
+def _load_valuator_snapshot_payload(session_dir: Path, session_id: str) -> dict[str, Any]:
+    plan_path = session_dir / "plan" / "active" / "decomposition.json"
+    if not plan_path.exists():
+        raise HTTPException(status_code=404, detail="Plan decomposition not found")
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    query = str(plan.get("query", "")).strip()
+    if not query:
+        input_path = session_dir / "input" / "user_input.md"
+        if input_path.exists():
+            query = input_path.read_text(encoding="utf-8").strip()
+
+    execution_artifacts: list[dict[str, Any]] = []
+    execution_round_dir, execution_round = _latest_round_dir(session_dir / "execution")
+    if execution_round_dir is not None:
+        outputs_dir = execution_round_dir / "outputs"
+        if outputs_dir.exists():
+            for task_dir in sorted(outputs_dir.iterdir()):
+                if not task_dir.is_dir():
+                    continue
+                task_id = task_dir.name
+                result_path = task_dir / "result.md"
+                if not result_path.exists():
+                    continue
+                meta = _read_json_or_default(task_dir / "result.md.meta.json", {})
+                execution_artifacts.append(
+                    {
+                        "task_id": task_id,
+                        "logical_output_path": f"/execution/outputs/{task_id}/result.md",
+                        "tool": meta.get("tool"),
+                        "args_hash": meta.get("args_hash"),
+                        "exists": True,
+                    }
+                )
+
+    aggregation_reports: list[dict[str, Any]] = []
+    aggregation_round_dir, aggregation_round = _latest_round_dir(session_dir / "aggregation")
+    if aggregation_round_dir is not None:
+        for report in sorted(aggregation_round_dir.rglob("report.md")):
+            task_id = report.parent.name
+            aggregation_reports.append(
+                {
+                    "task_id": task_id,
+                    "logical_report_path": f"/aggregation/{task_id}/report.md",
+                    "exists": True,
+                }
+            )
+
+    review = _read_json_or_default(
+        session_dir / "review" / "latest.json",
+        {"status": "running", "actions": [], "round": None},
+    )
+    if "actions" not in review or not isinstance(review.get("actions"), list):
+        review["actions"] = []
+    if "coverage_feedback" not in review or not isinstance(
+        review.get("coverage_feedback"), dict
+    ):
+        review["coverage_feedback"] = {}
+
+    latest_round = review.get("round") or execution_round or aggregation_round
+    output_exists = (session_dir / "output" / "final.md").exists()
+    status = str(review.get("status") or ("completed" if output_exists else "running"))
+
+    return {
+        "session_id": session_id,
+        "query": query,
+        "round": latest_round,
+        "status": status,
+        "plan": {
+            "query_units": plan.get("query_units") or [],
+            "contract": plan.get("contract"),
+            "tasks": plan.get("tasks") or [],
+            "root_task_id": plan.get("root_task_id"),
+        },
+        "execution": {"artifacts": execution_artifacts},
+        "aggregation": {"reports": aggregation_reports},
+        "review": {
+            "status": review.get("status", "running"),
+            "round": review.get("round"),
+            "actions": review.get("actions", []),
+            "coverage_feedback": review.get("coverage_feedback", {}),
+        },
+    }
+
+
+@app.get("/api/v1/sessions/{session_id}/valuator/snapshot")
+async def get_valuator_snapshot(session_id: str):
+    session_dir = _resolve_valuator_session_dir(session_id)
+    try:
+        return _load_valuator_snapshot_payload(session_dir, session_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to build valuator snapshot for {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to build snapshot: {str(e)}")
+
+
+@app.get("/api/v1/sessions/{session_id}/valuator/tasks/{task_id}")
+async def get_valuator_task_detail(session_id: str, task_id: str):
+    session_dir = _resolve_valuator_session_dir(session_id)
+    execution_round_dir, _ = _latest_round_dir(session_dir / "execution")
+    aggregation_round_dir, _ = _latest_round_dir(session_dir / "aggregation")
+
+    execution_text = ""
+    aggregation_text = ""
+    metadata: dict[str, str] = {}
+
+    if execution_round_dir is not None:
+        exec_path = execution_round_dir / "outputs" / task_id / "result.md"
+        if exec_path.exists():
+            execution_text = exec_path.read_text(encoding="utf-8")
+        meta_path = execution_round_dir / "outputs" / task_id / "result.md.meta.json"
+        raw_meta = _read_json_or_default(meta_path, {})
+        metadata = {str(k): str(v) for k, v in raw_meta.items()}
+
+    if aggregation_round_dir is not None:
+        agg_path = aggregation_round_dir / task_id / "report.md"
+        if agg_path.exists():
+            aggregation_text = agg_path.read_text(encoding="utf-8")
+
+    if not execution_text and not aggregation_text:
+        raise HTTPException(status_code=404, detail=f"Task artifacts not found: {task_id}")
+
+    return {
+        "session_id": session_id,
+        "task_id": task_id,
+        "execution_markdown": execution_text,
+        "aggregation_markdown": aggregation_text,
+        "output_metadata": metadata,
+    }
+
+
+@app.get("/api/v1/sessions/{session_id}/valuator/final")
+async def get_valuator_final(session_id: str):
+    session_dir = _resolve_valuator_session_dir(session_id)
+    final_path = session_dir / "output" / "final.md"
+    if not final_path.exists():
+        raise HTTPException(status_code=404, detail="Final markdown not found")
+    return {
+        "session_id": session_id,
+        "markdown": final_path.read_text(encoding="utf-8"),
+    }
 
 
 # ============================================================================

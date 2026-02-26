@@ -48,7 +48,7 @@ const router = useRouter()
 const handleCreateSession = async () => {
   const sessionId = await createSession()
   if (sessionId) {
-    router.push(`/session/${sessionId}`)
+    router.push(`/sessions/${sessionId}`)
   }
 }
 

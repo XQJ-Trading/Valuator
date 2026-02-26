@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
@@ -27,13 +27,16 @@ class Aggregation:
         plan: Plan,
         execution: dict,
         workspace: Workspace,
+        on_task_aggregated: Callable[[Task, int, int], Awaitable[None]] | None = None,
     ) -> dict:
         leaf_artifacts = extract_leaf_artifacts(execution)
         task_map = {task.id: task for task in plan.tasks}
         descendant_cache: dict[str, list[dict[str, str]]] = {}
         reports: dict[str, dict[str, Any]] = {}
 
-        for task_id in post_order_tasks(plan):
+        task_order = post_order_tasks(plan)
+        total_tasks = len(task_order)
+        for index, task_id in enumerate(task_order, start=1):
             task = task_map[task_id]
             materials = collect_materials(
                 task,
@@ -56,6 +59,8 @@ class Aggregation:
                 f"/aggregation/{task_id}/report.md",
                 report["markdown"],
             )
+            if on_task_aggregated is not None:
+                await on_task_aggregated(task, index, total_tasks)
 
         root_task_id = plan.root_task_id or infer_root_task_id(plan.tasks)
         root_report = reports.get(root_task_id)

@@ -3,8 +3,8 @@
 import uuid
 from typing import Optional
 
-from ...core.utils.config import config
-from ...core.utils.logger import logger
+from valuator.utils.config import config
+from valuator.utils.logger import logger
 from .llm_client import TaskRewriteLLMClient
 from .models import TaskRewriteHistory
 from ...repositories.task_rewrite_repository import TaskRewriteRepository

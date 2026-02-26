@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from hashlib import sha256
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from ...tools.base import ObservationData, ToolResult
 from ..contracts.plan import Plan, Task
@@ -23,7 +23,14 @@ class Executor:
         self.allowed_tools = set(_DEFAULT_ALLOWED_TOOLS)
         self._tool_cache: dict[str, Any] = {}
 
-    async def execute(self, query: str, plan: Plan, workspace: Workspace) -> dict[str, Any]:
+    async def execute(
+        self,
+        query: str,
+        plan: Plan,
+        workspace: Workspace,
+        on_leaf_start: Callable[[Task], Awaitable[None]] | None = None,
+        on_leaf_complete: Callable[[Task, dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
         _ = query
         leaf_tasks = [task for task in plan.tasks if task.task_type == "leaf"]
         if not leaf_tasks:
@@ -33,7 +40,12 @@ class Executor:
 
         async def _run(task: Task) -> dict[str, Any]:
             async with sem:
-                return await self._execute_one_leaf(task, workspace)
+                if on_leaf_start is not None:
+                    await on_leaf_start(task)
+                result = await self._execute_one_leaf(task, workspace)
+                if on_leaf_complete is not None:
+                    await on_leaf_complete(task, result)
+                return result
 
         results = await asyncio.gather(*[_run(task) for task in leaf_tasks])
         return {

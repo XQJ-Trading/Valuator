@@ -17,6 +17,10 @@
           <span class="nav-icon">📚</span>
           History
         </router-link>
+        <router-link to="/sessions" class="nav-btn">
+          <span class="nav-icon">🧩</span>
+          Sessions
+        </router-link>
         <div 
           ref="dropdownRef"
           class="nav-dropdown"

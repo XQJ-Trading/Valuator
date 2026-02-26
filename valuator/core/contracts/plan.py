@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .requirement import PlanContract
+
 TaskType = Literal["leaf", "merge"]
 
 
@@ -31,7 +33,7 @@ class Plan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str
-    analysis_strategy: str = ""
     query_units: list[str] = Field(default_factory=list)
+    contract: PlanContract | None = None
     root_task_id: str | None = None
     tasks: list[Task] = Field(default_factory=list)

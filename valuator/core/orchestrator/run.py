@@ -72,8 +72,9 @@ async def _run(args: argparse.Namespace) -> int:
     result = await engine.run(query)
 
     print(f"session_id: {result['session_id']}")
-    print(f"query_coverage: {result['query_coverage']:.3f}")
-    print(f"execution_coverage: {result['execution_coverage']:.3f}")
+    feedback = result.get("coverage_feedback", {})
+    if isinstance(feedback, dict):
+        print(f"coverage_feedback: {feedback.get('summary', '')}")
     print(f"status: {result['status']}")
     print(f"final_path: {result['final_path']}")
     print(f"review_path: {result['review_path']}")

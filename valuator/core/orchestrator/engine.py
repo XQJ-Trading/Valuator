@@ -7,8 +7,9 @@ from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..aggregator.service import Aggregation
 from ..contracts.plan import Plan
-from ..critic.service import Review
+from ..reviewer.service import Review
 from ..executor.service import Executor
+from ..graph.validator import validate_plan_graph
 from ..planner.service import Planner
 from ..workspace.service import Workspace
 
@@ -45,9 +46,9 @@ class Engine:
         client = GeminiClient(model or config.agent_model)
         workspace = Workspace(session_id=session_id, base_dir=base_dir)
         planner = Planner(client=client)
-        executor = Executor(client=client)
+        executor = Executor()
         aggregator = Aggregation(client=client)
-        reviewer = Review()
+        reviewer = Review(client=client)
         return cls(
             workspace=workspace,
             planner=planner,
@@ -72,7 +73,6 @@ class Engine:
         for round_idx in range(1, self.max_rounds + 1):
             self.workspace.set_round(round_idx)
             self.workspace.write_plan(plan)
-            self.workspace.write_strategy(plan.analysis_strategy)
 
             execution = await self.executor.execute(query, plan, self.workspace)
             aggregation = await self.aggregator.aggregate(
@@ -84,23 +84,25 @@ class Engine:
 
             final_path = self.workspace.write_final(aggregation["final_markdown"])
             review = await self.reviewer.review(plan, execution, aggregation)
+            review["actions"] = self._require_action_list(review.get("actions"))
+            status = "pass" if not review["actions"] else "fail"
+            review["status"] = status
             review["round"] = round_idx
             review_path = self.workspace.write_review(review)
             latest_review = review
 
-            if review.get("status") == "pass":
+            if status == "pass":
                 break
             if round_idx >= self.max_rounds:
                 break
-            plan = await self.planner.replan(query, plan, review)
+            plan = await self.planner.replan(plan, review)
 
         if final_path is None or review_path is None:
             raise RuntimeError("engine did not produce final artifacts")
 
         return {
             "session_id": self.workspace.session_id,
-            "query_coverage": float(latest_review.get("query_coverage", 0.0)),
-            "execution_coverage": float(latest_review.get("execution_coverage", 0.0)),
+            "coverage_feedback": latest_review.get("coverage_feedback", {}),
             "status": str(latest_review.get("status", "fail")),
             "final_path": str(final_path),
             "review_path": str(review_path),
@@ -109,11 +111,11 @@ class Engine:
     async def run_with_plan(self, query: str, plan: Plan) -> dict[str, Any]:
         if not query or not query.strip():
             raise ValueError("query is required")
+        validate_plan_graph(plan)
         self.workspace.prepare()
         self.workspace.write_user_input(query)
         self.workspace.set_round(1)
         self.workspace.write_plan(plan)
-        self.workspace.write_strategy(plan.analysis_strategy)
         execution = await self.executor.execute(query, plan, self.workspace)
         aggregation = await self.aggregator.aggregate(
             query,
@@ -123,13 +125,38 @@ class Engine:
         )
         final_path = self.workspace.write_final(aggregation["final_markdown"])
         review = await self.reviewer.review(plan, execution, aggregation)
+        review["actions"] = self._require_action_list(review.get("actions"))
+        review["status"] = "pass" if not review["actions"] else "fail"
         review["round"] = 1
         review_path = self.workspace.write_review(review)
         return {
             "session_id": self.workspace.session_id,
-            "query_coverage": float(review.get("query_coverage", 0.0)),
-            "execution_coverage": float(review.get("execution_coverage", 0.0)),
+            "coverage_feedback": review.get("coverage_feedback", {}),
             "status": str(review.get("status", "fail")),
             "final_path": str(final_path),
             "review_path": str(review_path),
         }
+
+    def _require_action_list(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            raise ValueError("review.actions must be list[{'node': int, 'reason': str}]")
+        reason_by_node: dict[int, list[str]] = {}
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("review.actions must be list[{'node': int, 'reason': str}]")
+            node = item.get("node")
+            reason = item.get("reason")
+            if (
+                not isinstance(node, int)
+                or isinstance(node, bool)
+                or node < 0
+                or not isinstance(reason, str)
+                or not reason.strip()
+            ):
+                raise ValueError("review.actions must be list[{'node': int, 'reason': str}]")
+            reason_by_node.setdefault(node, []).append(reason.strip())
+        actions: list[dict[str, Any]] = []
+        for node in sorted(reason_by_node):
+            dedup = list(dict.fromkeys(reason_by_node[node]))
+            actions.append({"node": node, "reason": " ".join(dedup)})
+        return actions

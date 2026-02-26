@@ -36,25 +36,12 @@ def collect_materials(
     reports: dict[str, dict[str, Any]],
     descendant_cache: dict[str, list[dict[str, str]]],
 ) -> list[dict[str, str]]:
-    materials: list[dict[str, str]] = []
-
-    for dep in task.deps:
-        child_report = reports.get(dep)
-        if not child_report:
-            raise ValueError(f"missing child report for {task.id}: {dep}")
-        materials.append(
-            {
-                "source": dep,
-                "content": child_report["markdown"],
-            }
+    _ = reports
+    return list(
+        descendant_leaf_artifacts(
+            task.id, task_map, leaf_artifacts, descendant_cache
         )
-
-    for artifact in descendant_leaf_artifacts(
-        task.id, task_map, leaf_artifacts, descendant_cache
-    ):
-        materials.append(artifact)
-
-    return materials
+    )
 
 
 def query_unit_ids_for_leaf_tasks(

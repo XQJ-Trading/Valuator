@@ -16,6 +16,7 @@ class Workspace:
         self.session_id = session_id
         self.session_dir = root / session_id
         self.current_round: int | None = None
+        self._cache_index: dict[tuple[str, str], Path] | None = None
 
     def prepare(self) -> None:
         for rel in (
@@ -32,6 +33,7 @@ class Workspace:
         if round_idx < 1:
             raise ValueError("round_idx must be >= 1")
         self.current_round = round_idx
+        self._cache_index = None
 
     def write_user_input(self, query: str) -> Path:
         return self._write_text("input/user_input.md", query.strip())
@@ -62,9 +64,6 @@ class Workspace:
         if not path.exists():
             raise ValueError(f"missing output file: {rel_output_path}")
         return path.read_text(encoding="utf-8")
-
-    def write_strategy(self, strategy: str) -> Path:
-        return self._write_text("plan/analysis_strategy.md", strategy.strip())
 
     def write_review(self, review: dict) -> Path:
         return self._write_json("review/latest.json", review)
@@ -98,12 +97,23 @@ class Workspace:
         return files
 
     def find_cached_output(self, tool: str, args_hash: str) -> str | None:
-        """Scan previous rounds for a matching (tool, args_hash) and return content."""
+        """Find cached output from previous rounds via pre-built metadata index."""
         if self.current_round is None or self.current_round <= 1:
             return None
+        if self._cache_index is None:
+            self._cache_index = self._build_cache_index()
+        cached_path = self._cache_index.get((tool, args_hash))
+        if cached_path is None or not cached_path.exists():
+            return None
+        return cached_path.read_text(encoding="utf-8")
+
+    def _build_cache_index(self) -> dict[tuple[str, str], Path]:
+        index: dict[tuple[str, str], Path] = {}
+        if self.current_round is None or self.current_round <= 1:
+            return index
         exec_dir = self.session_dir / "execution"
         if not exec_dir.exists():
-            return None
+            return index
         for round_idx in range(self.current_round - 1, 0, -1):
             round_dir = exec_dir / f"round-{round_idx:02d}" / "outputs"
             if not round_dir.exists():
@@ -113,17 +123,19 @@ class Workspace:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError):
                     continue
-                if (
-                    isinstance(meta, dict)
-                    and meta.get("tool") == tool
-                    and meta.get("args_hash") == args_hash
-                ):
-                    content_path = meta_path.with_name(
-                        meta_path.name.removesuffix(".meta.json")
-                    )
-                    if content_path.exists():
-                        return content_path.read_text(encoding="utf-8")
-        return None
+                if not isinstance(meta, dict):
+                    continue
+                tool = meta.get("tool")
+                args_hash = meta.get("args_hash")
+                if not isinstance(tool, str) or not isinstance(args_hash, str):
+                    continue
+                key = (tool, args_hash)
+                if key in index:
+                    continue
+                content_path = meta_path.with_name(meta_path.name.removesuffix(".meta.json"))
+                if content_path.exists():
+                    index[key] = content_path
+        return index
 
     def _write_text(self, rel_path: str, content: str) -> Path:
         path = self._resolve(rel_path)

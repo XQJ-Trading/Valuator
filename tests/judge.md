@@ -21,6 +21,8 @@ Reviewer 클래스는 파이프라인 안에서 구조적 품질(query/execution
 - 산출물은 md 파일만 작성한다. 코드 변경, JSON 생성, 스크립트 실행 없음.
 - 날짜는 상대 표현(`최근`, `지난 분기`)이 아니라 절대 표현(`2025Q3`, `2026-01-08`)을 쓴다.
 
+**final.md 채점 시 기대되는 출력**은 도메인 지식(퀀트 투자 보고서·의사결정 품질의 보편적 기준)으로 정의한다. 3개 레이어(Baseline Preservation, Quant Coordinate, Decision Protocol)와 실무 체크리스트의 상세 스키마는 `docs/final_report_schema.md`를 참조한다. Step 2(Baseline vs Final), Step 4(5축), Step 5(verdict)에서 해당 도메인 원칙과 체크리스트를 언급하며 판단한다.
+
 ---
 
 ## Inputs
@@ -68,7 +70,7 @@ Reviewer 클래스는 파이프라인 안에서 구조적 품질(query/execution
 기록할 것:
 - 세션 id, query 원문 요약 (1~2문장)
 - 대응 baseline case id 및 baseline 리포트 제목/시점
-- Reviewer가 이미 내린 구조적 판단 요약 (query_coverage, execution_coverage, status)
+- Reviewer가 이미 내린 구조적 판단 요약 (actions, coverage_feedback.summary, status)
 - judge 평가에서 전제하는 것들 (예: "baseline은 2025Q3 실적 + 2026 전망 기준으로 작성됨")
 
 이 파일은 이후 모든 judge 파일의 **앵커**다. 다른 파일에서 반복 서술하지 않고 여기를 참조한다.
@@ -245,6 +247,18 @@ verdict가 `revise` 또는 `fail`일 때만 작성한다.
 
 ---
 
+## 실무 체크리스트 (제출 전 게이트)
+
+Judge가 final.md를 채점할 때, 아래 5항목이 충족되는지 제출 전 게이트로 확인한다. 상세 도메인 원칙은 `docs/final_report_schema.md`를 참조한다.
+
+- [ ] **Baseline 핵심 100% 커버** (baseline이 있을 때): baseline이 전달하는 핵심 주장·팩트·리스크·트리거가 final에 Present 또는 Upgraded로 반영되어 있는가.
+- [ ] **세그먼트 정량표 존재**: 사업부별(NA/Intl/AWS 등) 매출·영업이익·OPM·기여도가 표 또는 동등한 좌표계로 제시되어 있는가.
+- [ ] **ROIC/자본효율 문장 1개 이상**: Capex → FCF/ROIC(또는 자본 수익성) 연결이 한 문장 이상 서술되어 있는가.
+- [ ] **리스크가 P&L/멀티플로 연결됨**: 리스크가 "존재한다" 수준이 아니라, 손익·현금흐름·밸류에이션의 어떤 항목에 어떻게 전이되는지 경로가 서술되어 있는가.
+- [ ] **액션 트리거가 정량 임계값**: 비중 확대/보유/축소의 전환 조건이 관측 가능한 숫자 임계값(예: AWS 성장률 25% 이상, FCF 적자폭)으로 명시되어 있는가.
+
+---
+
 ## Qualitative Insight Checklist
 
 모든 judge 파일을 작성한 후, 최종 자기 점검용으로 아래를 확인한다:
@@ -255,3 +269,15 @@ verdict가 `revise` 또는 `fail`일 때만 작성한다.
 - [ ] 결론이 실제 의사결정(매수/보류/축소)으로 바로 연결되고, 전환 조건이 명시되는가
 - [ ] Coverage Matrix의 Impact 열이 "누락됨" 수준에 머물지 않고, 투자 판단 왜곡을 구체적으로 서술하는가
 - [ ] verdict의 Required Revisions가 모호하지 않고, 완료 조건이 검증 가능한가
+
+---
+
+## 부록: 파이프라인 산출이 baseline 대비 약해질 수 있는 원인
+
+Judge 평가 시 참고용으로, 현재 파이프라인 산출이 baseline(골드) 대비 약하게 나올 수 있는 **구조적 원인**을 요약한다. (원인을 알면 Required Revisions를 더 구체적으로 쓸 수 있다.)
+
+1. **구조적 보존 없음**: 필수 블록(세그먼트 표, 자본효율 1문장)을 명시하지 않으면, 요약 단계에서 서사 일관성을 우선해 표·ROIC 문장이 빠지기 쉽다. → Segment Economics·Capital Efficiency 축 약화.
+2. **이중 압축**: leaf → task synthesis → root → final 재요약으로 두 번 압축되며, root에 있던 표·숫자가 final 단계에서 빠질 수 있다. → 정량 좌표 Partial/Missing.
+3. **결론 변경 무설명**: 결론을 Buy에서 Tactical Hold 등으로 바꿨을 때 "왜/언제 복귀"를 쓰지 않으면, baseline 결론을 대체만 한 상태로 보인다. → 결론 일관성·신뢰도 하락.
+4. **Critic–Judge 불일치**: 파이프라인 Critic은 섹션 개수·숫자·트리거 개수·리스크 전이만 보고, 세그먼트 표·ROIC·View/Position·Regime Shift는 보지 않는다. → 파이프라인 pass여도 Judge 기준에서는 revise/fail 가능.
+5. **좌표계 불일치**: 시점·세그먼트 정의가 소스별로 섞이면, baseline과 같은 좌표계로 비교하기 어려워 Time Alignment·Segment Economics에서 불리하게 보일 수 있다.

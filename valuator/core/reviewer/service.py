@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -55,7 +54,6 @@ class Reviewer:
             node
             for task in leaf_tasks.values()
             for node in task.query_unit_ids
-            if 0 <= node < unit_count
         }
         units_without_leaf_mapping = [
             node for node in range(unit_count) if node not in mapped_units
@@ -79,6 +77,9 @@ class Reviewer:
             "final_empty": final_empty,
             "action_nodes_total": len(candidate_nodes),
         }
+        aggregation_error = str(aggregation.get("aggregation_error") or "").strip()
+        if aggregation_error:
+            signals["aggregation_error"] = 1
 
         user_prompt = build_reviewer_user_prompt(
             query=plan.query,
@@ -89,6 +90,7 @@ class Reviewer:
                 "missing_contract_items": missing_contract_items,
                 "missing_leaf_task_ids": missing_leaf_task_ids,
                 "units_without_leaf_mapping": units_without_leaf_mapping,
+                "aggregation_error": aggregation_error,
             },
             final_markdown=final_markdown,
             now_utc=now_utc,
@@ -97,20 +99,15 @@ class Reviewer:
             max_node=max(unit_count - 1, 0)
         )
 
-        try:
-            raw = await self.client.generate(
-                prompt=user_prompt,
-                system_prompt=REVIEWER_SYSTEM,
-                response_mime_type="application/json",
-                response_json_schema=response_schema,
-                trace_method="reviewer.review",
-            )
-            data: dict[str, Any] = json.loads(raw.strip())
-            actions = self._collapse_actions(data["actions"], unit_count)
-            self_assessment = data["self_assessment"]
-            quant_axes = data["quant_axes"]
-        except Exception as exc:
-            raise ValueError(f"invalid reviewer response: {exc}") from exc
+        data = await self.client.generate_json(
+            prompt=user_prompt,
+            system_prompt=REVIEWER_SYSTEM,
+            response_json_schema=response_schema,
+            trace_method="reviewer.review",
+        )
+        actions = self._collapse_actions(data["actions"], unit_count)
+        self_assessment = data["self_assessment"]
+        quant_axes = data["quant_axes"]
 
         coverage_feedback = self._build_coverage_feedback(
             signals=signals,
@@ -140,20 +137,16 @@ class Reviewer:
         nodes: set[int] = set()
         for item_id in missing_contract_items:
             item = item_map.get(item_id)
-            if item is not None and 0 <= item.unit_id < unit_count:
+            if item is not None:
                 nodes.add(item.unit_id)
 
         for node in units_without_leaf_mapping:
-            if 0 <= node < unit_count:
-                nodes.add(node)
+            nodes.add(node)
 
         for task_id in missing_leaf_task_ids:
-            task = leaf_tasks.get(task_id)
-            if task is None:
-                continue
+            task = leaf_tasks[task_id]
             for node in task.query_unit_ids:
-                if 0 <= node < unit_count:
-                    nodes.add(node)
+                nodes.add(node)
 
         if final_empty:
             return list(range(unit_count))
@@ -186,7 +179,7 @@ class Reviewer:
             node = action["node"]
             reason = action["reason"].strip()
             if node < 0 or node >= unit_count:
-                raise ValueError(f"invalid action node: {node}")
+                continue
             if not reason:
                 continue
             reason_by_node.setdefault(node, []).append(reason)

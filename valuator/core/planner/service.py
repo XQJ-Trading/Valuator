@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -9,7 +8,6 @@ from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..contracts.plan import Plan, Task, ToolCall
 from ..contracts.requirement import PlanContract, RequirementItem
-from ..graph.validator import validate_plan_graph
 
 _SYSTEM_PROMPT = (
     "Return concise JSON only. No markdown. "
@@ -81,7 +79,6 @@ class Planner:
             root_task_id=root_id,
             tasks=tasks,
         )
-        validate_plan_graph(plan)
         return plan
 
     async def replan(self, current_plan: Plan, review: dict[str, Any]) -> Plan:
@@ -119,9 +116,6 @@ class Planner:
 
         task_map = {task.id: task for task in current_plan.tasks}
         root_id = current_plan.root_task_id
-        if not root_id or root_id not in task_map:
-            raise ValueError("current plan has invalid root_task_id")
-
         root = task_map[root_id]
         merged_root = root.model_copy(
             update={"deps": [*root.deps, *[t.id for t in new_tasks]]}
@@ -131,7 +125,6 @@ class Planner:
         merged_tasks.append(merged_root)
 
         next_plan = current_plan.model_copy(update={"tasks": merged_tasks})
-        validate_plan_graph(next_plan)
         return next_plan
 
     async def _plan_decomposition(
@@ -154,10 +147,9 @@ class Planner:
             f"[LATEST_YEAR]\n{latest_year}\n\n"
             f"[QUERY]\n{query}\n"
         )
-        raw = await self.client.generate(
+        data = await self.client.generate_json(
             prompt=prompt,
             system_prompt=_SYSTEM_PROMPT,
-            response_mime_type="application/json",
             response_json_schema={
                 "type": "object",
                 "additionalProperties": False,
@@ -172,7 +164,6 @@ class Planner:
             },
             trace_method="planner._plan_decomposition",
         )
-        data = self._parse_json(raw)
         units = [unit.strip() for unit in data["units"] if unit.strip()]
         units = list(dict.fromkeys(units))
         if not units:
@@ -260,10 +251,9 @@ class Planner:
             f"[QUERY_UNIT]\n{unit}\n\n"
             f"[TOOLS]\n{tools_block}\n"
         )
-        raw = await self.client.generate(
+        data = await self.client.generate_json(
             prompt=prompt,
             system_prompt=_SYSTEM_PROMPT,
-            response_mime_type="application/json",
             response_json_schema={
                 "type": "object",
                 "additionalProperties": False,
@@ -275,13 +265,12 @@ class Planner:
             },
             trace_method="planner._select_tool_for_unit",
         )
-        data = self._parse_json(raw)
         name = data["tool_name"].strip()
         args = data["tool_args"]
-        self._validate_selected_tool(name=name, args=args)
+        self._check_tool_args(name=name, args=args)
         return ToolCall(name=name, args=args)
 
-    def _validate_selected_tool(
+    def _check_tool_args(
         self,
         *,
         name: str,
@@ -289,7 +278,7 @@ class Planner:
     ) -> None:
         spec = _TOOL_ARGS.get(name)
         if spec is None:
-            raise ValueError(f"invalid tool selected: {name}")
+            raise RuntimeError(f"planner tool registry mismatch: {name}")
         required = spec["required"]
         missing = [key for key in required if key not in args]
         if missing:
@@ -316,9 +305,6 @@ class Planner:
         if self._now_utc is not None:
             return self._now_utc.date()
         return date.today()
-
-    def _parse_json(self, raw: str) -> dict[str, Any]:
-        return json.loads(raw)
 
     def _compile_contract(self, query_units: list[str]) -> PlanContract:
         items: list[RequirementItem] = []

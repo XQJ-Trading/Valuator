@@ -14,8 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
-from valuator.core import Engine
-from valuator.core.llm_usage import LLMUsageWriter
+from valuator.core import Engine, Plan
 from valuator.utils.config import config
 from valuator.utils.logger import logger
 from .repositories import (
@@ -294,7 +293,6 @@ class SessionService:
 
     async def _run(self, runtime: _RuntimeSession) -> None:
         record = runtime.record
-        usage_writer: LLMUsageWriter | None = None
         try:
             await self._emit(
                 runtime,
@@ -314,214 +312,49 @@ class SessionService:
             )
 
             engine = Engine.create(session_id=record.session_id, model=record.model)
-            usage_writer = LLMUsageWriter(
-                engine.workspace.session_dir / "output" / "llm_usage.jsonl",
-                session_started_at=datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
-            )
-            engine.planner.bind_usage_writer(usage_writer)
-            engine.aggregator.bind_usage_writer(usage_writer)
-            engine.reviewer.bind_usage_writer(usage_writer)
-            engine.workspace.prepare()
-            engine.workspace.write_user_input(effective_query)
-            now_utc = datetime.now(timezone.utc)
-            engine.planner.bind_now_utc(now_utc)
-            engine.reviewer.bind_now_utc(now_utc)
-
-            await self._emit(
-                runtime,
-                {
-                    "type": "action",
-                    "stage": "plan",
-                    "content": "Step 1/5 - 계획 수립 중",
-                },
-            )
-            plan = await engine.planner.plan(effective_query)
-            await self._emit(
-                runtime,
-                {
-                    "type": "observation",
-                    "stage": "plan",
-                    "content": f"Step 1/5 완료 - task {len(plan.tasks)}개",
-                },
-            )
-
-            final_path: Path | None = None
-            latest_review: dict[str, Any] = {}
-            for round_idx in range(1, engine.max_rounds + 1):
-                engine.workspace.set_round(round_idx)
-                engine.workspace.write_plan(plan)
-
+            async def _on_leaf_start(task: Any) -> None:
                 await self._emit(
                     runtime,
                     {
                         "type": "action",
-                        "stage": "execute",
-                        "round": round_idx,
-                        "content": f"Step 2/5 - 실행 중 (round {round_idx})",
+                        "stage": "execute-task",
+                        "task_id": task.id,
+                        "content": f"Leaf 시작 - {task.id}",
                     },
                 )
-                leaf_total = len(
-                    [task for task in plan.tasks if task.task_type == "leaf"]
-                )
-                completed_leaf_count = 0
-                leaf_count_lock = asyncio.Lock()
 
-                async def _on_leaf_start(task: Any) -> None:
-                    await self._emit(
-                        runtime,
-                        {
-                            "type": "action",
-                            "stage": "execute-task",
-                            "round": round_idx,
-                            "task_id": task.id,
-                            "content": f"Leaf 시작 - {task.id}",
-                        },
-                    )
-
-                async def _on_leaf_complete(task: Any, _: dict[str, Any]) -> None:
-                    nonlocal completed_leaf_count
-                    async with leaf_count_lock:
-                        completed_leaf_count += 1
-                        current = completed_leaf_count
-                    await self._emit(
-                        runtime,
-                        {
-                            "type": "observation",
-                            "stage": "execute-task",
-                            "round": round_idx,
-                            "task_id": task.id,
-                            "content": f"Leaf 완료 - {task.id} ({current}/{leaf_total})",
-                        },
-                    )
-
-                execution = await engine.executor.execute(
-                    effective_query,
-                    plan,
-                    engine.workspace,
-                    usage_writer=usage_writer,
-                    on_leaf_start=_on_leaf_start,
-                    on_leaf_complete=_on_leaf_complete,
-                )
-                completed_leaf_ids = execution.get("leaf_completed_tasks") or []
+            async def _on_leaf_complete(task: Any, _: dict[str, Any]) -> None:
                 await self._emit(
                     runtime,
                     {
                         "type": "observation",
-                        "stage": "execute",
-                        "round": round_idx,
-                        "content": (
-                            f"Step 2/5 완료 - leaf task {len(completed_leaf_ids)}개 실행"
-                        ),
+                        "stage": "execute-task",
+                        "task_id": task.id,
+                        "content": f"Leaf 완료 - {task.id}",
                     },
                 )
 
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "action",
-                        "stage": "aggregate",
-                        "round": round_idx,
-                        "content": f"Step 3/5 - 집계 중 (round {round_idx})",
-                    },
-                )
-
-                async def _on_task_aggregated(
-                    task: Any, index: int, total: int
-                ) -> None:
-                    await self._emit(
-                        runtime,
-                        {
-                            "type": "observation",
-                            "stage": "aggregate-task",
-                            "round": round_idx,
-                            "task_id": task.id,
-                            "content": f"집계 완료 - {task.id} ({index}/{total})",
-                        },
-                    )
-
-                aggregation = await engine.aggregator.aggregate(
-                    effective_query,
-                    plan,
-                    execution,
-                    engine.workspace,
-                    on_task_aggregated=_on_task_aggregated,
-                )
-                final_path = engine.workspace.write_final(aggregation["final_markdown"])
+            async def _on_task_aggregated(
+                task: Any, index: int, total: int
+            ) -> None:
                 await self._emit(
                     runtime,
                     {
                         "type": "observation",
-                        "stage": "aggregate",
-                        "round": round_idx,
-                        "content": "Step 3/5 완료 - 최종 초안 생성",
+                        "stage": "aggregate-task",
+                        "task_id": task.id,
+                        "content": f"집계 완료 - {task.id} ({index}/{total})",
                     },
                 )
 
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "action",
-                        "stage": "review",
-                        "round": round_idx,
-                        "content": f"Step 4/5 - 리뷰 중 (round {round_idx})",
-                    },
-                )
-                review = await engine.reviewer.review(plan, execution, aggregation)
-                review_status = "pass" if not review["actions"] else "fail"
-                review_payload = {
-                    **review,
-                    "status": review_status,
-                    "round": round_idx,
-                }
-                engine.workspace.write_review(review_payload)
-                latest_review = review_payload
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "review",
-                        "stage": "review",
-                        "round": round_idx,
-                        "content": (
-                            "Step 4/5 완료 - "
-                            + (
-                                "PASS (추가 조치 없음)"
-                                if review_status == "pass"
-                                else "FAIL (재계획 필요)"
-                            )
-                        ),
-                    },
-                )
+            result = await engine.run(
+                effective_query,
+                on_leaf_start=_on_leaf_start,
+                on_leaf_complete=_on_leaf_complete,
+                on_task_aggregated=_on_task_aggregated,
+            )
 
-                if review_status == "pass":
-                    break
-                if round_idx >= engine.max_rounds:
-                    break
-
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "action",
-                        "stage": "replan",
-                        "round": round_idx,
-                        "content": f"Step 5/5 - 재계획 중 (round {round_idx})",
-                    },
-                )
-                plan = await engine.planner.replan(plan, review)
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "observation",
-                        "stage": "replan",
-                        "round": round_idx,
-                        "content": f"Step 5/5 완료 - task {len(plan.tasks)}개로 갱신",
-                    },
-                )
-
-            if final_path is None:
-                raise RuntimeError("engine did not produce final artifacts")
-
+            final_path = Path(result["final_path"])
             final_markdown = ""
             if final_path.exists():
                 final_markdown = final_path.read_text(encoding="utf-8").strip()
@@ -540,9 +373,7 @@ class SessionService:
                     "type": "review",
                     "stage": "summary",
                     "content": (
-                        f"최종 상태: {str(latest_review.get('status', 'unknown')).upper()}"
-                        if latest_review
-                        else "최종 상태: UNKNOWN"
+                        f"최종 상태: {str(result.get('status', 'unknown')).upper()}"
                     ),
                 },
             )
@@ -558,11 +389,6 @@ class SessionService:
             await self._emit(runtime, {"type": "error", "message": str(exc)})
             await self._persist(record, success=False)
         finally:
-            if usage_writer is not None:
-                engine.planner.bind_usage_writer(None)
-                engine.aggregator.bind_usage_writer(None)
-                engine.reviewer.bind_usage_writer(None)
-                usage_writer.append_total()
             await self._finish(record.session_id)
 
     async def _emit(self, runtime: _RuntimeSession, event: dict[str, Any]) -> None:
@@ -1282,16 +1108,24 @@ def _latest_round_dir(parent: Path) -> tuple[Path | None, int | None]:
     return best_dir, best_round
 
 
-def _read_json_or_default(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+def _read_json_dict(path: Path) -> dict[str, Any] | None:
     if not path.exists():
-        return default
+        return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
     except Exception:
-        pass
-    return default
+        return None
+    return None
+
+
+def _load_snapshot_plan(path: Path) -> tuple[Plan | None, dict[str, Any]]:
+    try:
+        model = Plan.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, (_read_json_dict(path) or {})
+    return model, model.model_dump()
 
 
 def _load_valuator_snapshot_payload(
@@ -1300,9 +1134,13 @@ def _load_valuator_snapshot_payload(
     plan_path = session_dir / "plan" / "active" / "decomposition.json"
     if not plan_path.exists():
         raise HTTPException(status_code=404, detail="Plan decomposition not found")
-    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan_model, plan = _load_snapshot_plan(plan_path)
 
-    query = str(plan.get("query", "")).strip()
+    query = (
+        plan_model.query.strip()
+        if plan_model is not None
+        else str(plan.get("query", "")).strip()
+    )
     if not query:
         input_path = session_dir / "input" / "user_input.md"
         if input_path.exists():
@@ -1320,7 +1158,7 @@ def _load_valuator_snapshot_payload(
                 result_path = task_dir / "result.md"
                 if not result_path.exists():
                     continue
-                meta = _read_json_or_default(task_dir / "result.md.meta.json", {})
+                meta = _read_json_dict(task_dir / "result.md.meta.json") or {}
                 execution_artifacts.append(
                     {
                         "task_id": task_id,
@@ -1346,20 +1184,19 @@ def _load_valuator_snapshot_payload(
                 }
             )
 
-    review = _read_json_or_default(
-        session_dir / "review" / "latest.json",
-        {"status": "running", "actions": [], "round": None},
-    )
-    if "actions" not in review or not isinstance(review.get("actions"), list):
-        review["actions"] = []
-    if "coverage_feedback" not in review or not isinstance(
-        review.get("coverage_feedback"), dict
-    ):
-        review["coverage_feedback"] = {}
-    if "now_utc" not in review or not isinstance(review.get("now_utc"), str):
-        review["now_utc"] = ""
-    if "quant_axes" not in review or not isinstance(review.get("quant_axes"), dict):
-        review["quant_axes"] = {}
+    review_raw = _read_json_dict(session_dir / "review" / "latest.json") or {
+        "status": "running",
+        "actions": [],
+        "round": None,
+    }
+    review = {
+        "status": str(review_raw.get("status") or "running"),
+        "round": review_raw.get("round"),
+        "actions": review_raw.get("actions") or [],
+        "coverage_feedback": review_raw.get("coverage_feedback") or {},
+        "now_utc": str(review_raw.get("now_utc") or ""),
+        "quant_axes": review_raw.get("quant_axes") or {},
+    }
 
     latest_round = review.get("round") or execution_round or aggregation_round
     output_exists = (session_dir / "output" / "final.md").exists()
@@ -1371,10 +1208,26 @@ def _load_valuator_snapshot_payload(
         "round": latest_round,
         "status": status,
         "plan": {
-            "query_units": plan.get("query_units") or [],
-            "contract": plan.get("contract"),
-            "tasks": plan.get("tasks") or [],
-            "root_task_id": plan.get("root_task_id"),
+            "query_units": (
+                list(plan_model.query_units)
+                if plan_model is not None
+                else plan.get("query_units") or []
+            ),
+            "contract": (
+                (plan_model.contract.model_dump() if plan_model.contract else None)
+                if plan_model is not None
+                else plan.get("contract")
+            ),
+            "tasks": (
+                [task.model_dump() for task in plan_model.tasks]
+                if plan_model is not None
+                else plan.get("tasks") or []
+            ),
+            "root_task_id": (
+                plan_model.root_task_id
+                if plan_model is not None
+                else plan.get("root_task_id")
+            ),
         },
         "execution": {"artifacts": execution_artifacts},
         "aggregation": {"reports": aggregation_reports},
@@ -1418,7 +1271,7 @@ async def get_valuator_task_detail(session_id: str, task_id: str):
         if exec_path.exists():
             execution_text = exec_path.read_text(encoding="utf-8")
         meta_path = execution_round_dir / "outputs" / task_id / "result.md.meta.json"
-        raw_meta = _read_json_or_default(meta_path, {})
+        raw_meta = _read_json_dict(meta_path) or {}
         metadata = {str(k): str(v) for k, v in raw_meta.items()}
 
     if aggregation_round_dir is not None:

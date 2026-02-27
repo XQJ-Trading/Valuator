@@ -136,15 +136,14 @@ class LLMUsageWriter:
         method: str,
         model: str,
         usage: TokenUsage | Mapping[str, int] | None,
-        latency_ms: float,
+        latency_seconds: float,
         started_at: str,
     ) -> None:
-        latency_ms = latency_ms * 1000.0
         row = LLMUsage.from_call(
             method=method,
             model=model,
             usage=usage,
-            latency_ms=latency_ms,
+            latency_ms=latency_seconds * 1000.0,
             started_at=started_at,
         )
         self._append_row(row)

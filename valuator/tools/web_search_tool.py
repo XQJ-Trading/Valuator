@@ -102,7 +102,7 @@ class PerplexitySearchTool(ReActBaseTool):
                     HumanMessage(content=query),
                 ]
             )
-            latency_ms = measurement.latency_seconds()
+            latency_seconds = measurement.latency_seconds()
             answer = response.content
             meta = getattr(response, "response_metadata", {}) or {}
             extra = getattr(response, "additional_kwargs", {}) or {}
@@ -117,7 +117,7 @@ class PerplexitySearchTool(ReActBaseTool):
                     method="web_search_tool._execute_single_search",
                     model="sonar",
                     usage=usage_meta,
-                    latency_ms=latency_ms,
+                    latency_seconds=latency_seconds,
                     started_at=measurement.started_at,
                 )
 
@@ -145,17 +145,17 @@ class PerplexitySearchTool(ReActBaseTool):
                 },
             )
         except Exception as e:
-            latency_ms = measurement.latency_seconds()
+            latency_seconds = measurement.latency_seconds()
             if writer is not None:
                 writer.append_call(
-                    method="web_search_tool._execute_single_search",
+                    method="web_search_tool._execute_single_search.error",
                     model="sonar",
                     usage={
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
                         "total_tokens": 0,
                     },
-                    latency_ms=latency_ms,
+                    latency_seconds=latency_seconds,
                     started_at=measurement.started_at,
                 )
             logger.error(f"Perplexity search failed: {e}")

@@ -2,7 +2,7 @@ import asyncio
 import queue
 import threading
 import uuid
-from typing import Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from google import genai
 from google.genai import chats, types
@@ -10,6 +10,9 @@ from google.genai import chats, types
 from ..utils.config import config
 
 _STREAM_DONE = object()
+
+if TYPE_CHECKING:
+    from ..core.llm_usage import LLMUsageWriter
 
 
 class GeminiSession:
@@ -74,12 +77,17 @@ class GeminiClient:
         model: str | None = None,
         api_key: str | None = None,
         client: genai.Client | None = None,
+        usage_writer: "LLMUsageWriter | None" = None,
     ):
         key = api_key or config.google_api_key
         if not key:
             raise ValueError("Missing GOOGLE_API_KEY")
         self.model = model or config.agent_model
         self.client = client or genai.Client(api_key=key)
+        self.usage_writer = usage_writer
+
+    def bind_usage_writer(self, usage_writer: "LLMUsageWriter | None") -> None:
+        self.usage_writer = usage_writer
 
     def format_messages(self, system_prompt: str) -> dict[str, str]:
         return {"system_prompt": system_prompt}
@@ -117,6 +125,7 @@ class GeminiClient:
         response_mime_type: str | None = None,
         response_schema: dict[str, Any] | None = None,
         response_json_schema: dict[str, Any] | None = None,
+        trace_method: str = "gemini.generate",
     ) -> str:
         config_obj = self._build_config(
             system_prompt=system_prompt,
@@ -124,13 +133,48 @@ class GeminiClient:
             response_schema=response_schema,
             response_json_schema=response_json_schema,
         )
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
-            model=self.model,
-            contents=prompt,
-            config=config_obj,
-        )
-        return self._extract_text(response)
+        from ..core.llm_usage import start_measurement
+
+        writer = self.usage_writer
+        measurement = start_measurement()
+        try:
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=self.model,
+                contents=prompt,
+                config=config_obj,
+            )
+            latency_ms = measurement.latency_seconds()
+
+            usage_metadata = getattr(response, "usage_metadata", None)
+            if hasattr(usage_metadata, "model_dump"):
+                usage_metadata = usage_metadata.model_dump()
+            if not isinstance(usage_metadata, dict):
+                usage_metadata = None
+
+            if writer is not None:
+                writer.append_call(
+                    method=trace_method,
+                    model=self.model,
+                    usage=usage_metadata,
+                    latency_ms=latency_ms,
+                    started_at=measurement.started_at,
+                )
+            return self._extract_text(response)
+        except Exception:
+            if writer is not None:
+                writer.append_call(
+                    method=trace_method,
+                    model=self.model,
+                    usage={
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                    latency_ms=measurement.latency_seconds(),
+                    started_at=measurement.started_at,
+                )
+            raise
 
     async def generate_stream(
         self,

@@ -21,6 +21,9 @@ class Aggregation:
     def __init__(self, client: GeminiClient | None = None):
         self.client = client or GeminiClient(config.agent_model)
 
+    def bind_usage_writer(self, usage_writer: Any | None) -> None:
+        self.client.bind_usage_writer(usage_writer)
+
     async def aggregate(
         self,
         query: str,
@@ -48,11 +51,13 @@ class Aggregation:
             if task.task_type == "leaf":
                 report = self._leaf_passthrough(task=task, materials=materials)
             else:
+                contract_section, contract_markers = self._contract_section(plan, task_id)
                 report = await self._synthesize(
                     task=task,
                     query=query,
                     materials=materials,
-                    contract_section=self._contract_section(plan, task_id),
+                    contract_section=contract_section,
+                    contract_markers=contract_markers,
                 )
             reports[task_id] = report
             workspace.write_output(
@@ -80,7 +85,6 @@ class Aggregation:
         return {
             "final_markdown": final_md,
             "root_task_id": root_task_id,
-            "root_report": root_report,
             "aggregated_leaf_task_ids": aggregated_leaf_task_ids,
             "aggregated_query_unit_ids": aggregated_query_unit_ids,
             "final_included_leaf_task_ids": aggregated_leaf_task_ids,
@@ -110,21 +114,26 @@ class Aggregation:
         query: str,
         materials: list[dict[str, str]],
         contract_section: str,
+        contract_markers: list[str],
     ) -> dict[str, Any]:
         if not materials:
             raise ValueError(f"no materials for task {task.id}")
 
         prompt = self._build_prompt(task, query, materials, contract_section)
+        markdown = ""
         try:
             raw = await self.client.generate(
                 prompt=prompt,
                 system_prompt=_SYSTEM_PROMPT,
+                trace_method="aggregator._synthesize",
             )
             markdown = raw.strip()
         except Exception:
-            markdown = self._fallback_synthesize(task, query, materials, contract_section)
+            pass
         if not markdown:
-            markdown = self._fallback_synthesize(task, query, materials, contract_section)
+            markdown = self._fallback_synthesize(
+                task, query, materials, contract_markers
+            )
         return {
             "task_id": task.id,
             "markdown": markdown,
@@ -168,44 +177,44 @@ class Aggregation:
             "- 상대 시점 표현(최근, 향후, 단기, 장기, 작년, 내년)을 사용하지 않음.\n"
             "- 리스크는 존재 여부만 쓰지 말고 손익/현금흐름 전이 경로로 설명.\n"
             "- 명확한 헤더와 구조로 작성.\n"
+            "- 자료에 valuation/pricing 좌표(시총, PER, PBR, 가격대, 목표가)가 있으면 누락 없이 유지.\n"
+            "- 투자 액션/트리거는 반드시 수치 임계치를 포함.\n"
+            "- QUERY/CONTRACT에 명시된 핵심 기업/티커는 유지하고, 다른 종목/테마로 대체하지 않음.\n"
             "- [CONTRACT] 섹션이 있으면 각 항목마다 `## [R-xxx]` 헤더를 반드시 하나씩 포함.\n"
             "- 각 `## [R-xxx]` 섹션은 해당 requirement를 직접 충족하는 답변을 포함.\n"
             "- 마크다운 텍스트만 반환 (JSON 래핑 없이)."
         )
 
-    def _contract_section(self, plan: Plan, task_id: str) -> str:
+    def _contract_section(self, plan: Plan, task_id: str) -> tuple[str, list[str]]:
         if plan.contract is None:
-            return ""
+            return "", []
         if plan.root_task_id and task_id != plan.root_task_id:
-            return ""
+            return "", []
+
         lines: list[str] = []
+        markers: list[str] = []
         for item in plan.contract.items:
             lines.append(
                 f"- [{item.id}] unit={item.unit_id} required={item.required} requirement={item.acceptance}"
             )
+            markers.append(item.id)
         if not lines:
-            return ""
-        return "\n".join(lines)
+            return "", []
+        return "\n".join(lines), markers
 
     def _fallback_synthesize(
         self,
         task: Task,
         query: str,
         materials: list[dict[str, str]],
-        contract_section: str,
+        contract_markers: list[str],
     ) -> str:
         title = task.description.strip() or task.id
         lines = [f"# {title}", "", f"- query: {query}", ""]
-        if contract_section.strip():
+        if contract_markers:
             lines.append("## Contract Coverage")
             lines.append("")
-            for row in contract_section.splitlines():
-                row = row.strip()
-                if not row.startswith("- ["):
-                    continue
-                marker = row.split("]", 1)[0].removeprefix("- [")
-                if not marker:
-                    continue
+            for marker in contract_markers:
                 lines.append(f"## [{marker}]")
                 lines.append("- requirement: covered in fallback output")
                 lines.append("")

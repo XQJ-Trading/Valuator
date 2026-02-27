@@ -24,11 +24,12 @@ from .base import ReActBaseTool
 
 
 class PerplexitySearchTool(ReActBaseTool):
-    def __init__(self):
+    def __init__(self, usage_writer: Any | None = None):
         super().__init__(
             name="web_search_tool",
             description="Search the web for current information using Perplexity AI. Provides real-time web results with citations.",
         )
+        self.usage_writer = usage_writer
         try:
             if ChatPerplexity is None or HumanMessage is None or SystemMessage is None:
                 raise ValueError("langchain-perplexity dependency is unavailable")
@@ -49,6 +50,9 @@ class PerplexitySearchTool(ReActBaseTool):
             logger.warning(f"PerplexitySearchTool initialization failed: {e}")
             self.chat = None
             self.available = False
+
+    def bind_usage_writer(self, usage_writer: Any | None) -> None:
+        self.usage_writer = usage_writer
 
     async def execute(
         self,
@@ -78,6 +82,11 @@ class PerplexitySearchTool(ReActBaseTool):
                 error="Perplexity API not available. Check PPLX_API_KEY configuration or dependencies.",
             )
 
+        from ..core.llm_usage import start_measurement
+
+        writer = self.usage_writer
+        measurement = start_measurement()
+
         try:
             logger.info(f"Searching web with Perplexity for: {query}")
 
@@ -93,9 +102,25 @@ class PerplexitySearchTool(ReActBaseTool):
                     HumanMessage(content=query),
                 ]
             )
+            latency_ms = measurement.latency_seconds()
             answer = response.content
             meta = getattr(response, "response_metadata", {}) or {}
             extra = getattr(response, "additional_kwargs", {}) or {}
+            usage_meta = getattr(response, "usage_metadata", {}) or {}
+            if hasattr(usage_meta, "model_dump"):
+                usage_meta = usage_meta.model_dump()
+            if not isinstance(usage_meta, dict):
+                usage_meta = {}
+
+            if writer is not None:
+                writer.append_call(
+                    method="web_search_tool._execute_single_search",
+                    model="sonar",
+                    usage=usage_meta,
+                    latency_ms=latency_ms,
+                    started_at=measurement.started_at,
+                )
+
             sources = (
                 meta.get("citations")
                 or meta.get("sources")
@@ -107,14 +132,32 @@ class PerplexitySearchTool(ReActBaseTool):
 
             return ToolResult(
                 success=True,
-                result={"query": query, "answer": answer, "sources": sources},
+                result={
+                    "query": query,
+                    "summary": answer,
+                    "answer": answer,
+                    "sources": sources,
+                },
                 metadata={
                     "search_type": "perplexity_web",
                     "model": "sonar",
-                    "usage": getattr(response, "usage_metadata", {}),
+                    "usage": usage_meta,
                 },
             )
         except Exception as e:
+            latency_ms = measurement.latency_seconds()
+            if writer is not None:
+                writer.append_call(
+                    method="web_search_tool._execute_single_search",
+                    model="sonar",
+                    usage={
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                    latency_ms=latency_ms,
+                    started_at=measurement.started_at,
+                )
             logger.error(f"Perplexity search failed: {e}")
             return ToolResult(
                 success=False, result=None, error=f"Search failed: {str(e)}"

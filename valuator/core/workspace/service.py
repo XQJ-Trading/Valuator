@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from ..contracts.plan import Plan
@@ -74,14 +73,14 @@ class Workspace:
     def write_output_metadata(self, rel_output_path: str, payload: dict) -> Path:
         return self._write_json(self._metadata_rel_path(rel_output_path), payload)
 
-    def read_output_metadata(self, rel_output_path: str) -> dict[str, str] | None:
+    def read_output_metadata(self, rel_output_path: str) -> dict | None:
         path = self._resolve(self._metadata_rel_path(rel_output_path))
         if not path.exists():
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        return {str(k): str(v) for k, v in data.items()}
+        return data
 
     def list_task_output_paths(self, task_id: str) -> list[str]:
         root = self._resolve(f"/execution/outputs/{task_id}")
@@ -109,7 +108,7 @@ class Workspace:
 
     def _build_cache_index(self) -> dict[tuple[str, str], Path]:
         index: dict[tuple[str, str], Path] = {}
-        if self.current_round is None or self.current_round <= 1:
+        if self.current_round is None:
             return index
         exec_dir = self.session_dir / "execution"
         if not exec_dir.exists():
@@ -127,9 +126,9 @@ class Workspace:
                     continue
                 tool = meta.get("tool")
                 args_hash = meta.get("args_hash")
-                if not isinstance(tool, str) or not isinstance(args_hash, str):
+                if not tool or not args_hash:
                     continue
-                key = (tool, args_hash)
+                key = (str(tool), str(args_hash))
                 if key in index:
                     continue
                 content_path = meta_path.with_name(meta_path.name.removesuffix(".meta.json"))
@@ -175,9 +174,10 @@ class Workspace:
 
     def _logical_output_path(self, path: Path) -> str:
         rel = path.resolve().relative_to(self.session_dir.resolve()).as_posix()
-        round_match = re.match(r"execution/round-\d+/outputs/(.+)", rel)
-        if round_match:
-            return f"/execution/outputs/{round_match.group(1)}"
+        parts = rel.split("/", 3)
+        if len(parts) == 4 and parts[0] == "execution" and parts[2] == "outputs":
+            if parts[1].startswith("round-"):
+                return f"/execution/outputs/{parts[3]}"
         if rel.startswith("execution/outputs/"):
             return f"/{rel}"
         raise ValueError(f"invalid output path for session workspace: {path}")

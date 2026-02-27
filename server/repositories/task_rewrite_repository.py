@@ -15,7 +15,7 @@ try:
 except ImportError:
     MONGODB_AVAILABLE = False
 
-from ..core.utils.logger import logger
+from valuator.utils.logger import logger
 
 if TYPE_CHECKING:
     from ..services.task_rewrite.models import TaskRewriteHistory

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,7 @@ from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..aggregator.service import Aggregation
 from ..contracts.plan import Plan
+from ..llm_usage import LLMUsageWriter
 from ..reviewer.service import Review
 from ..executor.service import Executor
 from ..graph.validator import validate_plan_graph
@@ -63,60 +65,111 @@ class Engine:
             raise ValueError("query is required")
 
         self.workspace.prepare()
+        usage_writer = LLMUsageWriter(
+            self.workspace.session_dir / "output" / "llm_usage.jsonl",
+            session_started_at=datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        )
+        self.planner.bind_usage_writer(usage_writer)
+        self.aggregator.bind_usage_writer(usage_writer)
+        self.reviewer.bind_usage_writer(usage_writer)
         self.workspace.write_user_input(query)
+        now_utc = datetime.now(timezone.utc)
+        self.planner.bind_now_utc(now_utc)
+        self.reviewer.bind_now_utc(now_utc)
+        try:
+            plan = await self.planner.plan(query)
+            final_path: Path | None = None
+            review_path: Path | None = None
+            latest_review: dict[str, Any] | None = None
 
-        plan = await self.planner.plan(query)
-        final_path: Path | None = None
-        review_path: Path | None = None
-        latest_review: dict[str, Any] = {}
+            for round_idx in range(1, self.max_rounds + 1):
+                review_payload, final_path, review_path = await self._run_round(
+                    query=query,
+                    plan=plan,
+                    round_idx=round_idx,
+                    usage_writer=usage_writer,
+                )
+                status = review_payload["status"]
+                latest_review = review_payload
 
-        for round_idx in range(1, self.max_rounds + 1):
-            self.workspace.set_round(round_idx)
-            self.workspace.write_plan(plan)
+                if status == "pass":
+                    break
+                if round_idx >= self.max_rounds:
+                    break
+                plan = await self.planner.replan(plan, review_payload)
 
-            execution = await self.executor.execute(query, plan, self.workspace)
-            aggregation = await self.aggregator.aggregate(
-                query,
-                plan,
-                execution,
-                self.workspace,
-            )
+            if final_path is None or review_path is None or latest_review is None:
+                raise RuntimeError("engine did not produce final artifacts")
 
-            final_path = self.workspace.write_final(aggregation["final_markdown"])
-            review = await self.reviewer.review(plan, execution, aggregation)
-            review["actions"] = self._require_action_list(review.get("actions"))
-            status = "pass" if not review["actions"] else "fail"
-            review["status"] = status
-            review["round"] = round_idx
-            review_path = self.workspace.write_review(review)
-            latest_review = review
-
-            if status == "pass":
-                break
-            if round_idx >= self.max_rounds:
-                break
-            plan = await self.planner.replan(plan, review)
-
-        if final_path is None or review_path is None:
-            raise RuntimeError("engine did not produce final artifacts")
-
-        return {
-            "session_id": self.workspace.session_id,
-            "coverage_feedback": latest_review.get("coverage_feedback", {}),
-            "status": str(latest_review.get("status", "fail")),
-            "final_path": str(final_path),
-            "review_path": str(review_path),
-        }
+            return {
+                "session_id": self.workspace.session_id,
+                "coverage_feedback": latest_review["coverage_feedback"],
+                "status": latest_review["status"],
+                "final_path": str(final_path),
+                "review_path": str(review_path),
+            }
+        finally:
+            self.planner.bind_usage_writer(None)
+            self.aggregator.bind_usage_writer(None)
+            self.reviewer.bind_usage_writer(None)
+            usage_writer.append_total()
 
     async def run_with_plan(self, query: str, plan: Plan) -> dict[str, Any]:
         if not query or not query.strip():
             raise ValueError("query is required")
         validate_plan_graph(plan)
         self.workspace.prepare()
+        usage_writer = LLMUsageWriter(
+            self.workspace.session_dir / "output" / "llm_usage.jsonl",
+            session_started_at=datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        )
+        self.planner.bind_usage_writer(usage_writer)
+        self.aggregator.bind_usage_writer(usage_writer)
+        self.reviewer.bind_usage_writer(usage_writer)
         self.workspace.write_user_input(query)
-        self.workspace.set_round(1)
+        now_utc = datetime.now(timezone.utc)
+        self.planner.bind_now_utc(now_utc)
+        self.reviewer.bind_now_utc(now_utc)
+        try:
+            review_payload, final_path, review_path = await self._run_round(
+                query,
+                plan,
+                round_idx=1,
+                usage_writer=usage_writer,
+            )
+            return {
+                "session_id": self.workspace.session_id,
+                "coverage_feedback": review_payload["coverage_feedback"],
+                "status": review_payload["status"],
+                "final_path": str(final_path),
+                "review_path": str(review_path),
+            }
+        finally:
+            self.planner.bind_usage_writer(None)
+            self.aggregator.bind_usage_writer(None)
+            self.reviewer.bind_usage_writer(None)
+            usage_writer.append_total()
+
+    async def _run_round(
+        self,
+        query: str,
+        plan: Plan,
+        *,
+        round_idx: int,
+        usage_writer: LLMUsageWriter | None = None,
+    ) -> tuple[dict[str, Any], Path, Path]:
+        self.workspace.set_round(round_idx)
         self.workspace.write_plan(plan)
-        execution = await self.executor.execute(query, plan, self.workspace)
+        execution = await self.executor.execute(
+            query,
+            plan,
+            self.workspace,
+            usage_writer=usage_writer,
+        )
         aggregation = await self.aggregator.aggregate(
             query,
             plan,
@@ -125,38 +178,10 @@ class Engine:
         )
         final_path = self.workspace.write_final(aggregation["final_markdown"])
         review = await self.reviewer.review(plan, execution, aggregation)
-        review["actions"] = self._require_action_list(review.get("actions"))
-        review["status"] = "pass" if not review["actions"] else "fail"
-        review["round"] = 1
-        review_path = self.workspace.write_review(review)
-        return {
-            "session_id": self.workspace.session_id,
-            "coverage_feedback": review.get("coverage_feedback", {}),
-            "status": str(review.get("status", "fail")),
-            "final_path": str(final_path),
-            "review_path": str(review_path),
+        review_payload = {
+            **review,
+            "status": "pass" if not review["actions"] else "fail",
+            "round": round_idx,
         }
-
-    def _require_action_list(self, value: Any) -> list[dict[str, Any]]:
-        if not isinstance(value, list):
-            raise ValueError("review.actions must be list[{'node': int, 'reason': str}]")
-        reason_by_node: dict[int, list[str]] = {}
-        for item in value:
-            if not isinstance(item, dict):
-                raise ValueError("review.actions must be list[{'node': int, 'reason': str}]")
-            node = item.get("node")
-            reason = item.get("reason")
-            if (
-                not isinstance(node, int)
-                or isinstance(node, bool)
-                or node < 0
-                or not isinstance(reason, str)
-                or not reason.strip()
-            ):
-                raise ValueError("review.actions must be list[{'node': int, 'reason': str}]")
-            reason_by_node.setdefault(node, []).append(reason.strip())
-        actions: list[dict[str, Any]] = []
-        for node in sorted(reason_by_node):
-            dedup = list(dict.fromkeys(reason_by_node[node]))
-            actions.append({"node": node, "reason": " ".join(dedup)})
-        return actions
+        review_path = self.workspace.write_review(review_payload)
+        return review_payload, final_path, review_path

@@ -4,7 +4,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
 from valuator.core import Engine
+from valuator.core.llm_usage import LLMUsageWriter
 from valuator.utils.config import config
 from valuator.utils.logger import logger
 from .repositories import (
@@ -257,6 +258,7 @@ class SessionService:
 
     async def _run(self, runtime: _RuntimeSession) -> None:
         record = runtime.record
+        usage_writer: LLMUsageWriter | None = None
         try:
             await self._emit(runtime, {"type": "start", "query": record.query, "content": record.query})
             await self._emit(
@@ -268,8 +270,20 @@ class SessionService:
             )
 
             engine = Engine.create(session_id=record.session_id, model=record.model)
+            usage_writer = LLMUsageWriter(
+                engine.workspace.session_dir / "output" / "llm_usage.jsonl",
+                session_started_at=datetime.now(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                ),
+            )
+            engine.planner.bind_usage_writer(usage_writer)
+            engine.aggregator.bind_usage_writer(usage_writer)
+            engine.reviewer.bind_usage_writer(usage_writer)
             engine.workspace.prepare()
             engine.workspace.write_user_input(record.query)
+            now_utc = datetime.now(timezone.utc)
+            engine.planner.bind_now_utc(now_utc)
+            engine.reviewer.bind_now_utc(now_utc)
 
             await self._emit(
                 runtime,
@@ -340,6 +354,7 @@ class SessionService:
                     record.query,
                     plan,
                     engine.workspace,
+                    usage_writer=usage_writer,
                     on_leaf_start=_on_leaf_start,
                     on_leaf_complete=_on_leaf_complete,
                 )
@@ -405,12 +420,14 @@ class SessionService:
                     },
                 )
                 review = await engine.reviewer.review(plan, execution, aggregation)
-                review["actions"] = engine._require_action_list(review.get("actions"))
                 review_status = "pass" if not review["actions"] else "fail"
-                review["status"] = review_status
-                review["round"] = round_idx
-                engine.workspace.write_review(review)
-                latest_review = review
+                review_payload = {
+                    **review,
+                    "status": review_status,
+                    "round": round_idx,
+                }
+                engine.workspace.write_review(review_payload)
+                latest_review = review_payload
                 await self._emit(
                     runtime,
                     {
@@ -488,6 +505,11 @@ class SessionService:
             await self._emit(runtime, {"type": "error", "message": str(exc)})
             await self._persist(record, success=False)
         finally:
+            if usage_writer is not None:
+                engine.planner.bind_usage_writer(None)
+                engine.aggregator.bind_usage_writer(None)
+                engine.reviewer.bind_usage_writer(None)
+                usage_writer.append_total()
             await self._finish(record.session_id)
 
     async def _emit(self, runtime: _RuntimeSession, event: dict[str, Any]) -> None:
@@ -1220,6 +1242,10 @@ def _load_valuator_snapshot_payload(session_dir: Path, session_id: str) -> dict[
         review.get("coverage_feedback"), dict
     ):
         review["coverage_feedback"] = {}
+    if "now_utc" not in review or not isinstance(review.get("now_utc"), str):
+        review["now_utc"] = ""
+    if "quant_axes" not in review or not isinstance(review.get("quant_axes"), dict):
+        review["quant_axes"] = {}
 
     latest_round = review.get("round") or execution_round or aggregation_round
     output_exists = (session_dir / "output" / "final.md").exists()
@@ -1243,6 +1269,8 @@ def _load_valuator_snapshot_payload(session_dir: Path, session_id: str) -> dict[
             "round": review.get("round"),
             "actions": review.get("actions", []),
             "coverage_feedback": review.get("coverage_feedback", {}),
+            "now_utc": review.get("now_utc", ""),
+            "quant_axes": review.get("quant_axes", {}),
         },
     }
 

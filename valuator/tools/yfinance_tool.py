@@ -13,19 +13,39 @@ class YFinanceBalanceSheetTool(BaseTool):
         )
 
     async def execute(self, **kwargs) -> ToolResult:
-        import datetime as dt
-        import yfinance as yf
-
         raw = kwargs.get("ticker") or kwargs.get("corp")
         if not raw or not str(raw).strip():
             return ToolResult(success=False, result=None, error="'ticker' is required")
 
         year = str(kwargs.get("year") or kwargs.get("years") or "").strip()
+        symbol = str(raw).strip()
+        query_year = year or "latest"
+        fallback_query = (
+            f"{symbol} balance sheet total assets total liabilities total equity "
+            f"market cap current price trailing pe price to book {query_year}"
+        )
+
+        import datetime as dt
+        try:
+            import yfinance as yf
+        except Exception as exc:
+            return ToolResult(
+                success=False,
+                result=None,
+                error=f"yfinance dependency is unavailable: {exc}",
+                metadata={
+                    "error_code": "dependency_missing",
+                    "fallback": {
+                        "tool_name": "web_search_tool",
+                        "tool_args": {"query": fallback_query},
+                    },
+                },
+            )
+
         min_year = kwargs.get("min_year")
         if min_year is not None:
             min_year = int(min_year)
 
-        symbol = str(raw).strip()
         ticker_candidates = [symbol]
         if symbol.isdigit() and len(symbol) == 6:
             ticker_candidates = [f"{symbol}.KS", f"{symbol}.KQ", symbol]
@@ -141,6 +161,7 @@ class YFinanceBalanceSheetTool(BaseTool):
             )
 
         t = yf.Ticker(used_ticker)
+        info = t.info or {}
         cf = t.cashflow
         if cf is None or cf.empty:
             cf = t.quarterly_cashflow
@@ -186,6 +207,13 @@ class YFinanceBalanceSheetTool(BaseTool):
             "interest_expense": interest_expense,
             "operating_cash_flow": operating_cash_flow,
             "capex": capex,
+            "market_cap": info.get("marketCap"),
+            "current_price": info.get("currentPrice"),
+            "trailing_pe": info.get("trailingPE"),
+            "forward_pe": info.get("forwardPE"),
+            "price_to_book": info.get("priceToBook"),
+            "enterprise_value": info.get("enterpriseValue"),
+            "currency": info.get("currency"),
         }
         if total_liabilities is not None and total_equity:
             result["debt_to_equity"] = total_liabilities / total_equity
@@ -195,6 +223,19 @@ class YFinanceBalanceSheetTool(BaseTool):
             result["interest_coverage"] = operating_income / abs(interest_expense)
         if operating_cash_flow is not None and capex is not None:
             result["free_cash_flow"] = operating_cash_flow - capex
+        summary_parts = [
+            f"ticker={result['ticker']}",
+            f"year={result['year']}",
+            f"market_cap={result.get('market_cap')}",
+            f"current_price={result.get('current_price')}",
+            f"trailing_pe={result.get('trailing_pe')}",
+            f"price_to_book={result.get('price_to_book')}",
+            f"debt_to_equity={result.get('debt_to_equity')}",
+            f"current_ratio={result.get('current_ratio')}",
+            f"interest_coverage={result.get('interest_coverage')}",
+            f"free_cash_flow={result.get('free_cash_flow')}",
+        ]
+        result["summary"] = ", ".join(summary_parts)
         return ToolResult(
             success=True,
             result=result,

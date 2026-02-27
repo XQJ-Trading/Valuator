@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import requests
@@ -24,15 +26,33 @@ SEC_HEADERS = {
 
 CHUNK_SIZE = 2000
 CHUNK_SYSTEM_PROMPT = (
-    "Extract only filing details relevant to the user query. "
-    "Stay strictly inside provided text. If nothing relevant exists, reply 'no relevant'."
+    "Return JSON only. Stay strictly inside provided filing text. "
+    "Set relevant=false when the chunk does not help answer the query."
 )
 CHUNK_PROMPT = (
     "10-K text slice:\n"
     "{chunk}\n\n"
-    "Retrieve information needed to answer this query:\n"
+    "Decide if this chunk is relevant to this query and extract only relevant details:\n"
     "{query}\n"
 )
+CHUNK_RESPONSE_JSON_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["relevant", "extract"],
+    "properties": {
+        "relevant": {"type": "boolean"},
+        "extract": {"type": "string"},
+    },
+}
+
+
+class SecToolError(Exception):
+    def __init__(
+        self, message: str, *, error_code: str = "other", recoverable: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.recoverable = recoverable
 
 
 def load_ticker_table() -> pd.DataFrame:
@@ -45,7 +65,7 @@ def load_ticker_table() -> pd.DataFrame:
     )
     response.raise_for_status()
     df = pd.DataFrame(response.json()).T
-    df.to_json(str(TICKER_PATH), orient="records", force_ascii=False)
+    df.to_json(TICKER_PATH, orient="records", force_ascii=False)
     return df
 
 
@@ -55,7 +75,11 @@ def get_ticker_and_cik(ticker: str) -> tuple[str, str]:
     normalized = re.sub(r"[^a-zA-Z0-9]", "", ticker).lower()
     rows = df[df["ticker"].astype(str).str.lower() == normalized]
     if rows.empty:
-        raise ValueError(f"ticker not found: {ticker}")
+        raise SecToolError(
+            f"ticker not found: {ticker}",
+            error_code="ticker_not_found",
+            recoverable=True,
+        )
     row = rows.iloc[0]
     return normalized, str(row["cik_str"]).zfill(10)
 
@@ -86,7 +110,11 @@ def get_10k_html_link(ticker: str, year: int) -> tuple[str, int]:
         reverse=True,
     )
     if not tenk_candidates:
-        raise ValueError("no 10-K filings found")
+        raise SecToolError(
+            "no 10-K filings found",
+            error_code="no_10k_filings",
+            recoverable=True,
+        )
 
     target_year = str(year)
     picks = [candidate for candidate in tenk_candidates if candidate[0].startswith(target_year)]
@@ -105,7 +133,11 @@ def get_10k_html_link(ticker: str, year: int) -> tuple[str, int]:
             probe = requests.get(html_url, headers=SEC_HEADERS, timeout=20)
             if probe.ok:
                 return html_url, year
-    raise ValueError(f"10-K report not found for ticker {ticker} in {year}")
+    raise SecToolError(
+        f"10-K report not found for ticker {ticker} in {year}",
+        error_code="missing_10k_report",
+        recoverable=True,
+    )
 
 
 def fetch_reader_lines(ticker: str, filing_url: str) -> list[str]:
@@ -133,62 +165,66 @@ def fetch_reader_lines(ticker: str, filing_url: str) -> list[str]:
 
 
 class SECTool(BaseTool):
-    def __init__(self):
+    def __init__(self, usage_writer: Any | None = None):
         super().__init__(
             "sec_tool",
             "Retrieve relevant 10-K details from SEC EDGAR for a ticker/year/query.",
         )
-        self.client = GeminiClient(config.agent_model)
+        self.client = GeminiClient(config.agent_model, usage_writer=usage_writer)
 
-    async def _ask_model(self, system_prompt: str, prompt: str) -> str:
-        content = await self.client.generate(prompt=prompt, system_prompt=system_prompt)
-        text = content.strip()
-        if not text:
-            raise ValueError("empty response from Gemini during SEC extraction")
-        return text
+    def bind_usage_writer(self, usage_writer: Any | None) -> None:
+        self.client.bind_usage_writer(usage_writer)
 
     async def _extract_chunks(self, query: str, lines: list[str]) -> list[str]:
         tasks = [
-            self._ask_model(
-                CHUNK_SYSTEM_PROMPT,
-                CHUNK_PROMPT.format(
+            self.client.generate(
+                prompt=CHUNK_PROMPT.format(
                     query=query,
                     chunk="\n".join(lines[start : start + CHUNK_SIZE]),
                 ),
+                system_prompt=CHUNK_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_json_schema=CHUNK_RESPONSE_JSON_SCHEMA,
+                trace_method="sec_tool._extract_chunks",
             )
             for start in range(0, len(lines), CHUNK_SIZE)
         ]
-        results = await asyncio.gather(*tasks)
-        return [
-            cleaned
-            for text in results
-            if (cleaned := text.strip())
-            and not cleaned.lower().startswith("no relevant")
-        ]
+        responses = await asyncio.gather(*tasks)
+        findings: list[str] = []
+        for raw in responses:
+            data = json.loads(raw)
+            if not data["relevant"]:
+                continue
+            text = data["extract"].strip()
+            if text:
+                findings.append(text)
+        return findings
 
     async def execute(self, **kwargs) -> ToolResult:
-        ticker = kwargs.get("ticker") or kwargs.get("corp")
+        ticker = (kwargs.get("ticker") or kwargs.get("corp") or "").strip()
         year = kwargs.get("year")
-        query = kwargs.get("query")
+        query = (kwargs.get("query") or "").strip()
         if not ticker:
             return ToolResult(success=False, result=None, error="'ticker' is required")
-        if not year:
+        if year is None:
             return ToolResult(success=False, result=None, error="'year' is required")
         if not query:
             return ToolResult(success=False, result=None, error="'query' is required")
 
         try:
             year_int = int(year)
-            filing_url, used_year = get_10k_html_link(str(ticker), year_int)
-            lines = fetch_reader_lines(str(ticker), filing_url)
-            findings = await self._extract_chunks(str(query), lines)
+            filing_url, used_year = get_10k_html_link(ticker, year_int)
+            lines = fetch_reader_lines(ticker, filing_url)
+            findings = await self._extract_chunks(query, lines)
+            summary = "\n\n".join(findings).strip()
             return ToolResult(
                 success=True,
                 result={
-                    "ticker": str(ticker).upper(),
+                    "ticker": ticker.upper(),
                     "year": used_year,
-                    "query": str(query),
+                    "query": query,
                     "filing_url": filing_url,
+                    "summary": summary,
                     "extracts": findings,
                 },
                 metadata={
@@ -197,8 +233,28 @@ class SECTool(BaseTool):
                     "selected_count": len(findings),
                 },
             )
+        except SecToolError as exc:
+            error_text = str(exc)
+            metadata = {"error_code": exc.error_code}
+            if exc.recoverable:
+                metadata["fallback"] = {
+                    "tool_name": "web_search_tool",
+                    "tool_args": {"query": query},
+                }
+            return ToolResult(
+                success=False,
+                result=None,
+                error=error_text,
+                metadata=metadata,
+            )
         except Exception as exc:
-            return ToolResult(success=False, result=None, error=str(exc))
+            error_text = str(exc)
+            return ToolResult(
+                success=False,
+                result=None,
+                error=error_text,
+                metadata={"error_code": "other"},
+            )
 
     def get_schema(self) -> dict[str, object]:
         return {

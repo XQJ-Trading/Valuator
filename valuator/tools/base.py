@@ -91,6 +91,9 @@ class BaseTool(ABC):
             "schema": self.get_schema(),
         }
 
+    def bind_usage_writer(self, usage_writer: Any | None) -> None:
+        _ = usage_writer
+
 
 class ReActBaseTool(BaseTool, ABC):
     def __init__(self, name: str, description: str):

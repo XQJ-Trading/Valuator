@@ -30,19 +30,15 @@ class ExecuteCodeTool(ReActBaseTool):
         exec_globals = {"__builtins__": __builtins__}
         try:
             with contextlib.redirect_stdout(output_buffer):
-                if any(k in code for k in ("def ", "class ", "for ", "while ", "if ")):
+                try:
+                    result = eval(code, exec_globals)
+                except SyntaxError:
                     exec(code, exec_globals)
                     execution_type = "exec"
                 else:
-                    try:
-                        result = eval(code, exec_globals)
-                    except SyntaxError:
-                        exec(code, exec_globals)
-                        execution_type = "exec"
-                    else:
-                        if result is not None:
-                            print(result)
-                        execution_type = "eval"
+                    if result is not None:
+                        print(result)
+                    execution_type = "eval"
             output = output_buffer.getvalue().strip()
             if not output:
                 output = (

@@ -2,12 +2,15 @@ import { createRouter, createWebHistory } from 'vue-router'
 import ChatPage from '../pages/ChatPage.vue'
 import HistoryPage from '../pages/HistoryPage.vue'
 import OngoingPage from '../pages/OngoingPage.vue'
-import SessionPage from '../pages/SessionPage.vue'
 import TaskRewritePage from '../pages/TaskRewritePage.vue'
 import TaskRewriteHistoryPage from '../pages/TaskRewriteHistoryPage.vue'
 import TaskRewriteDetailPage from '../pages/TaskRewriteDetailPage.vue'
 import GeminiLogsPage from '../pages/GeminiLogsPage.vue'
 import GeminiLogDetailPage from '../pages/GeminiLogDetailPage.vue'
+import ValuatorSessionsPage from '../pages/ValuatorSessionsPage.vue'
+import ValuatorSessionPage from '../pages/ValuatorSessionPage.vue'
+import ValuatorTaskDetailPage from '../pages/ValuatorTaskDetailPage.vue'
+import ValuatorFinalPage from '../pages/ValuatorFinalPage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -30,11 +33,9 @@ const router = createRouter({
     },
     {
       path: '/session/:sessionId',
-      name: 'session',
-      component: SessionPage,
-      props: true,
+      redirect: to => `/sessions/${String(to.params.sessionId || '')}`,
       meta: {
-        title: 'AI Agent - Session'
+        title: 'Valuator - Session Detail'
       }
     },
     {
@@ -52,6 +53,41 @@ const router = createRouter({
       props: true,
       meta: {
         title: 'AI Agent - Session Detail'
+      }
+    },
+    {
+      path: '/sessions',
+      name: 'valuator-sessions',
+      component: ValuatorSessionsPage,
+      meta: {
+        title: 'Valuator - Sessions'
+      }
+    },
+    {
+      path: '/sessions/:sessionId',
+      name: 'valuator-session-detail',
+      component: ValuatorSessionPage,
+      props: true,
+      meta: {
+        title: 'Valuator - Session Detail'
+      }
+    },
+    {
+      path: '/sessions/:sessionId/tasks/:taskId',
+      name: 'valuator-task-detail',
+      component: ValuatorTaskDetailPage,
+      props: true,
+      meta: {
+        title: 'Valuator - Task Detail'
+      }
+    },
+    {
+      path: '/sessions/:sessionId/final',
+      name: 'valuator-final',
+      component: ValuatorFinalPage,
+      props: true,
+      meta: {
+        title: 'Valuator - Final'
       }
     },
     {

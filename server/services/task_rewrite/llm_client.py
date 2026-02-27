@@ -2,9 +2,9 @@
 
 from typing import Optional
 
-from ...core.models.gemini_direct import GeminiDirectModel
-from ...core.utils.config import config
-from ...core.utils.logger import logger
+from valuator.models.gemini_direct import GeminiClient
+from valuator.utils.config import config
+from valuator.utils.logger import logger
 
 
 class TaskRewriteLLMClient:
@@ -23,11 +23,11 @@ class TaskRewriteLLMClient:
                 "Google API key is required. Set GOOGLE_API_KEY in environment or pass api_key parameter."
             )
 
-        self._model_cache: dict[str, GeminiDirectModel] = {}
+        self._model_cache: dict[str, GeminiClient] = {}
 
     def _get_model(
         self, model_name: str, thinking_level: Optional[str] = None
-    ) -> GeminiDirectModel:
+    ) -> GeminiClient:
         """
         Get or create a model instance (with caching)
 
@@ -36,20 +36,17 @@ class TaskRewriteLLMClient:
             thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
 
         Returns:
-            GeminiDirectModel instance
+            GeminiClient instance
         """
         # Create cache key including thinking_level
         cache_key = f"{model_name}:{thinking_level or 'none'}"
 
         if cache_key not in self._model_cache:
-            # Always use direct API
-            self._model_cache[cache_key] = GeminiDirectModel(
+            # thinking_level is accepted for API compatibility, but current client path is prompt-only.
+            _ = thinking_level
+            self._model_cache[cache_key] = GeminiClient(
                 model=model_name,
-                google_api_key=self.api_key,
-                temperature=0.7,
-                max_output_tokens=2048,
-                thinking_level=thinking_level,
-                streaming=False,
+                api_key=self.api_key,
             )
             logger.debug(
                 f"Created Direct API LLM client for model: {model_name}, thinking_level: {thinking_level}"
@@ -92,18 +89,7 @@ class TaskRewriteLLMClient:
 
         try:
             logger.info(f"Calling LLM for task rewrite (model: {model})")
-            from langchain_core.messages import HumanMessage
-
-            messages = [HumanMessage(content=prompt)]
-            if (
-                not messages
-                or not messages[0].content
-                or not messages[0].content.strip()
-            ):
-                raise ValueError("Message content cannot be empty")
-
-            response = await llm.ainvoke(messages)
-            rewritten_task = response.content if hasattr(response, "content") else str(response)
+            rewritten_task = await llm.generate(prompt=prompt, system_prompt="")
 
             logger.info(f"Task rewrite completed (model: {model})")
             return rewritten_task.strip()

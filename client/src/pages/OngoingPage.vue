@@ -148,8 +148,7 @@ async function fetchActiveSessions() {
 }
 
 function connectToSession(sessionId: string) {
-  // 세션 페이지로 이동 (세션 URL)
-  router.push(`/session/${sessionId}`)
+  router.push(`/sessions/${sessionId}`)
 }
 
 function truncateText(text: string, length: number): string {

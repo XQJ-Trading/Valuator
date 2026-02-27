@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..core.utils.logger import logger
+from valuator.utils.logger import logger
 from .base import SessionRepository
 
 

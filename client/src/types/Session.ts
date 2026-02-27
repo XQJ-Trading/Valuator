@@ -20,7 +20,7 @@ export interface SessionEvent {
 }
 
 export interface StreamEventData {
-  type: 'start' | 'thought' | 'action' | 'observation' | 'final_answer' | 'end' | 'error' | 'token'
+  type: 'start' | 'thought' | 'action' | 'observation' | 'review' | 'final_answer' | 'end' | 'error' | 'token'
   content?: string
   message?: string
   tool?: string

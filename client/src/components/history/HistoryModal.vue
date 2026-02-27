@@ -140,8 +140,9 @@ async function handleReplay(sessionId: string) {
       sessionId,
       (event) => {
         // 이벤트를 Message 형식으로 변환
+        const messageType = event.type === 'review' ? 'observation' : event.type
         const message: Message = {
-          type: event.type,
+          type: messageType as Message['type'],
           content: event.content || '',
           metadata: {
             tool: event.tool,
@@ -161,13 +162,12 @@ async function handleReplay(sessionId: string) {
           replayStatus.value = '🧠 사고중...'
         } else if (event.type === 'action') {
           replayStatus.value = `⚡ ${event.tool || '도구'} 실행중...`
-        } else if (event.type === 'observation') {
+        } else if (event.type === 'observation' || event.type === 'review') {
           replayStatus.value = '👁️ 결과 분석중...'
         } else if (event.type === 'end') {
           replayStatus.value = '재생 완료'
         }
       },
-1
     )
   } catch (e: any) {
     console.error('Replay error:', e)

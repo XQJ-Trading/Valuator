@@ -126,7 +126,14 @@ def session_to_stream_events(session: dict[str, Any]) -> list[dict[str, Any]]:
             event_type = str(step.get("type") or "observation")
             content = str(step.get("content") or "")
             event: dict[str, Any] = {"type": event_type, "content": content}
-            for key in ("tool", "tool_input", "tool_output", "tool_result", "error", "query"):
+            for key in (
+                "tool",
+                "tool_input",
+                "tool_output",
+                "tool_result",
+                "error",
+                "query",
+            ):
                 if key in step:
                     event[key] = step[key]
             events.append(event)
@@ -156,6 +163,8 @@ class SessionRecord:
     created_at: datetime
     completed_at: datetime | None = None
     error: str | None = None
+    thinking_level: str | None = None
+    context: dict[str, Any] | None = None
     steps: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -164,10 +173,14 @@ class SessionRecord:
             "query": self.query,
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": (
+                self.completed_at.isoformat() if self.completed_at else None
+            ),
             "event_count": len(self.steps),
             "error": self.error,
             "model": self.model,
+            "thinking_level": self.thinking_level,
+            "context": self.context,
         }
 
 
@@ -175,6 +188,8 @@ class SessionRecord:
 class _RuntimeSession:
     record: SessionRecord
     subscribers: list[asyncio.Queue]
+    thinking_level: str | None = None
+    context: dict[str, Any] | None = None
     task: asyncio.Task | None = None
 
 
@@ -182,6 +197,9 @@ class SessionService:
     def __init__(self, history_repository: Any):
         self.history_repository = history_repository
         self._active: dict[str, _RuntimeSession] = {}
+        self._completed: dict[str, _RuntimeSession] = {}
+        self._completed_order: list[str] = []
+        self._max_completed_sessions = 20
 
     async def start_session(
         self,
@@ -191,7 +209,7 @@ class SessionService:
         thinking_level: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> SessionRecord:
-        _ = thinking_level, context
+        normalized_context = dict(context) if context else None
         session_id = f"S-{datetime.utcnow().strftime('%Y%m%d-%H%M%S%fZ')}"
         record = SessionRecord(
             session_id=session_id,
@@ -199,34 +217,41 @@ class SessionService:
             model=model or config.agent_model,
             status=SessionStatus.RUNNING,
             created_at=datetime.utcnow(),
+            thinking_level=thinking_level,
+            context=normalized_context,
         )
-        runtime = _RuntimeSession(record=record, subscribers=[])
+        runtime = _RuntimeSession(
+            record=record,
+            subscribers=[],
+            thinking_level=thinking_level,
+            context=normalized_context,
+        )
         runtime.task = asyncio.create_task(self._run(runtime))
         self._active[session_id] = runtime
         return record
 
     async def get_session(self, session_id: str) -> SessionRecord | None:
-        runtime = self._active.get(session_id)
+        runtime = self._runtime_for(session_id)
         return runtime.record if runtime else None
 
-    async def subscribe_to_session(self, session_id: str) -> AsyncGenerator[dict[str, Any], None]:
-        runtime = self._active.get(session_id)
+    async def subscribe_to_session(
+        self, session_id: str
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        runtime = self._runtime_for(session_id)
         if runtime is None:
             raise ValueError(f"Session not found: {session_id}")
 
         queue: asyncio.Queue = asyncio.Queue()
-        for event in runtime.record.steps:
-            await queue.put(event)
-        await queue.put(None if runtime.record.status == SessionStatus.RUNNING else "END")
-
         runtime.subscribers.append(queue)
+        for event in runtime.record.steps:
+            queue.put_nowait(event)
+        if runtime.record.status != SessionStatus.RUNNING:
+            queue.put_nowait("END")
         try:
             while True:
                 item = await queue.get()
                 if item == "END":
                     break
-                if item is None:
-                    continue
                 yield item
         finally:
             if queue in runtime.subscribers:
@@ -235,7 +260,15 @@ class SessionService:
     async def end_session(self, session_id: str) -> bool:
         runtime = self._active.get(session_id)
         if runtime is None:
-            return False
+            removed = self._completed.pop(session_id, None)
+            if removed is None:
+                return False
+            self._completed_order = [
+                existing for existing in self._completed_order if existing != session_id
+            ]
+            for queue in removed.subscribers:
+                queue.put_nowait("END")
+            return True
 
         if runtime.task and not runtime.task.done():
             runtime.task.cancel()
@@ -244,14 +277,17 @@ class SessionService:
             except asyncio.CancelledError:
                 pass
 
-        runtime.record.status = SessionStatus.FAILED
-        runtime.record.completed_at = datetime.utcnow()
-        runtime.record.error = "terminated"
-        await self._persist(runtime.record, success=False)
+        if runtime.record.status == SessionStatus.RUNNING:
+            runtime.record.status = SessionStatus.FAILED
+            runtime.record.completed_at = datetime.utcnow()
+            runtime.record.error = "terminated"
+            await self._persist(runtime.record, success=False)
         await self._finish(session_id)
         return True
 
-    async def list_sessions(self, limit: int = 20, offset: int = 0) -> list[SessionRecord]:
+    async def list_sessions(
+        self, limit: int = 20, offset: int = 0
+    ) -> list[SessionRecord]:
         rows = [state.record for state in self._active.values()]
         rows.sort(key=lambda item: item.created_at, reverse=True)
         return rows[offset : offset + limit]
@@ -260,7 +296,15 @@ class SessionService:
         record = runtime.record
         usage_writer: LLMUsageWriter | None = None
         try:
-            await self._emit(runtime, {"type": "start", "query": record.query, "content": record.query})
+            await self._emit(
+                runtime,
+                {"type": "start", "query": record.query, "content": record.query},
+            )
+            effective_query = self._build_effective_query(
+                record.query,
+                thinking_level=runtime.thinking_level,
+                context=runtime.context,
+            )
             await self._emit(
                 runtime,
                 {
@@ -272,15 +316,15 @@ class SessionService:
             engine = Engine.create(session_id=record.session_id, model=record.model)
             usage_writer = LLMUsageWriter(
                 engine.workspace.session_dir / "output" / "llm_usage.jsonl",
-                session_started_at=datetime.now(timezone.utc).isoformat().replace(
-                    "+00:00", "Z"
-                ),
+                session_started_at=datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
             )
             engine.planner.bind_usage_writer(usage_writer)
             engine.aggregator.bind_usage_writer(usage_writer)
             engine.reviewer.bind_usage_writer(usage_writer)
             engine.workspace.prepare()
-            engine.workspace.write_user_input(record.query)
+            engine.workspace.write_user_input(effective_query)
             now_utc = datetime.now(timezone.utc)
             engine.planner.bind_now_utc(now_utc)
             engine.reviewer.bind_now_utc(now_utc)
@@ -293,7 +337,7 @@ class SessionService:
                     "content": "Step 1/5 - 계획 수립 중",
                 },
             )
-            plan = await engine.planner.plan(record.query)
+            plan = await engine.planner.plan(effective_query)
             await self._emit(
                 runtime,
                 {
@@ -318,7 +362,9 @@ class SessionService:
                         "content": f"Step 2/5 - 실행 중 (round {round_idx})",
                     },
                 )
-                leaf_total = len([task for task in plan.tasks if task.task_type == "leaf"])
+                leaf_total = len(
+                    [task for task in plan.tasks if task.task_type == "leaf"]
+                )
                 completed_leaf_count = 0
                 leaf_count_lock = asyncio.Lock()
 
@@ -351,7 +397,7 @@ class SessionService:
                     )
 
                 execution = await engine.executor.execute(
-                    record.query,
+                    effective_query,
                     plan,
                     engine.workspace,
                     usage_writer=usage_writer,
@@ -380,7 +426,10 @@ class SessionService:
                         "content": f"Step 3/5 - 집계 중 (round {round_idx})",
                     },
                 )
-                async def _on_task_aggregated(task: Any, index: int, total: int) -> None:
+
+                async def _on_task_aggregated(
+                    task: Any, index: int, total: int
+                ) -> None:
                     await self._emit(
                         runtime,
                         {
@@ -393,7 +442,7 @@ class SessionService:
                     )
 
                 aggregation = await engine.aggregator.aggregate(
-                    record.query,
+                    effective_query,
                     plan,
                     execution,
                     engine.workspace,
@@ -436,7 +485,11 @@ class SessionService:
                         "round": round_idx,
                         "content": (
                             "Step 4/5 완료 - "
-                            + ("PASS (추가 조치 없음)" if review_status == "pass" else "FAIL (재계획 필요)")
+                            + (
+                                "PASS (추가 조치 없음)"
+                                if review_status == "pass"
+                                else "FAIL (재계획 필요)"
+                            )
                         ),
                     },
                 )
@@ -515,7 +568,7 @@ class SessionService:
     async def _emit(self, runtime: _RuntimeSession, event: dict[str, Any]) -> None:
         runtime.record.steps.append(event)
         for queue in list(runtime.subscribers):
-            await queue.put(event)
+            queue.put_nowait(event)
 
     async def _persist(self, record: SessionRecord, *, success: bool) -> None:
         if self.history_repository is None:
@@ -530,15 +583,70 @@ class SessionService:
             "duration": self._duration_seconds(record),
             "status": record.status.value,
             "model": record.model,
+            "thinking_level": record.thinking_level,
+            "context": record.context,
         }
         await self.history_repository.save_session(payload)
 
     async def _finish(self, session_id: str) -> None:
         runtime = self._active.pop(session_id, None)
+        if runtime is not None:
+            self._remember_completed(runtime)
+        else:
+            runtime = self._completed.get(session_id)
         if runtime is None:
             return
         for queue in runtime.subscribers:
-            await queue.put("END")
+            queue.put_nowait("END")
+
+    def _runtime_for(self, session_id: str) -> _RuntimeSession | None:
+        return self._active.get(session_id) or self._completed.get(session_id)
+
+    def _remember_completed(self, runtime: _RuntimeSession) -> None:
+        session_id = runtime.record.session_id
+        already_known = session_id in self._completed
+        self._completed[session_id] = runtime
+        if not already_known:
+            self._completed_order.append(session_id)
+
+        while len(self._completed_order) > self._max_completed_sessions:
+            expired_id = self._completed_order.pop(0)
+            self._completed.pop(expired_id, None)
+
+    @staticmethod
+    def _build_effective_query(
+        query: str,
+        *,
+        thinking_level: str | None,
+        context: dict[str, Any] | None,
+    ) -> str:
+        sections: list[str] = []
+        if thinking_level:
+            sections.append(f"[THINKING_LEVEL]\n{thinking_level}")
+
+        if context:
+            context_copy = dict(context)
+            system_context = str(context_copy.pop("system_context", "") or "").strip()
+            if system_context:
+                sections.append(f"[SYSTEM_CONTEXT]\n{system_context}")
+
+            valuation_profile = context_copy.pop("valuation_profile", None)
+            if valuation_profile is not None:
+                sections.append(f"[VALUATION_PROFILE]\n{valuation_profile}")
+
+            if context_copy:
+                sections.append(
+                    "[REQUEST_CONTEXT_JSON]\n"
+                    + json.dumps(
+                        context_copy, ensure_ascii=False, sort_keys=True, default=str
+                    )
+                )
+
+        if not sections:
+            return query
+
+        request_control = "\n\n".join(sections)
+        return f"{query}\n\n[REQUEST_CONTROL]\n{request_control}"
 
     @staticmethod
     def _final_answer(steps: list[dict[str, Any]]) -> str:
@@ -1094,7 +1202,9 @@ async def list_active_sessions(
             active = await session_service.list_sessions(limit=limit + offset, offset=0)
             active_rows = [session.to_dict() for session in active]
 
-            historical = await history_repository.list_sessions(limit=limit + offset, offset=0)
+            historical = await history_repository.list_sessions(
+                limit=limit + offset, offset=0
+            )
             summaries = sessions_to_summaries(historical)
             history_rows = [
                 {
@@ -1184,7 +1294,9 @@ def _read_json_or_default(path: Path, default: dict[str, Any]) -> dict[str, Any]
     return default
 
 
-def _load_valuator_snapshot_payload(session_dir: Path, session_id: str) -> dict[str, Any]:
+def _load_valuator_snapshot_payload(
+    session_dir: Path, session_id: str
+) -> dict[str, Any]:
     plan_path = session_dir / "plan" / "active" / "decomposition.json"
     if not plan_path.exists():
         raise HTTPException(status_code=404, detail="Plan decomposition not found")
@@ -1220,7 +1332,9 @@ def _load_valuator_snapshot_payload(session_dir: Path, session_id: str) -> dict[
                 )
 
     aggregation_reports: list[dict[str, Any]] = []
-    aggregation_round_dir, aggregation_round = _latest_round_dir(session_dir / "aggregation")
+    aggregation_round_dir, aggregation_round = _latest_round_dir(
+        session_dir / "aggregation"
+    )
     if aggregation_round_dir is not None:
         for report in sorted(aggregation_round_dir.rglob("report.md")):
             task_id = report.parent.name
@@ -1284,7 +1398,9 @@ async def get_valuator_snapshot(session_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to build valuator snapshot for {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to build snapshot: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to build snapshot: {str(e)}"
+        )
 
 
 @app.get("/api/v1/sessions/{session_id}/valuator/tasks/{task_id}")
@@ -1311,7 +1427,9 @@ async def get_valuator_task_detail(session_id: str, task_id: str):
             aggregation_text = agg_path.read_text(encoding="utf-8")
 
     if not execution_text and not aggregation_text:
-        raise HTTPException(status_code=404, detail=f"Task artifacts not found: {task_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Task artifacts not found: {task_id}"
+        )
 
     return {
         "session_id": session_id,
@@ -1558,7 +1676,9 @@ async def get_gemini_logs(
                 timestamp_str = _extract_step_timestamp(step_file.name)
                 if not timestamp_str:
                     continue
-                display_name = _encode_session_log_filename(session_dir.name, step_file.name)
+                display_name = _encode_session_log_filename(
+                    session_dir.name, step_file.name
+                )
                 add_metadata(step_file, display_name, timestamp_str)
 
         # Legacy flat logs (backward compatibility)
@@ -1567,18 +1687,20 @@ async def get_gemini_logs(
             if not timestamp_str:
                 continue
             add_metadata(filepath, filepath.name, timestamp_str)
-        
+
         # Apply filters
         filtered_files = file_metadatas
-        
+
         # Search filter
         if search:
             search_lower = search.lower()
             filtered_files = [
-                f for f in filtered_files
-                if search_lower in f["filename"].lower() or search_lower in f["timestamp"].lower()
+                f
+                for f in filtered_files
+                if search_lower in f["filename"].lower()
+                or search_lower in f["timestamp"].lower()
             ]
-        
+
         # Date range filter
         if date_from:
             try:
@@ -1586,11 +1708,12 @@ async def get_gemini_logs(
                 filtered_files = [
                     f
                     for f in filtered_files
-                    if f["date"] and datetime.fromisoformat(f["date"]).date() >= from_date
+                    if f["date"]
+                    and datetime.fromisoformat(f["date"]).date() >= from_date
                 ]
             except ValueError:
                 pass
-        
+
         if date_to:
             try:
                 to_date = datetime.strptime(date_to, "%Y%m%d").date()
@@ -1601,7 +1724,7 @@ async def get_gemini_logs(
                 ]
             except ValueError:
                 pass
-        
+
         # Model filter
         if model:
             # Need to load model from files that weren't loaded yet
@@ -1615,7 +1738,7 @@ async def get_gemini_logs(
                     except Exception:
                         pass
             filtered_files = [f for f in filtered_files if f.get("model") == model]
-        
+
         # Sort
         if sort == "newest":
             filtered_files.sort(key=lambda x: x["datetime"] or "", reverse=True)
@@ -1623,11 +1746,11 @@ async def get_gemini_logs(
             filtered_files.sort(key=lambda x: x["datetime"] or "")
         elif sort == "size":
             filtered_files.sort(key=lambda x: x["size"], reverse=True)
-        
+
         # Pagination
         total = len(filtered_files)
-        paginated_files = filtered_files[offset:offset + limit]
-        
+        paginated_files = filtered_files[offset : offset + limit]
+
         # Remove filepath from response (not needed on frontend)
         for f in paginated_files:
             f.pop("filepath", None)
@@ -1640,7 +1763,7 @@ async def get_gemini_logs(
                         f["model"] = data.get("model")
                 except Exception:
                     f["model"] = "unknown"
-        
+
         return {
             "files": paginated_files,
             "total": total,
@@ -1669,25 +1792,29 @@ async def get_gemini_log_detail(filename: str):
     try:
         logs_dir = Path("logs/gemini_low_level_request")
         filepath = _resolve_gemini_log_path(filename, logs_dir)
-        
+
         if not filepath.exists():
-            raise HTTPException(status_code=404, detail=f"Log file not found: {filename}")
-        
+            raise HTTPException(
+                status_code=404, detail=f"Log file not found: {filename}"
+            )
+
         # Read file
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
+
         # Extract metadata
         timestamp_str = data.get("timestamp")
         if not isinstance(timestamp_str, str):
             timestamp_str = _extract_request_response_timestamp(filepath.name)
         if not timestamp_str:
             timestamp_str = _extract_step_timestamp(filepath.name)
-        file_datetime = _parse_gemini_timestamp(timestamp_str) if timestamp_str else None
+        file_datetime = (
+            _parse_gemini_timestamp(timestamp_str) if timestamp_str else None
+        )
         file_date = file_datetime.date() if file_datetime else None
-        
+
         file_size = filepath.stat().st_size
-        
+
         return {
             "filename": filename,
             "metadata": {
@@ -1725,10 +1852,12 @@ async def download_gemini_log(filename: str):
     try:
         logs_dir = Path("logs/gemini_low_level_request")
         filepath = _resolve_gemini_log_path(filename, logs_dir)
-        
+
         if not filepath.exists():
-            raise HTTPException(status_code=404, detail=f"Log file not found: {filename}")
-        
+            raise HTTPException(
+                status_code=404, detail=f"Log file not found: {filename}"
+            )
+
         return FileResponse(
             path=str(filepath),
             filename=filename,
@@ -1791,9 +1920,7 @@ def _resolve_gemini_log_path(filename: str, logs_dir: Path) -> Path:
 
 
 def _extract_request_response_timestamp(filename: str) -> Optional[str]:
-    match = re.match(
-        r"^request_response_(\d{8}_\d{6}(?:_\d{6})?)\.json$", filename
-    )
+    match = re.match(r"^request_response_(\d{8}_\d{6}(?:_\d{6})?)\.json$", filename)
     if match:
         return match.group(1)
     return None

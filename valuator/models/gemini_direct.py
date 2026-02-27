@@ -1,4 +1,5 @@
 import asyncio
+import json
 import queue
 import threading
 import uuid
@@ -144,7 +145,7 @@ class GeminiClient:
                 contents=prompt,
                 config=config_obj,
             )
-            latency_ms = measurement.latency_seconds()
+            latency_seconds = measurement.latency_seconds()
 
             usage_metadata = getattr(response, "usage_metadata", None)
             if hasattr(usage_metadata, "model_dump"):
@@ -157,24 +158,47 @@ class GeminiClient:
                     method=trace_method,
                     model=self.model,
                     usage=usage_metadata,
-                    latency_ms=latency_ms,
+                    latency_seconds=latency_seconds,
                     started_at=measurement.started_at,
                 )
             return self._extract_text(response)
         except Exception:
             if writer is not None:
                 writer.append_call(
-                    method=trace_method,
+                    method=f"{trace_method}.error",
                     model=self.model,
                     usage={
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
                         "total_tokens": 0,
                     },
-                    latency_ms=measurement.latency_seconds(),
+                    latency_seconds=measurement.latency_seconds(),
                     started_at=measurement.started_at,
                 )
             raise
+
+    async def generate_json(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str = "",
+        response_json_schema: dict[str, Any],
+        trace_method: str,
+    ) -> dict[str, Any]:
+        raw = await self.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            response_mime_type="application/json",
+            response_json_schema=response_json_schema,
+            trace_method=trace_method,
+        )
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{trace_method} returned invalid JSON") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"{trace_method} expected JSON object")
+        return data
 
     async def generate_stream(
         self,

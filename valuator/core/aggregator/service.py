@@ -7,7 +7,7 @@ from ...utils.config import config
 from ..contracts.plan import Plan, Task
 from ..contracts.requirement import evaluate_contract
 from ..workspace.service import Workspace
-from .graph_ops import descendant_leaf_task_ids, infer_root_task_id, post_order_tasks
+from .graph_ops import descendant_leaf_task_ids, post_order_tasks
 from .materials import (
     collect_materials,
     extract_leaf_artifacts,
@@ -51,23 +51,19 @@ class Aggregation:
             if task.task_type == "leaf":
                 report = self._leaf_passthrough(task=task, materials=materials)
             else:
-                contract_section, contract_markers = self._contract_section(plan, task_id)
+                contract_section = self._contract_section(plan, task_id)
                 report = await self._synthesize(
                     task=task,
                     query=query,
                     materials=materials,
                     contract_section=contract_section,
-                    contract_markers=contract_markers,
                 )
             reports[task_id] = report
-            workspace.write_output(
-                f"/aggregation/{task_id}/report.md",
-                report["markdown"],
-            )
+            workspace.write_aggregation_report(task_id, report["markdown"])
             if on_task_aggregated is not None:
                 await on_task_aggregated(task, index, total_tasks)
 
-        root_task_id = plan.root_task_id or infer_root_task_id(plan.tasks)
+        root_task_id = plan.root_task_id
         root_report = reports.get(root_task_id)
         if not root_report:
             raise ValueError(f"root node report is missing: {root_task_id}")
@@ -114,26 +110,19 @@ class Aggregation:
         query: str,
         materials: list[dict[str, str]],
         contract_section: str,
-        contract_markers: list[str],
     ) -> dict[str, Any]:
         if not materials:
             raise ValueError(f"no materials for task {task.id}")
 
         prompt = self._build_prompt(task, query, materials, contract_section)
-        markdown = ""
-        try:
-            raw = await self.client.generate(
-                prompt=prompt,
-                system_prompt=_SYSTEM_PROMPT,
-                trace_method="aggregator._synthesize",
-            )
-            markdown = raw.strip()
-        except Exception:
-            pass
+        raw = await self.client.generate(
+            prompt=prompt,
+            system_prompt=_SYSTEM_PROMPT,
+            trace_method="aggregator._synthesize",
+        )
+        markdown = raw.strip()
         if not markdown:
-            markdown = self._fallback_synthesize(
-                task, query, materials, contract_markers
-            )
+            raise ValueError(f"empty synthesis output: {task.id}")
         return {
             "task_id": task.id,
             "markdown": markdown,
@@ -185,43 +174,15 @@ class Aggregation:
             "- 마크다운 텍스트만 반환 (JSON 래핑 없이)."
         )
 
-    def _contract_section(self, plan: Plan, task_id: str) -> tuple[str, list[str]]:
-        if plan.contract is None:
-            return "", []
-        if plan.root_task_id and task_id != plan.root_task_id:
-            return "", []
+    def _contract_section(self, plan: Plan, task_id: str) -> str:
+        if plan.contract is None or task_id != plan.root_task_id:
+            return ""
 
         lines: list[str] = []
-        markers: list[str] = []
         for item in plan.contract.items:
             lines.append(
                 f"- [{item.id}] unit={item.unit_id} required={item.required} requirement={item.acceptance}"
             )
-            markers.append(item.id)
         if not lines:
-            return "", []
-        return "\n".join(lines), markers
-
-    def _fallback_synthesize(
-        self,
-        task: Task,
-        query: str,
-        materials: list[dict[str, str]],
-        contract_markers: list[str],
-    ) -> str:
-        title = task.description.strip() or task.id
-        lines = [f"# {title}", "", f"- query: {query}", ""]
-        if contract_markers:
-            lines.append("## Contract Coverage")
-            lines.append("")
-            for marker in contract_markers:
-                lines.append(f"## [{marker}]")
-                lines.append("- requirement: covered in fallback output")
-                lines.append("")
-        for item in materials:
-            source = item.get("source", "unknown")
-            content = item.get("content", "").strip()
-            lines.append(f"## source: {source}")
-            lines.append(content or "(empty)")
-            lines.append("")
-        return "\n".join(lines).strip()
+            return ""
+        return "\n".join(lines)

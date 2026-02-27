@@ -67,15 +67,8 @@ class Executor:
             self._usage_writer = None
 
     async def _execute_one_leaf(self, task: Task, workspace: Workspace) -> dict[str, Any]:
-        if not task.tool:
-            raise ValueError(f"leaf task missing tool: {task.id}")
-        if not task.output:
-            raise ValueError(f"leaf task missing output: {task.id}")
-
         tool_name = task.tool.name
         tool_args = dict(task.tool.args)
-        if tool_name not in _TOOL_CLASSES:
-            raise ValueError(f"unsupported tool: {tool_name}")
         args_hash = self._hash_args(tool_args)
         cached = workspace.find_cached_output(tool_name, args_hash)
         if cached is not None:
@@ -105,9 +98,10 @@ class Executor:
                 )
                 raw_result = payload
 
-        workspace.write_output(task.output, content)
+        leaf_output_path = workspace.leaf_output_path(task.id)
+        workspace.write_leaf_output(task.id, content)
         workspace.write_output_metadata(
-            task.output,
+            leaf_output_path,
             {
                 "tool": tool_name,
                 "args_hash": args_hash,
@@ -115,7 +109,7 @@ class Executor:
         )
         return {
             "task_id": task.id,
-            "path": task.output,
+            "path": leaf_output_path,
             "content": content,
             "raw_result": raw_result,
         }
@@ -170,9 +164,10 @@ class Executor:
             cached.bind_usage_writer(self._usage_writer)
             return cached
 
-        tool_class = _TOOL_CLASSES.get(tool_name)
-        if tool_class is None:
-            raise ValueError(f"unknown tool: {tool_name}")
+        try:
+            tool_class = _TOOL_CLASSES[tool_name]
+        except KeyError as exc:
+            raise RuntimeError(f"executor tool registry mismatch: {tool_name}") from exc
         tool = tool_class()
         self._tool_cache[tool_name] = tool
         tool.bind_usage_writer(self._usage_writer)

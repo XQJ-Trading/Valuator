@@ -5,21 +5,15 @@ from ..contracts.plan import Plan, Task
 
 def post_order_tasks(plan: Plan) -> list[str]:
     task_map = {task.id: task for task in plan.tasks}
-    state: dict[str, int] = {}
+    visited: set[str] = set()
     order: list[str] = []
 
     def visit(task_id: str) -> None:
-        current = state.get(task_id, 0)
-        if current == 1:
-            raise ValueError("invalid task graph: cycle detected")
-        if current == 2:
+        if task_id in visited:
             return
-        state[task_id] = 1
         for dep in sorted(task_map[task_id].deps):
-            if dep not in task_map:
-                raise ValueError(f"invalid task graph: missing dependency {dep}")
             visit(dep)
-        state[task_id] = 2
+        visited.add(task_id)
         order.append(task_id)
 
     for task_id in sorted(task_map):
@@ -73,9 +67,6 @@ def descendant_leaf_task_ids(root_task_id: str, task_map: dict[str, Task]) -> se
     def collect(task_id: str) -> set[str]:
         if task_id in cache:
             return cache[task_id]
-        if task_id not in task_map:
-            raise ValueError(f"invalid task graph: missing task {task_id}")
-
         task = task_map[task_id]
         if task.task_type == "leaf":
             cache[task_id] = {task_id}

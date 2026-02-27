@@ -70,6 +70,24 @@ class Workspace:
     def write_final(self, markdown: str) -> Path:
         return self._write_text("output/final.md", markdown.strip() + "\n")
 
+    def leaf_output_path(self, task_id: str) -> str:
+        return f"/execution/outputs/{task_id}/result.md"
+
+    def aggregation_report_path(self, task_id: str) -> str:
+        return f"/aggregation/{task_id}/report.md"
+
+    def write_leaf_output(self, task_id: str, content: str) -> Path:
+        rel_output_path = self.leaf_output_path(task_id)
+        return self.write_output(rel_output_path, content)
+
+    def read_leaf_output(self, task_id: str) -> str:
+        rel_output_path = self.leaf_output_path(task_id)
+        return self.read_output(rel_output_path)
+
+    def write_aggregation_report(self, task_id: str, markdown: str) -> Path:
+        rel_output_path = self.aggregation_report_path(task_id)
+        return self.write_output(rel_output_path, markdown)
+
     def write_output_metadata(self, rel_output_path: str, payload: dict) -> Path:
         return self._write_json(self._metadata_rel_path(rel_output_path), payload)
 
@@ -160,14 +178,14 @@ class Workspace:
         if clean_rel_path.startswith(exec_prefix):
             if self.current_round is None:
                 raise ValueError("current round is not set")
-            suffix = clean_rel_path[len(exec_prefix) :]
+            suffix = clean_rel_path[len(exec_prefix):]
             return f"execution/round-{self.current_round:02d}/outputs/{suffix}"
 
         agg_prefix = "aggregation/"
         if clean_rel_path.startswith(agg_prefix):
             if self.current_round is None:
                 raise ValueError("current round is not set")
-            suffix = clean_rel_path[len(agg_prefix) :]
+            suffix = clean_rel_path[len(agg_prefix):]
             return f"aggregation/round-{self.current_round:02d}/{suffix}"
 
         return clean_rel_path

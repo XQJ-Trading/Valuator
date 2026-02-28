@@ -8,7 +8,6 @@ from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..aggregator.service import Aggregation
 from ..contracts.plan import Plan
-from ..contracts.requirement import evaluate_contract
 from ..llm_usage import LLMUsageWriter
 from ..reviewer.service import Review
 from ..executor.service import Executor
@@ -209,20 +208,13 @@ class Engine:
             on_leaf_start=on_leaf_start,
             on_leaf_complete=on_leaf_complete,
         )
-        try:
-            aggregation = await self.aggregator.aggregate(
-                query,
-                plan,
-                execution,
-                self.workspace,
-                on_task_aggregated=on_task_aggregated,
-            )
-        except Exception as exc:
-            aggregation = self._aggregation_failure_payload(
-                plan=plan,
-                execution=execution,
-                error=exc,
-            )
+        aggregation = await self.aggregator.aggregate(
+            query,
+            plan,
+            execution,
+            self.workspace,
+            on_task_aggregated=on_task_aggregated,
+        )
         final_path = self.workspace.write_final(aggregation["final_markdown"])
         review = await self.reviewer.review(plan, execution, aggregation)
         review_payload = {
@@ -232,34 +224,3 @@ class Engine:
         }
         review_path = self.workspace.write_review(review_payload)
         return review_payload, final_path, review_path
-
-    def _aggregation_failure_payload(
-        self,
-        *,
-        plan: Plan,
-        execution: dict[str, Any],
-        error: Exception,
-    ) -> dict[str, Any]:
-        task_map = {task.id: task for task in plan.tasks}
-        leaf_ids = sorted(
-            task_id
-            for task_id in set(execution.get("leaf_completed_tasks") or [])
-            if task_id in task_map and task_map[task_id].task_type == "leaf"
-        )
-        aggregated_query_unit_ids = sorted(
-            {
-                unit_id
-                for task_id in leaf_ids
-                for unit_id in task_map[task_id].query_unit_ids
-            }
-        )
-        return {
-            "final_markdown": "",
-            "root_task_id": plan.root_task_id,
-            "aggregated_leaf_task_ids": leaf_ids,
-            "aggregated_query_unit_ids": aggregated_query_unit_ids,
-            "final_included_leaf_task_ids": leaf_ids,
-            "final_included_query_unit_ids": aggregated_query_unit_ids,
-            "missing_contract_items": evaluate_contract(plan.contract, ""),
-            "aggregation_error": f"{type(error).__name__}: {error}",
-        }

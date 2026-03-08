@@ -13,6 +13,9 @@
           <span class="valuator-live-meta">{{ roundText }}</span>
           <span class="valuator-live-meta">Execution {{ executionCount }} / {{ totalLeafTaskCount }}</span>
           <span class="valuator-live-meta">Aggregation {{ aggregationCount }} / {{ totalLeafTaskCount }}</span>
+          <span class="valuator-live-meta">{{ queryCoverageText }}</span>
+          <span class="valuator-live-meta">{{ unitCoverageText }}</span>
+          <span class="valuator-live-meta">{{ domainCoverageText }}</span>
           <span class="valuator-live-meta">Updated {{ lastUpdatedText }}</span>
         </div>
         <button class="valuator-refresh-btn" :disabled="manualRefreshing" @click="refreshSnapshotManually">
@@ -268,6 +271,27 @@ const latestLiveEvent = computed(() => {
 })
 const finalMarkdownHtml = computed(() => renderMarkdown(finalMarkdown.value))
 const selectedUnitMarkdownHtml = computed(() => renderMarkdown(selectedUnitMarkdown.value))
+const queryCoverageText = computed(() => {
+  const querySignals = snapshot.value?.review.coverage_feedback?.signals?.query
+  if (!querySignals) {
+    return 'Query -'
+  }
+  return `Query ${querySignals.covered} / ${querySignals.total}`
+})
+const unitCoverageText = computed(() => {
+  const unitSignals = snapshot.value?.review.coverage_feedback?.signals?.units
+  if (!unitSignals) {
+    return 'Units -'
+  }
+  return `Units P${unitSignals.planned}/${unitSignals.total} E${unitSignals.executed}/${unitSignals.total} A${unitSignals.aggregated}/${unitSignals.total} F${unitSignals.final}/${unitSignals.total}`
+})
+const domainCoverageText = computed(() => {
+  const domainSignals = snapshot.value?.review.coverage_feedback?.signals?.domains
+  if (!domainSignals) {
+    return 'Domains -'
+  }
+  return `Domains P${domainSignals.planned}/${domainSignals.selected_total} E${domainSignals.executed}/${domainSignals.selected_total} F${domainSignals.final}/${domainSignals.selected_total}`
+})
 const finalPreviewMessage = computed(() => {
   if (streamStatus.value === 'live' || streamStatus.value === 'connecting') {
     return 'Generating final result...'

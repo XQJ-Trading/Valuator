@@ -1,0 +1,22 @@
+id: ceo
+name: CEO·리더십 분석
+description: 장기 투자 관점에서 CEO·경영진 품질, 조직 문화, 거버넌스를 평가한다.
+tools:
+  - ceo_analysis_tool
+  - web_search_tool
+  - sec_tool
+domain_tools:
+  - tool: ceo_analysis_tool
+    enabled: true
+prompt_fragment: |-
+  입력: 회사명(필수), 티커·섹터(선택). 활용 정보: 경영진·거버넌스·자본배분 이력·보상 구조·이사회·실적(TSR·마진 등).
+  Fisher/Buffett/Munger 관점. Stage 1: Integrity & Transparency, Strategic Vision & Execution, Capital-Allocation, Shareholder-Orientation, Track Record. Stage 2: Innovation & R&D, Talent Dynamics, Ethical Climate & Board, Decision-making & Adaptability, Margin Sustainability. Stage 3: strengths/weaknesses/risks, leadership rating(Excellent/Good/Fair/Poor만 사용), long-term investment rationale.
+  출력: 불릿만 사용, Stage 1·2 항목당 최소 한 문단, 숫자 점수 금지. 근거·출처 가능한 경우 인용.
+report_contract:
+  - CEO/경영진 등급(Excellent/Good/Fair/Poor)과 그 근거를 제시한다.
+  - 핵심 리스크 3개와 손익/현금흐름 전이 경로를 제시한다.
+  - 투자 관점 결론(긍정/부정 트리거 포함)을 제시한다.
+tasks:
+  - id: ceo_report
+    name: CEO·리더십 분석 리포트
+depends_on: []

@@ -1,0 +1,21 @@
+schema_version: 1
+modules:
+  - ceo
+  - dcf
+  - balance_sheet
+  - risk_transmission
+
+# Query Analysis용 메타 (LLM 프롬프트에 주입)
+default_behavior: all
+valuation_scope: |
+  이 시스템은 밸류에이션·투자 분석을 위한 것이다.
+  사용자 쿼리가 기업 분석, 밸류에이션, 투자 판단과 관련되면 전체 도메인을 적용한다.
+exclusion_signals: |
+  다음은 도메인 적용 예외: 뉴스 요약만 요청, 특정 주가 시세만 요청, 일반 QA(투자 무관).
+selective_signals: |
+  특정 도메인만 요청된 경우(예: "CEO만 분석해줘", "DCF만") 해당 모듈만 선택한다.
+module_summaries:
+  ceo: "CEO·경영진·거버넌스 평가"
+  dcf: "DCF 밸류에이션 (폼·가정·계산)"
+  balance_sheet: "재무제표·재무 추출·비율"
+  risk_transmission: "리스크→손익/CF 전이 분석"

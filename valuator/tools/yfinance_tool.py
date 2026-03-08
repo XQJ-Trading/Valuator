@@ -26,6 +26,7 @@ class YFinanceBalanceSheetTool(BaseTool):
         )
 
         import datetime as dt
+
         try:
             import yfinance as yf
         except Exception as exc:
@@ -235,7 +236,7 @@ class YFinanceBalanceSheetTool(BaseTool):
             f"interest_coverage={result.get('interest_coverage')}",
             f"free_cash_flow={result.get('free_cash_flow')}",
         ]
-        result["summary"] = ", ".join(summary_parts)
+        result["findings"] = ", ".join(summary_parts)
         return ToolResult(
             success=True,
             result=result,

@@ -1,0 +1,22 @@
+id: risk_transmission
+name: 리스크 전이
+description: 리스크가 손익/현금흐름 line-item으로 전이되는 경로를 분석한다.
+tools:
+  - web_search_tool
+  - sec_tool
+  - code_execute_tool
+domain_tools:
+  - tool: sec_tool
+    enabled: true
+    lookback_years: 3
+prompt_fragment: |-
+  입력: 회사·섹터·쿼리. 리스크를 이벤트 수준으로 정의하고, 손익표·현금흐름표의 구체적 line item으로 전이 경로를 연결한다. 영향은 수치 구간(예: -3%~-7%)으로 제시.
+report_contract:
+  - 최근 3개년(절대연도 기준) 리스크별 전이 경로(원인→손익/CF 항목→영향)를 제시한다.
+  - 각 리스크에 대해 현금흐름(영업현금흐름/FCF) line-item 연결을 명시한다.
+  - 영향 범위를 구간(예: -3%~-7%)으로 제시한다.
+  - 모니터링 트리거 지표를 제시한다.
+tasks:
+  - id: risk_transmission
+    name: 리스크 전이 분석
+depends_on: []

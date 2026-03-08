@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 from hashlib import sha256
 from typing import Any, Awaitable, Callable
 
+from ...domain import DomainModuleContext
+from ...domain.ir import build_domain_artifact_fields
+from ...tools.balance_sheet_extraction_tool import BalanceSheetExtractionTool
+from ...tools.ceo_analysis_tool import CEOAnalysisTool
 from ...tools.code_execute_tool import ExecuteCodeTool
+from ...tools.dcf_pipeline_tool import DCFPipelineTool
 from ...tools.sec_tool import SECTool
 from ...tools.base import ObservationData, ToolResult
+from ...tools.specs import TOOL_SPECS
 from ...tools.web_search_tool import PerplexitySearchTool
 from ...tools.yfinance_tool import YFinanceBalanceSheetTool
-from ..contracts.plan import Plan, Task
-from ..planner.service import _TOOL_ARGS
+from ..contracts.plan import ExecutionArtifact, ExecutionResult, Plan, Task, TaskReport
 from ..workspace.service import Workspace
 
 _TOOL_CLASSES: dict[str, type[Any]] = {
@@ -19,16 +25,27 @@ _TOOL_CLASSES: dict[str, type[Any]] = {
     "sec_tool": SECTool,
     "yfinance_balance_sheet": YFinanceBalanceSheetTool,
     "code_execute_tool": ExecuteCodeTool,
+    "ceo_analysis_tool": CEOAnalysisTool,
+    "dcf_pipeline_tool": DCFPipelineTool,
+    "balance_sheet_extraction_tool": BalanceSheetExtractionTool,
 }
 _EXECUTOR_LEAF_CONCURRENCY = 4
+_EXECUTABLE_TASK_TYPES = frozenset({"leaf", "module"})
 
 
 class Executor:
     def __init__(self) -> None:
-        if set(_TOOL_CLASSES) != set(_TOOL_ARGS):
+        if set(_TOOL_CLASSES) != set(TOOL_SPECS):
             raise ValueError("planner/executor tool keys mismatch")
         self._tool_cache: dict[str, Any] = {}
         self._usage_writer: Any | None = None
+        self._domain_context: DomainModuleContext | None = None
+
+    def bind_domain_context(
+        self,
+        domain_context: DomainModuleContext | None,
+    ) -> None:
+        self._domain_context = domain_context
 
     async def execute(
         self,
@@ -38,42 +55,171 @@ class Executor:
         usage_writer: Any | None = None,
         on_leaf_start: Callable[[Task], Awaitable[None]] | None = None,
         on_leaf_complete: Callable[[Task, dict[str, Any]], Awaitable[None]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> ExecutionResult:
         _ = query
         self._usage_writer = usage_writer
-        leaf_tasks = [task for task in plan.tasks if task.task_type == "leaf"]
-        if not leaf_tasks:
+        task_map = {task.id: task for task in plan.tasks}
+        executable_tasks = {
+            task.id: task
+            for task in plan.tasks
+            if task.task_type in _EXECUTABLE_TASK_TYPES
+        }
+        if not executable_tasks:
             self._usage_writer = None
-            return {"leaf_completed_tasks": [], "artifacts": []}
+            return ExecutionResult()
 
+        dependency_cache: dict[str, set[str]] = {}
+        required_dependencies = {
+            task_id: self._required_executable_dependencies(
+                task_id=task_id,
+                task_map=task_map,
+                cache=dependency_cache,
+            )
+            for task_id in executable_tasks
+        }
         sem = asyncio.Semaphore(_EXECUTOR_LEAF_CONCURRENCY)
-
-        async def _run(task: Task) -> dict[str, Any]:
-            async with sem:
-                if on_leaf_start is not None:
-                    await on_leaf_start(task)
-                result = await self._execute_one_leaf(task, workspace)
-                if on_leaf_complete is not None:
-                    await on_leaf_complete(task, result)
-                return result
+        completed: dict[str, ExecutionArtifact] = {}
+        results: list[ExecutionArtifact] = []
+        pending = dict(executable_tasks)
 
         try:
-            results = await asyncio.gather(*[_run(task) for task in leaf_tasks])
-            return {
-                "leaf_completed_tasks": [row["task_id"] for row in results],
-                "artifacts": results,
-            }
+            while pending:
+                ready = [
+                    task
+                    for task_id, task in pending.items()
+                    if required_dependencies[task_id].issubset(completed)
+                ]
+                if not ready:
+                    raise ValueError("executable task graph has unresolved dependencies")
+
+                batch_results = await self._execute_task_batch(
+                    tasks=ready,
+                    task_map=task_map,
+                    completed=completed,
+                    reports=None,
+                    workspace=workspace,
+                    semaphore=sem,
+                    on_leaf_start=on_leaf_start,
+                    on_leaf_complete=on_leaf_complete,
+                )
+                for artifact in batch_results:
+                    results.append(artifact)
+                    completed[artifact.task_id] = artifact
+                    pending.pop(artifact.task_id, None)
+
+            return ExecutionResult(
+                completed_leaf_task_ids=[
+                    artifact.task_id
+                    for artifact in results
+                    if executable_tasks[artifact.task_id].task_type == "leaf"
+                ],
+                artifacts=results,
+            )
         finally:
             self._usage_writer = None
 
-    async def _execute_one_leaf(self, task: Task, workspace: Workspace) -> dict[str, Any]:
+    async def execute_batch(
+        self,
+        *,
+        plan: Plan,
+        task_ids: list[str],
+        workspace: Workspace,
+        usage_writer: Any | None = None,
+        on_leaf_start: Callable[[Task], Awaitable[None]] | None = None,
+        on_leaf_complete: Callable[[Task, dict[str, Any]], Awaitable[None]] | None = None,
+        dependency_reports: dict[str, TaskReport] | None = None,
+    ) -> list[ExecutionArtifact]:
+        if not task_ids:
+            return []
+
+        self._usage_writer = usage_writer
+        task_map = {task.id: task for task in plan.tasks}
+        tasks = [task_map[task_id] for task_id in task_ids]
+        sem = asyncio.Semaphore(_EXECUTOR_LEAF_CONCURRENCY)
+
+        try:
+            return await self._execute_task_batch(
+                tasks=tasks,
+                task_map=task_map,
+                completed={},
+                reports=dependency_reports,
+                workspace=workspace,
+                semaphore=sem,
+                on_leaf_start=on_leaf_start,
+                on_leaf_complete=on_leaf_complete,
+            )
+        finally:
+            self._usage_writer = None
+
+    async def _execute_task_batch(
+        self,
+        *,
+        tasks: list[Task],
+        task_map: dict[str, Task],
+        completed: dict[str, ExecutionArtifact],
+        reports: dict[str, TaskReport] | None,
+        workspace: Workspace,
+        semaphore: asyncio.Semaphore,
+        on_leaf_start: Callable[[Task], Awaitable[None]] | None,
+        on_leaf_complete: Callable[[Task, dict[str, Any]], Awaitable[None]] | None,
+    ) -> list[ExecutionArtifact]:
+        async def _run(task: Task) -> ExecutionArtifact:
+            async with semaphore:
+                if on_leaf_start is not None:
+                    await on_leaf_start(task)
+                artifact = await self._execute_one_task(
+                    task=task,
+                    task_map=task_map,
+                    completed=completed,
+                    reports=reports,
+                    workspace=workspace,
+                )
+                if on_leaf_complete is not None:
+                    await on_leaf_complete(task, asdict(artifact))
+                return artifact
+
+        return list(await asyncio.gather(*[_run(task) for task in tasks]))
+
+    async def _execute_one_task(
+        self,
+        *,
+        task: Task,
+        task_map: dict[str, Task],
+        completed: dict[str, ExecutionArtifact],
+        reports: dict[str, TaskReport] | None,
+        workspace: Workspace,
+    ) -> ExecutionArtifact:
         tool_name = task.tool.name
-        tool_args = dict(task.tool.args)
+        tool_args = self._tool_args_for_task(
+            task=task,
+            task_map=task_map,
+            completed=completed,
+            reports=reports,
+        )
+        if self._domain_context is not None and self._domain_context.module_ids:
+            allowed: set[str] = set()
+            for module_id in self._domain_context.module_ids:
+                module = self._domain_context.modules.get(module_id)
+                if module is None:
+                    continue
+                for name in module.tools:
+                    allowed.add(name)
+            if allowed and tool_name not in allowed:
+                raise ValueError(
+                    f"tool '{tool_name}' is not allowed for current domain context"
+                )
         args_hash = self._hash_args(tool_args)
         cached = workspace.find_cached_output(tool_name, args_hash)
+        domain_fields: dict[str, Any] = {}
         if cached is not None:
             content = cached
             raw_result = self._extract_raw_result_from_markdown(cached)
+            domain_fields = build_domain_artifact_fields(
+                tool_name=tool_name,
+                raw_result=raw_result,
+                metadata={},
+                fallback_domain_id=task.domain_id.strip(),
+            )
         else:
             result = await self._get_tool(tool_name).execute(**tool_args)
             if not result.success:
@@ -97,6 +243,12 @@ class Executor:
                     metadata=result.metadata,
                 )
                 raw_result = payload
+                domain_fields = build_domain_artifact_fields(
+                    tool_name=tool_name,
+                    raw_result=raw_result,
+                    metadata=result.metadata or {},
+                    fallback_domain_id=task.domain_id.strip(),
+                )
 
         leaf_output_path = workspace.leaf_output_path(task.id)
         workspace.write_leaf_output(task.id, content)
@@ -107,12 +259,128 @@ class Executor:
                 "args_hash": args_hash,
             },
         )
-        return {
-            "task_id": task.id,
-            "path": leaf_output_path,
-            "content": content,
-            "raw_result": raw_result,
-        }
+        return ExecutionArtifact(
+            task_id=task.id,
+            path=leaf_output_path,
+            content=content,
+            raw_result=raw_result,
+            domain_id=str(domain_fields.get("domain_id") or ""),
+            domain_summary=str(domain_fields.get("domain_summary") or ""),
+            domain_key_values=dict(domain_fields.get("domain_key_values") or {}),
+            domain_payload=dict(domain_fields.get("domain_payload") or {}),
+        )
+
+    def _tool_args_for_task(
+        self,
+        *,
+        task: Task,
+        task_map: dict[str, Task],
+        completed: dict[str, ExecutionArtifact],
+        reports: dict[str, TaskReport] | None,
+    ) -> dict[str, Any]:
+        tool_args = dict(task.tool.args)
+        if task.task_type != "module":
+            return tool_args
+
+        context = self._dependency_context(
+            task=task,
+            task_map=task_map,
+            completed=completed,
+            reports=reports,
+        )
+        if not context:
+            return tool_args
+
+        if task.tool.name == "balance_sheet_extraction_tool":
+            tool_args["summary"] = context
+            return tool_args
+
+        tool_args["context"] = context
+        return tool_args
+
+    def _required_executable_dependencies(
+        self,
+        *,
+        task_id: str,
+        task_map: dict[str, Task],
+        cache: dict[str, set[str]],
+    ) -> set[str]:
+        cached = cache.get(task_id)
+        if cached is not None:
+            return cached
+
+        task = task_map[task_id]
+        required: set[str] = set()
+        for dep_id in task.deps:
+            dep = task_map[dep_id]
+            if dep.task_type in _EXECUTABLE_TASK_TYPES:
+                required.add(dep_id)
+                continue
+            required.update(
+                self._required_executable_dependencies(
+                    task_id=dep_id,
+                    task_map=task_map,
+                    cache=cache,
+                )
+            )
+        cache[task_id] = required
+        return required
+
+    def _dependency_context(
+        self,
+        *,
+        task: Task,
+        task_map: dict[str, Task],
+        completed: dict[str, ExecutionArtifact],
+        reports: dict[str, TaskReport] | None,
+    ) -> str:
+        if not task.deps:
+            return ""
+
+        lines: list[str] = []
+        for dep_id in task.deps:
+            self._append_dependency_context(
+                task_id=dep_id,
+                task_map=task_map,
+                completed=completed,
+                reports=reports,
+                lines=lines,
+            )
+        return "\n\n".join(lines)
+
+    def _append_dependency_context(
+        self,
+        *,
+        task_id: str,
+        task_map: dict[str, Task],
+        completed: dict[str, ExecutionArtifact],
+        reports: dict[str, TaskReport] | None,
+        lines: list[str],
+    ) -> None:
+        if reports is not None:
+            report = reports.get(task_id)
+            if report is not None:
+                markdown = report.markdown.strip()
+                if markdown:
+                    lines.append(f"--- task: {task_id} ---")
+                    lines.append(markdown)
+                    return
+
+        task = task_map[task_id]
+        if task.task_type in _EXECUTABLE_TASK_TYPES:
+            result = completed[task_id]
+            lines.append(f"--- task: {task_id} ---")
+            lines.append(result.content.strip())
+            return
+
+        for dep_id in task.deps:
+            self._append_dependency_context(
+                task_id=dep_id,
+                task_map=task_map,
+                completed=completed,
+                reports=reports,
+                lines=lines,
+            )
 
     async def _run_failure_fallback(
         self,
@@ -139,10 +407,9 @@ class Executor:
         payload = fallback_result.result
         if isinstance(payload, ObservationData):
             payload = payload.data
-        if isinstance(payload, dict):
-            payload = dict(payload)
-        else:
-            payload = {"result": payload}
+        payload = (
+            dict(payload) if isinstance(payload, dict) else {"result": payload}
+        )
         payload["fallback_from"] = tool_name
         payload["fallback_reason"] = failure.error or ""
         error_code = (failure.metadata.get("error_code") or "").strip()
@@ -168,6 +435,7 @@ class Executor:
             tool_class = _TOOL_CLASSES[tool_name]
         except KeyError as exc:
             raise RuntimeError(f"executor tool registry mismatch: {tool_name}") from exc
+
         tool = tool_class()
         self._tool_cache[tool_name] = tool
         tool.bind_usage_writer(self._usage_writer)

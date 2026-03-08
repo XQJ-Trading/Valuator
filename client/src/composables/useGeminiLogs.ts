@@ -5,8 +5,6 @@ export interface GeminiLogFile {
   timestamp: string
   date: string
   time: string
-  size: number
-  size_formatted: string
   model?: string
 }
 
@@ -17,8 +15,6 @@ export interface GeminiLogDetail {
     date: string | null
     time: string | null
     datetime: string | null
-    size: number
-    size_formatted: string
     model?: string
   }
   data: any
@@ -50,7 +46,7 @@ export function useGeminiLogs() {
     dateFrom?: string,
     dateTo?: string,
     model?: string,
-    sort: 'newest' | 'oldest' | 'size' = 'newest',
+    sort: 'newest' | 'oldest' = 'newest',
     append: boolean = false
   ) {
     loading.value = true
@@ -150,4 +146,3 @@ export function useGeminiLogs() {
     clearLogs,
   }
 }
-

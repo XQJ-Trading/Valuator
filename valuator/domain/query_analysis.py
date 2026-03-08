@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from ..models.gemini_direct import GeminiClient
 from ..utils.config import config
 from .query import (
     QueryAnalysis,
+    QueryIntent,
     QueryRequirement,
     QueryUnit,
     is_concrete_subject_kind,
@@ -28,142 +31,147 @@ def _dedupe_ints(values: list[int]) -> list[int]:
     return list(dict.fromkeys(values))
 
 
-def _build_query_analysis(payload: dict[str, Any], *, valid_domain_ids: set[str]) -> QueryAnalysis:
-    raw_domain_ids = payload.get("domain_ids") or []
-    domain_ids = _dedupe_strings(
-        [
-            str(domain_id).strip()
-            for domain_id in raw_domain_ids
-            if str(domain_id).strip()
-        ]
-    )
+class QueryIntentPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ticker: str = ""
+    market: str = ""
+    security_code: str = ""
+    company_names: list[str] = Field(default_factory=list)
+
+
+class QueryEntityPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+
+
+class QueryUnitPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    retrieval_query: str = Field(min_length=1)
+    domain_ids: list[str] = Field(default_factory=list, min_length=1)
+    entity_ids: list[str] = Field(default_factory=list)
+    time_scope: str = ""
+
+
+class QueryRequirementPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = ""
+    acceptance: str = Field(min_length=1)
+    unit_ids: list[int | str] = Field(default_factory=list, min_length=1)
+    domain_ids: list[str] = Field(default_factory=list, min_length=1)
+    entity_ids: list[str] = Field(default_factory=list)
+    provenance: str = Field(min_length=1)
+
+
+class QueryAnalysisPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    query_intent: QueryIntentPayload = Field(default_factory=QueryIntentPayload)
+    domain_ids: list[str] = Field(default_factory=list, min_length=1)
+    entities: list[QueryEntityPayload] = Field(default_factory=list)
+    units: list[QueryUnitPayload] = Field(default_factory=list, min_length=1)
+    requirements: list[QueryRequirementPayload] = Field(default_factory=list, min_length=1)
+    intent_tags: list[str] = Field(default_factory=list)
+    rationale: str = Field(min_length=1)
+
+
+def _build_query_analysis(
+    payload: dict[str, Any],
+    *,
+    query: str,
+    valid_domain_ids: set[str],
+) -> QueryAnalysis:
+    raw = QueryAnalysisPayload.model_validate(payload)
+    domain_ids = _dedupe_strings(raw.domain_ids)
     if not domain_ids:
         raise ValueError("query analysis returned no valid domain_ids")
-    unknown_domains = sorted(set(domain_ids) - valid_domain_ids)
+    domain_id_set = set(domain_ids)
+    unknown_domains = sorted(domain_id_set - valid_domain_ids)
     if unknown_domains:
         raise ValueError(
             "query analysis returned unknown domain_ids: "
             + ", ".join(unknown_domains)
         )
 
-    raw_entities = payload.get("entities") or []
-    entities: dict[str, str] = {}
-    for item in raw_entities:
-        if not isinstance(item, dict):
-            raise ValueError("query analysis returned invalid entity payload")
-        entity_id = str(item.get("id") or "").strip()
-        label = str(item.get("label") or "").strip()
-        kind = str(item.get("kind") or "").strip()
-        if not entity_id or not label or not kind:
-            raise ValueError("query analysis returned incomplete entity payload")
-        if not is_concrete_subject_kind(kind):
-            continue
-        if entity_id in entities:
-            raise ValueError(f"duplicate query entity id: {entity_id}")
-        entities[entity_id] = label
+    query_intent = QueryIntent(
+        query=query,
+        ticker=raw.query_intent.ticker,
+        market=raw.query_intent.market,
+        security_code=raw.query_intent.security_code,
+        company_names=_dedupe_strings(raw.query_intent.company_names),
+    )
 
-    raw_units = payload.get("units") or []
-    if not isinstance(raw_units, list) or not raw_units:
-        raise ValueError("query analysis returned no units")
+    entities: dict[str, str] = {}
+    for item in raw.entities:
+        if not is_concrete_subject_kind(item.kind):
+            continue
+        if item.id in entities:
+            raise ValueError(f"duplicate query entity id: {item.id}")
+        entities[item.id] = item.label
+
+    entity_id_set = set(entities)
     units: list[QueryUnit] = []
     unit_id_to_index: dict[str, int] = {}
-    for item in raw_units:
-        if not isinstance(item, dict):
-            raise ValueError("query analysis returned invalid unit payload")
-        unit_id = str(item.get("id") or "").strip()
-        objective = str(item.get("objective") or "").strip()
-        retrieval_query = str(item.get("retrieval_query") or "").strip()
-        raw_unit_domains = item.get("domain_ids") or []
-        unit_domains = _dedupe_strings(
-            [str(domain_id).strip() for domain_id in raw_unit_domains if str(domain_id).strip()]
-        )
-        raw_entity_ids = item.get("entity_ids") or []
+    for item in raw.units:
+        unit_domains = _dedupe_strings(item.domain_ids)
         entity_ids = _dedupe_strings(
-            [
-                str(entity_id).strip()
-                for entity_id in raw_entity_ids
-                if str(entity_id).strip() in entities
-            ]
+            [entity_id for entity_id in item.entity_ids if entity_id in entity_id_set]
         )
-        time_scope = str(item.get("time_scope") or "").strip()
-        if not unit_id or not objective or not retrieval_query:
-            raise ValueError("query analysis returned incomplete unit payload")
-        if unit_id in unit_id_to_index:
-            raise ValueError(f"duplicate query unit id: {unit_id}")
-        unknown_unit_domains = sorted(set(unit_domains) - set(domain_ids))
+        if item.id in unit_id_to_index:
+            raise ValueError(f"duplicate query unit id: {item.id}")
+        unknown_unit_domains = sorted(set(unit_domains) - domain_id_set)
         if unknown_unit_domains:
             raise ValueError(
-                f"query unit references unknown domain_ids: {unit_id}"
+                f"query unit references unknown domain_ids: {item.id}"
             )
         if not unit_domains:
-            raise ValueError(f"query unit missing domain_ids: {unit_id}")
-        unit_id_to_index[unit_id] = len(units)
+            raise ValueError(f"query unit missing domain_ids: {item.id}")
+        unit_id_to_index[item.id] = len(units)
         units.append(
             QueryUnit(
-                id=unit_id,
-                objective=objective,
-                retrieval_query=retrieval_query,
+                id=item.id,
+                objective=item.objective,
+                retrieval_query=item.retrieval_query,
                 domain_ids=unit_domains,
                 entity_ids=entity_ids,
-                time_scope=time_scope,
+                time_scope=item.time_scope,
             )
         )
-
-    raw_requirements = payload.get("requirements") or []
-    if not isinstance(raw_requirements, list) or not raw_requirements:
-        raise ValueError("query analysis returned no requirements")
 
     unit_count = len(units)
     requirements: list[QueryRequirement] = []
     seen_requirement_ids: set[str] = set()
-    for index, item in enumerate(raw_requirements, start=1):
-        if not isinstance(item, dict):
-            raise ValueError("query analysis returned invalid requirement payload")
-        requirement_id = str(item.get("id") or f"R-{index:03d}").strip()
-        acceptance = str(item.get("acceptance") or "").strip()
-        provenance = str(item.get("provenance") or "").strip()
-        raw_requirement_domains = item.get("domain_ids") or []
-        requirement_domains = _dedupe_strings(
-            [
-                str(domain_id).strip()
-                for domain_id in raw_requirement_domains
-                if str(domain_id).strip()
-            ]
-        )
-        raw_requirement_entities = item.get("entity_ids") or []
+    for index, item in enumerate(raw.requirements, start=1):
+        requirement_id = item.id or f"R-{index:03d}"
+        requirement_domains = _dedupe_strings(item.domain_ids)
         requirement_entities = _dedupe_strings(
-            [
-                str(entity_id).strip()
-                for entity_id in raw_requirement_entities
-                if str(entity_id).strip() in entities
-            ]
+            [entity_id for entity_id in item.entity_ids if entity_id in entity_id_set]
         )
-        raw_unit_refs = item.get("unit_ids") or []
-        if not requirement_id or not acceptance or not provenance:
-            raise ValueError("query analysis returned incomplete requirement payload")
         if requirement_id in seen_requirement_ids:
             raise ValueError(f"duplicate query requirement id: {requirement_id}")
         seen_requirement_ids.add(requirement_id)
         if not requirement_domains:
             raise ValueError("query requirement missing domain_ids")
-        if set(requirement_domains) - set(domain_ids):
+        if set(requirement_domains) - domain_id_set:
             raise ValueError("query requirement references unknown domain_ids")
-        if not raw_unit_refs:
-            raise ValueError("query requirement missing unit_ids")
 
         resolved_unit_ids: list[int] = []
-        for raw_ref in raw_unit_refs:
+        for raw_ref in item.unit_ids:
             if isinstance(raw_ref, int):
                 resolved_unit_ids.append(raw_ref)
                 continue
-            text = str(raw_ref).strip()
-            if not text:
-                raise ValueError("query requirement references unknown unit_ids")
-            if text in unit_id_to_index:
-                resolved_unit_ids.append(unit_id_to_index[text])
+            if raw_ref in unit_id_to_index:
+                resolved_unit_ids.append(unit_id_to_index[raw_ref])
                 continue
-            if text.isdigit():
-                resolved_unit_ids.append(int(text))
+            if raw_ref.isdigit():
+                resolved_unit_ids.append(int(raw_ref))
                 continue
             raise ValueError("query requirement references unknown unit_ids")
 
@@ -179,29 +187,24 @@ def _build_query_analysis(payload: dict[str, Any], *, valid_domain_ids: set[str]
         requirements.append(
             QueryRequirement(
                 id=requirement_id,
-                acceptance=acceptance,
+                acceptance=item.acceptance,
                 unit_ids=_dedupe_ints(resolved_unit_ids),
                 domain_ids=requirement_domains,
                 entity_ids=requirement_entities,
-                provenance=provenance,
+                provenance=item.provenance,
             )
         )
 
-    rationale = str(payload.get("rationale") or "").strip()
-    if not rationale:
-        raise ValueError("query analysis returned empty rationale")
-
-    intent_tags = _dedupe_strings(
-        [str(tag).strip() for tag in (payload.get("intent_tags") or []) if str(tag).strip()]
-    )
+    intent_tags = _dedupe_strings(raw.intent_tags)
 
     return QueryAnalysis(
         domain_ids=domain_ids,
+        query_intent=query_intent,
         entities=entities,
         units=units,
         requirements=requirements,
         intent_tags=intent_tags,
-        rationale=rationale,
+        rationale=raw.rationale,
     )
 
 
@@ -248,7 +251,9 @@ class QueryAnalyzer:
             "[AVAILABLE_MODULES]\n"
             f"{module_lines}\n\n"
             "Rules:\n"
-            "- Return domain_ids, entities, units, requirements, intent_tags, rationale.\n"
+            "- Return query_intent, domain_ids, entities, units, requirements, intent_tags, rationale.\n"
+            "- query_intent must include ticker, market, security_code, company_names.\n"
+            "- Use empty strings or an empty array in query_intent when the query does not identify a concrete subject.\n"
             "- units must be semantic retrieval units, not formatting instructions.\n"
             "- Every unit must include id, objective, retrieval_query, domain_ids, entity_ids, time_scope.\n"
             "- Every requirement must include acceptance, unit_ids, domain_ids, entity_ids, provenance.\n"
@@ -267,6 +272,7 @@ class QueryAnalyzer:
             "type": "object",
             "additionalProperties": False,
             "required": [
+                "query_intent",
                 "domain_ids",
                 "entities",
                 "units",
@@ -275,6 +281,25 @@ class QueryAnalyzer:
                 "rationale",
             ],
             "properties": {
+                "query_intent": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "ticker",
+                        "market",
+                        "security_code",
+                        "company_names",
+                    ],
+                    "properties": {
+                        "ticker": {"type": "string"},
+                        "market": {"type": "string"},
+                        "security_code": {"type": "string"},
+                        "company_names": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
                 "domain_ids": {
                     "type": "array",
                     "items": {"type": "string", "enum": list(index.modules)},
@@ -374,6 +399,4 @@ class QueryAnalyzer:
             response_json_schema=schema,
             trace_method="query_analysis.analyze",
         )
-        if not isinstance(payload, dict):
-            raise ValueError("query analysis returned non-object payload")
-        return _build_query_analysis(payload, valid_domain_ids=valid_ids)
+        return _build_query_analysis(payload, query=query, valid_domain_ids=valid_ids)

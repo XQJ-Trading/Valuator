@@ -19,6 +19,7 @@ from valuator.domain import (
     build_query_breakdown,
     fill_routing_defaults,
 )
+from valuator.tools.specs import registered_tool_names
 
 
 def _canonical_analysis(
@@ -247,6 +248,53 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         self.assertEqual(updated_intent.company_name, "")
         self.assertEqual(analysis.intent_tags, ["recommendation"])
 
+    def test_router_promotes_subject_from_query_analysis_boundary(self) -> None:
+        loader = DomainLoader()
+        index, modules = loader.load()
+        intent = QueryIntent(query="Amazon valuation")
+        analyzer = _AnalyzerStub(
+            QueryAnalysis(
+                domain_ids=["dcf"],
+                query_intent=QueryIntent(
+                    query="Amazon valuation",
+                    ticker="AMZN",
+                    market="USA",
+                    company_names=["Amazon"],
+                ),
+                entities={},
+                units=[
+                    QueryUnit(
+                        id="Q-001",
+                        objective="Analyze intrinsic value",
+                        retrieval_query="Amazon valuation upside",
+                        domain_ids=["dcf"],
+                        entity_ids=[],
+                        time_scope="2024-01-01 to 2026-03-06",
+                    )
+                ],
+                requirements=[
+                    QueryRequirement(
+                        id="R-001",
+                        acceptance="Explain the valuation conclusion.",
+                        unit_ids=[0],
+                        domain_ids=["dcf"],
+                        entity_ids=[],
+                        provenance="Derived from user query.",
+                    )
+                ],
+                rationale="Single-company valuation query.",
+            )
+        )
+
+        updated_intent, _ = asyncio.run(
+            analyze_query(intent, index, modules, analyzer=analyzer)
+        )
+
+        self.assertEqual(updated_intent.ticker, "AMZN")
+        self.assertEqual(updated_intent.market, "USA")
+        self.assertEqual(updated_intent.company_names, ["Amazon"])
+        self.assertEqual(updated_intent.entities, ["Amazon"])
+
     def test_planner_excludes_sec_tool_without_us_ticker(self) -> None:
         loader = DomainLoader()
         _, modules = loader.load()
@@ -290,6 +338,21 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         )
         self.assertEqual(tool.name, "web_search_tool")
         self.assertEqual(tool.args["query"], "현대무벡스 최근 5개년 재무제표 추출")
+
+    def test_planner_uses_legacy_single_unit_plan_without_domain_context(self) -> None:
+        planner = Planner(client=_NoopClient())
+
+        self.assertEqual(planner._allowed_tools_for_context(), registered_tool_names())
+
+        plan = asyncio.run(planner.plan("Analyze Amazon valuation"))
+
+        self.assertEqual(plan.analysis.domain_ids, [])
+        self.assertEqual(plan.analysis.allowed_tools, registered_tool_names())
+        self.assertEqual(len(plan.analysis.units), 1)
+        self.assertEqual(plan.analysis.units[0].objective, "Analyze Amazon valuation")
+        self.assertEqual(len(plan.analysis.requirements), 1)
+        self.assertEqual(plan.analysis.requirements[0].unit_ids, [0])
+        self.assertEqual(len([task for task in plan.tasks if task.task_type == "leaf"]), 1)
 
     def test_planner_skips_balance_sheet_module_task_when_domain_has_no_specialist_tool(
         self,
@@ -364,6 +427,55 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
     def setUp(self) -> None:
         loader = DomainLoader()
         self.index, self.modules = loader.load()
+
+    def test_query_analyzer_projects_subject_into_canonical_analysis(self) -> None:
+        analyzer = QueryAnalyzer(
+            client=_QueryAnalyzerClient(
+                {
+                    "query_intent": {
+                        "ticker": "AMZN",
+                        "market": "USA",
+                        "security_code": "",
+                        "company_names": ["Amazon"],
+                    },
+                    "domain_ids": ["dcf"],
+                    "entities": [],
+                    "units": [
+                        {
+                            "id": "Q-001",
+                            "objective": "Analyze valuation upside",
+                            "retrieval_query": "Amazon valuation upside",
+                            "domain_ids": ["dcf"],
+                            "entity_ids": [],
+                            "time_scope": "2024-01-01 to 2026-03-06",
+                        }
+                    ],
+                    "requirements": [
+                        {
+                            "acceptance": "Cover valuation evidence.",
+                            "unit_ids": [0],
+                            "domain_ids": ["dcf"],
+                            "entity_ids": [],
+                            "provenance": "Derived from user query.",
+                        }
+                    ],
+                    "intent_tags": [],
+                    "rationale": "Need one domain.",
+                }
+            )
+        )
+
+        analysis = asyncio.run(
+            analyzer.analyze(
+                query="Amazon valuation",
+                index=self.index,
+                modules=self.modules,
+            )
+        )
+
+        self.assertEqual(analysis.query_intent.ticker, "AMZN")
+        self.assertEqual(analysis.query_intent.market, "USA")
+        self.assertEqual(analysis.query_intent.company_names, ["Amazon"])
 
     def test_query_analyzer_maps_unit_id_strings_to_zero_based_indices(self) -> None:
         analyzer = QueryAnalyzer(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -35,6 +36,7 @@ from valuator.domain import (
 from valuator.domain.ir import build_domain_artifact_fields
 from valuator.tools.base import ToolResult
 from valuator.tools.specs import ToolSpec
+from valuator.utils.config import config as runtime_config
 
 
 def _analysis() -> QueryAnalysis:
@@ -146,6 +148,9 @@ class _NoopPlanner:
     def bind_now_utc(self, _now_utc: object) -> None:
         return None
 
+    def bind_domain_context(self, _domain_context: object) -> None:
+        return None
+
 
 class _SamePlanPlanner(_NoopPlanner):
     def __init__(self, plan: Plan | None = None) -> None:
@@ -163,6 +168,9 @@ class _SamePlanPlanner(_NoopPlanner):
 
 
 class _SingleLeafExecutor:
+    def bind_domain_context(self, _domain_context: object) -> None:
+        return None
+
     async def execute_batch(self, **kwargs: object) -> list[ExecutionArtifact]:
         task_ids = list(kwargs["task_ids"])
         return [
@@ -177,6 +185,9 @@ class _SingleLeafExecutor:
 
 class _StaticAggregator:
     def bind_usage_writer(self, _usage_writer: object) -> None:
+        return None
+
+    def bind_domain_context(self, _domain_context: object) -> None:
         return None
 
     async def build_task_report(self, **kwargs: object) -> TaskReport:
@@ -197,6 +208,9 @@ class _PassReviewer:
         return None
 
     def bind_now_utc(self, _now_utc: object) -> None:
+        return None
+
+    def bind_domain_context(self, _domain_context: object) -> None:
         return None
 
     async def review(self, *_args: object, **_kwargs: object) -> ReviewResult:
@@ -761,6 +775,41 @@ class EngineFinalMarkdownTests(unittest.TestCase):
         self.assertEqual(result["status"], "revise")
         self.assertEqual(planner.replan_calls, 1)
         self.assertEqual(reviewer.calls, 1)
+
+    def test_engine_runs_legacy_single_unit_plan_when_domain_arch_is_disabled(self) -> None:
+        planner = Planner(client=_PlannerClient())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(session_id="S-TEST", base_dir=Path(tmpdir))
+            engine = Engine(
+                workspace=workspace,
+                planner=planner,
+                executor=_SingleLeafExecutor(),
+                aggregator=_StaticAggregator(),
+                reviewer=_PassReviewer(),
+                max_rounds=1,
+            )
+
+            with patch(
+                "valuator.core.orchestrator.engine.config",
+                replace(runtime_config, domain_arch_enabled=False),
+            ):
+                result = asyncio.run(engine.run("Analyze Amazon valuation"))
+
+            plan_payload = json.loads(
+                (workspace.session_dir / "plan" / "active" / "decomposition.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(plan_payload["analysis"]["domain_ids"], [])
+        self.assertEqual(len(plan_payload["analysis"]["units"]), 1)
+        self.assertEqual(plan_payload["analysis"]["units"][0]["objective"], "Analyze Amazon valuation")
+        self.assertEqual(
+            plan_payload["analysis"]["requirements"][0]["unit_ids"],
+            [0],
+        )
 
 
 if __name__ == "__main__":

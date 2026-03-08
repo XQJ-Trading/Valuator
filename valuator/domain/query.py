@@ -53,6 +53,19 @@ class QueryIntent:
                 return text
         return ""
 
+    def concrete_values(self) -> list[str]:
+        values: list[str] = []
+        for candidate in [
+            *self.company_names,
+            *self.entities,
+            self.ticker,
+            self.security_code,
+        ]:
+            text = candidate.strip()
+            if text and text not in values:
+                values.append(text)
+        return values
+
 
 @dataclass(slots=True)
 class QueryUnit:
@@ -86,6 +99,7 @@ class QueryAnalysis:
     """
 
     domain_ids: list[DomainId] = field(default_factory=list)
+    query_intent: QueryIntent = field(default_factory=lambda: QueryIntent(query=""))
     entities: dict[str, str] = field(default_factory=dict)
     units: list[QueryUnit] = field(default_factory=list)
     requirements: list[QueryRequirement] = field(default_factory=list)

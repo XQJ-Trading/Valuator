@@ -51,6 +51,15 @@ class Engine:
         self._domain_loader = domain_loader
         self._domain_router = domain_router
 
+    def _bind_domain_context(
+        self,
+        domain_context: DomainModuleContext | None,
+    ) -> None:
+        self.planner.bind_domain_context(domain_context)
+        self.executor.bind_domain_context(domain_context)
+        self.aggregator.bind_domain_context(domain_context)
+        self.reviewer.bind_domain_context(domain_context)
+
     @classmethod
     def create(
         cls,
@@ -157,8 +166,8 @@ class Engine:
         now_utc = datetime.now(timezone.utc)
         self.planner.bind_now_utc(now_utc)
         self.reviewer.bind_now_utc(now_utc)
+        self._bind_domain_context(None)
 
-        domain_context: DomainModuleContext | None = None
         if (
             config.domain_arch_enabled
             and self._domain_loader is not None
@@ -178,10 +187,7 @@ class Engine:
                 query_intent=intent,
                 query_analysis=analysis,
             )
-            self.planner.bind_domain_context(domain_context)
-            self.executor.bind_domain_context(domain_context)
-            self.aggregator.bind_domain_context(domain_context)
-            self.reviewer.bind_domain_context(domain_context)
+            self._bind_domain_context(domain_context)
 
         try:
             plan = await self.planner.plan(query)

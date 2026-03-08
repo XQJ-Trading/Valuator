@@ -11,6 +11,7 @@ from ...domain import (
     DomainModuleContext,
     QueryAnalysis,
     QueryIntent,
+    QueryRequirement,
     QueryUnit,
 )
 from ...models.gemini_direct import GeminiClient
@@ -64,7 +65,7 @@ class Planner:
         if not query or not query.strip():
             raise ValueError("query is required")
 
-        analysis = self._required_query_analysis()
+        analysis = self._query_analysis_for_plan(query)
         reference_date = self._reference_date()
         tasks = await self._build_tasks(
             query=query,
@@ -300,15 +301,40 @@ class Planner:
         )
         return tasks
 
-    def _required_query_analysis(self) -> QueryAnalysis:
+    def _query_analysis_for_plan(self, query: str) -> QueryAnalysis:
         if self._domain_context is None or self._domain_context.query_analysis is None:
-            raise ValueError("domain context with query analysis is required")
+            return self._legacy_query_analysis(query)
+
         analysis = self._domain_context.query_analysis
         if not analysis.units:
             raise ValueError("query analysis must include units")
         if not analysis.requirements:
             raise ValueError("query analysis must include requirements")
         return analysis
+
+    def _legacy_query_analysis(self, query: str) -> QueryAnalysis:
+        return QueryAnalysis(
+            domain_ids=[],
+            units=[
+                QueryUnit(
+                    id="Q-001",
+                    objective=query.strip(),
+                    retrieval_query=query.strip(),
+                )
+            ],
+            requirements=[
+                QueryRequirement(
+                    id="R-001",
+                    acceptance=(
+                        "Address the user's query directly with sourced evidence and a clear investment conclusion."
+                    ),
+                    unit_ids=[0],
+                    provenance="Derived from the raw query in legacy planning mode.",
+                )
+            ],
+            allowed_tools=registered_tool_names(),
+            rationale="Legacy single-unit planning without domain routing.",
+        )
 
     def _choose_tool_deterministic(
         self,
@@ -424,8 +450,11 @@ class Planner:
             raise ValueError(f"unknown args for {name}: {unknown}")
 
     def _allowed_tools_for_context(self) -> list[str]:
+        if self._domain_context is None or self._domain_context.query_analysis is None:
+            return registered_tool_names()
+
         module_allowed = self._module_allowed_tools()
-        analysis = self._domain_context.query_analysis if self._domain_context else None
+        analysis = self._domain_context.query_analysis
         if analysis is not None and analysis.allowed_tools:
             valid = filter_tool_names(analysis.allowed_tools, intent=self._intent)
             if module_allowed:
@@ -436,8 +465,8 @@ class Planner:
             if valid:
                 return sorted(valid)
 
-        if self._domain_context is None or not self._domain_context.module_ids:
-            return filter_tool_names(registered_tool_names(), intent=self._intent)
+        if not self._domain_context.module_ids:
+            return registered_tool_names()
 
         if module_allowed:
             return module_allowed

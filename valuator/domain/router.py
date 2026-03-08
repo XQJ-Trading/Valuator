@@ -31,14 +31,25 @@ async def analyze_query(
             primary_task_id = module.tasks[0].id
             break
 
+    analyzed_intent = analysis.query_intent
     concrete_labels = list(dict.fromkeys(analysis.entities.values()))
     updated_intent = QueryIntent(
         query=intent.query,
-        ticker=intent.ticker,
-        market=intent.market,
-        security_code=intent.security_code,
-        company_names=intent.company_names or concrete_labels,
-        entities=list(dict.fromkeys([*analysis.entities.values(), *intent.entities])),
+        ticker=intent.ticker or analyzed_intent.ticker,
+        market=intent.market or analyzed_intent.market,
+        security_code=intent.security_code or analyzed_intent.security_code,
+        company_names=(
+            intent.company_names or analyzed_intent.company_names or concrete_labels
+        ),
+        entities=list(
+            dict.fromkeys(
+                [
+                    *analysis.entities.values(),
+                    *analyzed_intent.company_names,
+                    *intent.entities,
+                ]
+            )
+        ),
     )
     routed_analysis = replace(
         analysis,
@@ -79,7 +90,11 @@ def _merged_intent_tags(query: str, analysis: QueryAnalysis) -> list[str]:
 def _infer_intent_tags(*, query: str, analysis: QueryAnalysis) -> list[str]:
     text = query.strip().lower()
     tags: list[str] = []
-    concrete_entities = list(dict.fromkeys(analysis.entities.values()))
+    concrete_entities = list(
+        dict.fromkeys(
+            [*analysis.query_intent.concrete_values(), *analysis.entities.values()]
+        )
+    )
 
     recommend_patterns = (
         r"\b(recommend|recommended|pick|picks|idea|ideas|top|best)\b",

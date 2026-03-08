@@ -1,0 +1,25 @@
+id: dcf
+name: DCF 밸류에이션
+description: DCF 폼 설계, 가정 채우기, 할인/NPV 계산을 수행한다.
+tools:
+  - dcf_pipeline_tool
+  - yfinance_balance_sheet
+  - sec_tool
+  - code_execute_tool
+domain_tools:
+  - tool: dcf_pipeline_tool
+    enabled: true
+prompt_fragment: |-
+  입력: 회사명(또는 티커/쿼리). 단계: (1) 15년 명시기간 스프레드시트 폼 설계(연도·매출·성장률·EBITDA·FCF 등 컬럼만, 값 채우지 않음) (2) as-of일 기준 연구로 폼 채우기(복잡 계산은 수식으로 남김, 출처 명시 권장) (3) 채워진 폼+가정+계산출력을 바탕으로 DCF 결과 제시.
+  필수 가정: 매출 성장률, 영업이익률(또는 EBITDA margin), CAPEX/재투자, WACC, 터미널 성장률. 계산은 code_execute_tool로 재현 가능해야 함.
+report_contract:
+  - 내재가치(Enterprise value, 필요시 Equity value)와 Base/Bull/Bear 시나리오 및 현재 가격 대비 괴리를 제시한다.
+  - 핵심 가정값(성장률·WACC·터미널 성장률 등)과 근거 출처를 표로 제시한다.
+  - 민감도 결과와 가장 영향이 큰 변수를 명시한다.
+tasks:
+  - id: dcf_valuation
+    name: DCF 밸류에이션
+  - id: dcf_sensitivity
+    name: DCF 민감도 분석
+depends_on:
+  - balance_sheet

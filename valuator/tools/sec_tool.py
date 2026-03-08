@@ -117,10 +117,18 @@ def get_10k_html_link(ticker: str, year: int) -> tuple[str, int]:
         )
 
     target_year = str(year)
-    picks = [candidate for candidate in tenk_candidates if candidate[0].startswith(target_year)]
+    picks = [
+        candidate
+        for candidate in tenk_candidates
+        if candidate[0].startswith(target_year)
+    ]
     if not picks:
         year = int(tenk_candidates[0][0][:4])
-        picks = [candidate for candidate in tenk_candidates if candidate[0].startswith(str(year))]
+        picks = [
+            candidate
+            for candidate in tenk_candidates
+            if candidate[0].startswith(str(year))
+        ]
 
     for report_date, accession_number in picks:
         report_date = report_date.replace("-", "")
@@ -145,7 +153,9 @@ def fetch_reader_lines(ticker: str, filing_url: str) -> list[str]:
     url_key = hashlib.sha256(filing_url.encode("utf-8")).hexdigest()[:12]
     cache_path = DATA_DIR / f"{safe_ticker}-{url_key}-10-k-lines.txt"
     if cache_path.exists():
-        cached = [line for line in cache_path.read_text(encoding="utf-8").splitlines() if line]
+        cached = [
+            line for line in cache_path.read_text(encoding="utf-8").splitlines() if line
+        ]
         if cached:
             return cached
 
@@ -215,8 +225,8 @@ class SECTool(BaseTool):
             year_int = int(year)
             filing_url, used_year = get_10k_html_link(ticker, year_int)
             lines = fetch_reader_lines(ticker, filing_url)
-            findings = await self._extract_chunks(query, lines)
-            summary = "\n\n".join(findings).strip()
+            extracted_chunks = await self._extract_chunks(query, lines)
+            findings_text = "\n\n".join(extracted_chunks).strip()
             return ToolResult(
                 success=True,
                 result={
@@ -224,13 +234,13 @@ class SECTool(BaseTool):
                     "year": used_year,
                     "query": query,
                     "filing_url": filing_url,
-                    "summary": summary,
-                    "extracts": findings,
+                    "findings": findings_text,
+                    "extracts": extracted_chunks,
                 },
                 metadata={
                     "source": "sec_edgar",
                     "line_count": len(lines),
-                    "selected_count": len(findings),
+                    "selected_count": len(extracted_chunks),
                 },
             )
         except SecToolError as exc:

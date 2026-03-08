@@ -1,14 +1,31 @@
-"""Data contracts (DTOs) for core domain models."""
+"""Data contracts for pipeline core types."""
 
-from .plan import Plan, Task, ToolCall
-from .requirement import PlanContract, RequirementItem, RequirementType, evaluate_contract
+from .plan import (
+    AggregationResult,
+    DomainCoverage,
+    ExecutionArtifact,
+    ExecutionResult,
+    Plan,
+    ReportMaterial,
+    ReviewResult,
+    Task,
+    TaskReport,
+    ToolCall,
+    evaluate_contract,
+    parse_contract_coverage,
+)
 
 __all__ = [
+    "AggregationResult",
+    "DomainCoverage",
+    "ExecutionArtifact",
+    "ExecutionResult",
     "Plan",
+    "ReportMaterial",
+    "ReviewResult",
     "Task",
+    "TaskReport",
     "ToolCall",
-    "PlanContract",
-    "RequirementItem",
-    "RequirementType",
     "evaluate_contract",
+    "parse_contract_coverage",
 ]

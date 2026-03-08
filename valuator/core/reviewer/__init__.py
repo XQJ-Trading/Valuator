@@ -1,4 +1,4 @@
-"""Reviewer: evaluates gaps and returns action node reasons."""
+"""Reviewer: evaluates gaps and returns action target reasons."""
 
 from .service import Review, Reviewer
 

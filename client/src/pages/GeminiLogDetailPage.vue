@@ -18,10 +18,6 @@
           <span class="metadata-value">{{ logDetail.metadata.model }}</span>
         </div>
         <div class="metadata-item">
-          <span class="metadata-label">📦 크기</span>
-          <span class="metadata-value">{{ logDetail.metadata.size_formatted }}</span>
-        </div>
-        <div class="metadata-item">
           <button @click="handleDownload" class="btn-download">⬇️ 다운로드</button>
         </div>
       </div>
@@ -263,4 +259,3 @@ onMounted(() => {
   }
 }
 </style>
-

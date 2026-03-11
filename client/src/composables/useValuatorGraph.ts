@@ -23,7 +23,7 @@ export function useValuatorGraph(snapshot: Ref<ValuatorSnapshot | null>) {
     const isTerminal =
       reviewStatus === 'pass' || snapshotStatus === 'completed' || snapshotStatus === 'failed'
 
-    return queryUnits.map((label, unitId) => {
+    return queryUnits.map((unit, unitId) => {
       const unitTasks = tasks
         .filter(
           (task) => task.task_type === 'leaf' && task.query_unit_ids.some((raw) => Number(raw) === unitId)
@@ -32,12 +32,15 @@ export function useValuatorGraph(snapshot: Ref<ValuatorSnapshot | null>) {
           ...task,
           computed_status: deriveTaskStatus(task.id, completedTaskIds, isTerminal)
         }))
+      const label =
+        typeof unit === 'string'
+          ? unit
+          : unit.objective || unit.retrieval_query || unit.id || `Query Unit ${unitId + 1}`
 
       return {
         unit_id: unitId,
         label,
-        tasks: unitTasks,
-        has_actions: false
+        tasks: unitTasks
       }
     })
   })

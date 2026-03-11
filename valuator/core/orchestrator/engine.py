@@ -4,17 +4,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from ...domain import (
+    DomainLoader,
+    DomainModuleContext,
+    DomainRouter,
+    QueryIntent,
+)
 from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..aggregator.service import Aggregation
-from ..contracts.plan import Plan
-from ..contracts.requirement import evaluate_contract
+from ..contracts.plan import Plan, ReviewResult
 from ..llm_usage import LLMUsageWriter
 from ..reviewer.service import Review
 from ..executor.service import Executor
-from ..graph.validator import validate_plan_graph
 from ..planner.service import Planner
 from ..workspace.service import Workspace
+from .state import RoundState
 
 
 LeafStartCallback = Callable[[Any], Awaitable[None]]
@@ -32,6 +37,8 @@ class Engine:
         aggregator: Aggregation,
         reviewer: Review,
         max_rounds: int,
+        domain_loader: DomainLoader | None = None,
+        domain_router: DomainRouter | None = None,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds must be >= 1")
@@ -41,6 +48,17 @@ class Engine:
         self.aggregator = aggregator
         self.reviewer = reviewer
         self.max_rounds = max_rounds
+        self._domain_loader = domain_loader
+        self._domain_router = domain_router
+
+    def _bind_domain_context(
+        self,
+        domain_context: DomainModuleContext | None,
+    ) -> None:
+        self.planner.bind_domain_context(domain_context)
+        self.executor.bind_domain_context(domain_context)
+        self.aggregator.bind_domain_context(domain_context)
+        self.reviewer.bind_domain_context(domain_context)
 
     @classmethod
     def create(
@@ -57,6 +75,11 @@ class Engine:
         executor = Executor()
         aggregator = Aggregation(client=client)
         reviewer = Review(client=client)
+        domain_loader: DomainLoader | None = None
+        domain_router: DomainRouter | None = None
+        if config.domain_arch_enabled:
+            domain_loader = DomainLoader()
+            domain_router = DomainRouter()
         return cls(
             workspace=workspace,
             planner=planner,
@@ -64,6 +87,8 @@ class Engine:
             aggregator=aggregator,
             reviewer=reviewer,
             max_rounds=max_rounds,
+            domain_loader=domain_loader,
+            domain_router=domain_router,
         )
 
     async def _execute_plan(
@@ -79,10 +104,7 @@ class Engine:
     ) -> dict[str, Any]:
         final_path: Path | None = None
         review_path: Path | None = None
-        latest_review: dict[str, Any] | None = None
-
-        # Validate the initial plan once before starting rounds.
-        validate_plan_graph(plan)
+        latest_review: ReviewResult | None = None
 
         for round_idx in range(1, max_rounds + 1):
             review_payload, final_path, review_path = await self._run_round(
@@ -94,24 +116,25 @@ class Engine:
                 on_leaf_complete=on_leaf_complete,
                 on_task_aggregated=on_task_aggregated,
             )
-            status = review_payload["status"]
+            status = review_payload.status
             latest_review = review_payload
 
             if status == "pass":
                 break
             if round_idx >= max_rounds:
                 break
-            plan = await self.planner.replan(plan, review_payload)
-            # Validate the replanned graph before the next round uses it.
-            validate_plan_graph(plan)
+            next_plan = await self.planner.replan(plan, review_payload)
+            if next_plan == plan:
+                break
+            plan = next_plan
 
         if final_path is None or review_path is None or latest_review is None:
             raise RuntimeError("engine did not produce final artifacts")
 
         return {
             "session_id": self.workspace.session_id,
-            "coverage_feedback": latest_review["coverage_feedback"],
-            "status": latest_review["status"],
+            "coverage_feedback": latest_review.coverage_feedback,
+            "status": latest_review.status,
             "final_path": str(final_path),
             "review_path": str(review_path),
         }
@@ -137,10 +160,35 @@ class Engine:
         self.planner.bind_usage_writer(usage_writer)
         self.aggregator.bind_usage_writer(usage_writer)
         self.reviewer.bind_usage_writer(usage_writer)
+        if self._domain_router is not None:
+            self._domain_router.bind_usage_writer(usage_writer)
         self.workspace.write_user_input(query)
         now_utc = datetime.now(timezone.utc)
         self.planner.bind_now_utc(now_utc)
         self.reviewer.bind_now_utc(now_utc)
+        self._bind_domain_context(None)
+
+        if (
+            config.domain_arch_enabled
+            and self._domain_loader is not None
+            and self._domain_router is not None
+        ):
+            index, modules = self._domain_loader.load()
+            intent = QueryIntent(query=query)
+            intent, analysis = await self._domain_router.analyze(intent, index, modules)
+            selected_modules = {
+                module_id: modules[module_id]
+                for module_id in analysis.domain_ids
+                if module_id in modules
+            }
+            domain_context = DomainModuleContext(
+                module_ids=list(selected_modules),
+                modules=selected_modules,
+                query_intent=intent,
+                query_analysis=analysis,
+            )
+            self._bind_domain_context(domain_context)
+
         try:
             plan = await self.planner.plan(query)
             return await self._execute_plan(
@@ -156,6 +204,8 @@ class Engine:
             self.planner.bind_usage_writer(None)
             self.aggregator.bind_usage_writer(None)
             self.reviewer.bind_usage_writer(None)
+            if self._domain_router is not None:
+                self._domain_router.bind_usage_writer(None)
             usage_writer.append_total()
 
     async def run_with_plan(self, query: str, plan: Plan) -> dict[str, Any]:
@@ -198,68 +248,125 @@ class Engine:
         on_leaf_start: LeafStartCallback | None = None,
         on_leaf_complete: LeafCompleteCallback | None = None,
         on_task_aggregated: TaskAggregatedCallback | None = None,
-    ) -> tuple[dict[str, Any], Path, Path]:
+    ) -> tuple[ReviewResult, Path, Path]:
         self.workspace.set_round(round_idx)
         self.workspace.write_plan(plan)
-        execution = await self.executor.execute(
-            query,
-            plan,
-            self.workspace,
+        state = RoundState.from_plan(plan)
+
+        while state.has_pending_tasks():
+            progressed = await self._run_ready_executables(
+                query=query,
+                plan=plan,
+                state=state,
+                usage_writer=usage_writer,
+                on_leaf_start=on_leaf_start,
+                on_leaf_complete=on_leaf_complete,
+                on_task_aggregated=on_task_aggregated,
+            )
+            while await self._run_ready_merges(
+                query=query,
+                plan=plan,
+                state=state,
+                on_task_aggregated=on_task_aggregated,
+            ):
+                progressed = True
+
+            if not progressed:
+                raise ValueError("task graph has unresolved phased dependencies")
+
+        execution = state.execution_result()
+        aggregation = self.aggregator.finalize_aggregation(
+            plan=plan,
+            task_map=state.task_map,
+            artifact_materials=state.artifact_materials,
+            artifact_index=state.artifact_index,
+            reports=state.reports,
+        )
+        final_path = self.workspace.write_final(aggregation.final_markdown)
+        review = await self.reviewer.review(plan, execution, aggregation)
+        review_path = self.workspace.write_review(review)
+        return review, final_path, review_path
+
+    async def _run_ready_executables(
+        self,
+        *,
+        query: str,
+        plan: Plan,
+        state: RoundState,
+        usage_writer: LLMUsageWriter | None,
+        on_leaf_start: LeafStartCallback | None,
+        on_leaf_complete: LeafCompleteCallback | None,
+        on_task_aggregated: TaskAggregatedCallback | None,
+    ) -> bool:
+        ready_task_ids = state.ready_executable_task_ids()
+        if not ready_task_ids:
+            return False
+
+        artifacts = await self.executor.execute_batch(
+            plan=plan,
+            task_ids=ready_task_ids,
+            workspace=self.workspace,
             usage_writer=usage_writer,
             on_leaf_start=on_leaf_start,
             on_leaf_complete=on_leaf_complete,
+            dependency_reports=state.reports,
         )
-        try:
-            aggregation = await self.aggregator.aggregate(
-                query,
-                plan,
-                execution,
-                self.workspace,
+        for artifact in artifacts:
+            state.record_execution_artifact(artifact)
+            await self._build_and_store_report(
+                query=query,
+                plan=plan,
+                state=state,
+                task_id=artifact.task_id,
                 on_task_aggregated=on_task_aggregated,
             )
-        except Exception as exc:
-            aggregation = self._aggregation_failure_payload(
-                plan=plan,
-                execution=execution,
-                error=exc,
-            )
-        final_path = self.workspace.write_final(aggregation["final_markdown"])
-        review = await self.reviewer.review(plan, execution, aggregation)
-        review_payload = {
-            **review,
-            "status": "pass" if not review["actions"] else "fail",
-            "round": round_idx,
-        }
-        review_path = self.workspace.write_review(review_payload)
-        return review_payload, final_path, review_path
+        return True
 
-    def _aggregation_failure_payload(
+    async def _run_ready_merges(
         self,
         *,
+        query: str,
         plan: Plan,
-        execution: dict[str, Any],
-        error: Exception,
-    ) -> dict[str, Any]:
-        task_map = {task.id: task for task in plan.tasks}
-        leaf_ids = sorted(
-            task_id
-            for task_id in set(execution.get("leaf_completed_tasks") or [])
-            if task_id in task_map and task_map[task_id].task_type == "leaf"
+        state: RoundState,
+        on_task_aggregated: TaskAggregatedCallback | None,
+    ) -> bool:
+        ready_task_ids = state.ready_merge_task_ids()
+        if not ready_task_ids:
+            return False
+
+        for task_id in ready_task_ids:
+            await self._build_and_store_report(
+                query=query,
+                plan=plan,
+                state=state,
+                task_id=task_id,
+                on_task_aggregated=on_task_aggregated,
+            )
+        return True
+
+    async def _build_and_store_report(
+        self,
+        *,
+        query: str,
+        plan: Plan,
+        state: RoundState,
+        task_id: str,
+        on_task_aggregated: TaskAggregatedCallback | None,
+    ) -> None:
+        report = await self.aggregator.build_task_report(
+            query=query,
+            plan=plan,
+            task_id=task_id,
+            task_map=state.task_map,
+            artifact_materials=state.artifact_materials,
+            artifact_index=state.artifact_index,
+            reports=state.reports,
         )
-        aggregated_query_unit_ids = sorted(
-            {
-                unit_id
-                for task_id in leaf_ids
-                for unit_id in task_map[task_id].query_unit_ids
-            }
-        )
-        return {
-            "final_markdown": "",
-            "root_task_id": plan.root_task_id,
-            "aggregated_leaf_task_ids": leaf_ids,
-            "aggregated_query_unit_ids": aggregated_query_unit_ids,
-            "final_included_leaf_task_ids": leaf_ids,
-            "final_included_query_unit_ids": aggregated_query_unit_ids,
-            "missing_contract_items": evaluate_contract(plan.contract, ""),
-            "aggregation_error": f"{type(error).__name__}: {error}",
-        }
+        state.record_task_report(report)
+        self.workspace.write_aggregation_report(task_id, report.markdown)
+        if on_task_aggregated is not None:
+            await on_task_aggregated(
+                state.task_map[task_id],
+                state.completed_task_count,
+                state.total_tasks,
+            )

@@ -22,10 +22,6 @@
           <span class="info-label">🤖</span>
           {{ log.model }}
         </span>
-        <span class="info-item">
-          <span class="info-label">📦</span>
-          {{ log.size_formatted }}
-        </span>
       </div>
     </div>
   </div>
@@ -180,4 +176,3 @@ function handleDownloadClick(event: Event) {
   }
 }
 </style>
-

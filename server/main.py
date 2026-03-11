@@ -4,17 +4,17 @@ import os
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
-from valuator.core import Engine, Plan
+from valuator.core import Engine
 from valuator.utils.config import config
 from valuator.utils.logger import logger
 from .repositories import (
@@ -24,6 +24,7 @@ from .repositories import (
     MongoTaskRewriteRepository,
     TaskRewriteRepository,
 )
+from .services.valuator_snapshot import project_snapshot_plan
 from .services.task_rewrite.service import TaskRewriteService
 
 
@@ -496,7 +497,7 @@ task_rewrite_service: Optional[TaskRewriteService] = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     # Startup
     global history_repository, task_rewrite_repository, session_service, task_rewrite_service
     history_repository = create_history_repository()
@@ -504,12 +505,12 @@ async def lifespan(app: FastAPI):
 
     # Initialize session service
     session_service = SessionService(history_repository=history_repository)
-    print(f"SessionService initialized")
+    print("SessionService initialized")
 
     # Initialize task rewrite service
     task_rewrite_repository = create_task_rewrite_repository()
     task_rewrite_service = TaskRewriteService(repository=task_rewrite_repository)
-    print(f"TaskRewriteService initialized")
+    print("TaskRewriteService initialized")
 
     yield
 
@@ -1120,12 +1121,8 @@ def _read_json_dict(path: Path) -> dict[str, Any] | None:
     return None
 
 
-def _load_snapshot_plan(path: Path) -> tuple[Plan | None, dict[str, Any]]:
-    try:
-        model = Plan.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None, (_read_json_dict(path) or {})
-    return model, model.model_dump()
+def _load_snapshot_plan(path: Path) -> dict[str, Any]:
+    return _read_json_dict(path) or {}
 
 
 def _load_valuator_snapshot_payload(
@@ -1134,13 +1131,9 @@ def _load_valuator_snapshot_payload(
     plan_path = session_dir / "plan" / "active" / "decomposition.json"
     if not plan_path.exists():
         raise HTTPException(status_code=404, detail="Plan decomposition not found")
-    plan_model, plan = _load_snapshot_plan(plan_path)
+    plan = _load_snapshot_plan(plan_path)
 
-    query = (
-        plan_model.query.strip()
-        if plan_model is not None
-        else str(plan.get("query", "")).strip()
-    )
+    query = str(plan.get("query", "")).strip()
     if not query:
         input_path = session_dir / "input" / "user_input.md"
         if input_path.exists():
@@ -1201,34 +1194,14 @@ def _load_valuator_snapshot_payload(
     latest_round = review.get("round") or execution_round or aggregation_round
     output_exists = (session_dir / "output" / "final.md").exists()
     status = str(review.get("status") or ("completed" if output_exists else "running"))
+    snapshot_plan = project_snapshot_plan(plan)
 
     return {
         "session_id": session_id,
         "query": query,
         "round": latest_round,
         "status": status,
-        "plan": {
-            "query_units": (
-                list(plan_model.query_units)
-                if plan_model is not None
-                else plan.get("query_units") or []
-            ),
-            "contract": (
-                (plan_model.contract.model_dump() if plan_model.contract else None)
-                if plan_model is not None
-                else plan.get("contract")
-            ),
-            "tasks": (
-                [task.model_dump() for task in plan_model.tasks]
-                if plan_model is not None
-                else plan.get("tasks") or []
-            ),
-            "root_task_id": (
-                plan_model.root_task_id
-                if plan_model is not None
-                else plan.get("root_task_id")
-            ),
-        },
+        "plan": snapshot_plan,
         "execution": {"artifacts": execution_artifacts},
         "aggregation": {"reports": aggregation_reports},
         "review": {
@@ -1464,7 +1437,7 @@ async def get_gemini_logs(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     model: Optional[str] = Query(None),
-    sort: str = Query("newest", regex="^(newest|oldest|size)$"),
+    sort: str = Query("newest", regex="^(newest|oldest)$"),
 ):
     """
     Get list of Gemini request/response log files
@@ -1476,7 +1449,7 @@ async def get_gemini_logs(
         date_from: Start date filter (YYYYMMDD format)
         date_to: End date filter (YYYYMMDD format)
         model: Model name filter
-        sort: Sort order (newest, oldest, size)
+        sort: Sort order (newest, oldest)
 
     Returns:
         List of log file metadata
@@ -1497,7 +1470,6 @@ async def get_gemini_logs(
             file_datetime = _parse_gemini_timestamp(timestamp_str)
             file_date = file_datetime.date() if file_datetime else None
             time_str = file_datetime.strftime("%H:%M:%S") if file_datetime else None
-            file_size = filepath.stat().st_size
             file_model = None
             if model is not None:
                 try:
@@ -1514,8 +1486,6 @@ async def get_gemini_logs(
                     "date": file_date.isoformat() if file_date else None,
                     "time": time_str,
                     "datetime": file_datetime.isoformat() if file_datetime else None,
-                    "size": file_size,
-                    "size_formatted": _format_file_size(file_size),
                     "model": file_model,
                     "filepath": str(filepath),
                 }
@@ -1595,10 +1565,8 @@ async def get_gemini_logs(
         # Sort
         if sort == "newest":
             filtered_files.sort(key=lambda x: x["datetime"] or "", reverse=True)
-        elif sort == "oldest":
+        else:
             filtered_files.sort(key=lambda x: x["datetime"] or "")
-        elif sort == "size":
-            filtered_files.sort(key=lambda x: x["size"], reverse=True)
 
         # Pagination
         total = len(filtered_files)
@@ -1666,8 +1634,6 @@ async def get_gemini_log_detail(filename: str):
         )
         file_date = file_datetime.date() if file_datetime else None
 
-        file_size = filepath.stat().st_size
-
         return {
             "filename": filename,
             "metadata": {
@@ -1675,8 +1641,6 @@ async def get_gemini_log_detail(filename: str):
                 "date": file_date.isoformat() if file_date else None,
                 "time": file_datetime.strftime("%H:%M:%S") if file_datetime else None,
                 "datetime": file_datetime.isoformat() if file_datetime else None,
-                "size": file_size,
-                "size_formatted": _format_file_size(file_size),
                 "model": data.get("model"),
             },
             "data": data,
@@ -1723,16 +1687,6 @@ async def download_gemini_log(filename: str):
         raise HTTPException(
             status_code=500, detail=f"Failed to download Gemini log: {str(e)}"
         )
-
-
-def _format_file_size(size_bytes: int) -> str:
-    """Format file size in human-readable format"""
-    if size_bytes < 1024:
-        return f"{size_bytes}B"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f}KB"
-    else:
-        return f"{size_bytes / (1024 * 1024):.1f}MB"
 
 
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")

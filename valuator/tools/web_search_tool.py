@@ -19,8 +19,7 @@ except Exception:  # pragma: no cover - optional dependency at runtime
 
 from ..utils.config import config
 from ..utils.logger import logger
-from .base import ToolResult
-from .base import ReActBaseTool
+from .base import ReActBaseTool, ToolResult
 
 
 class PerplexitySearchTool(ReActBaseTool):
@@ -58,7 +57,7 @@ class PerplexitySearchTool(ReActBaseTool):
         self,
         query: str | None = None,
         queries: list[str] | None = None,
-        **kwargs,
+        **_kwargs,
     ) -> ToolResult:
         if queries:
             if not all(isinstance(q, str) and q.strip() for q in queries):
@@ -134,8 +133,7 @@ class PerplexitySearchTool(ReActBaseTool):
                 success=True,
                 result={
                     "query": query,
-                    "summary": answer,
-                    "answer": answer,
+                    "findings": answer,
                     "sources": sources,
                 },
                 metadata={
@@ -183,9 +181,24 @@ class PerplexitySearchTool(ReActBaseTool):
                 result=[r.model_dump() for r in results],
                 error="One or more searches failed",
             )
+        rows = [r.model_dump() for r in results]
+        findings_parts: list[str] = []
+        for row in rows:
+            result_payload = row.get("result")
+            if not isinstance(result_payload, dict):
+                continue
+            findings = result_payload.get("findings")
+            if isinstance(findings, str) and findings.strip():
+                findings_parts.append(findings.strip())
+        findings_text = "\n\n".join(findings_parts).strip()
+        if not findings_text:
+            findings_text = f"batch search completed: {len(rows)} queries"
         return ToolResult(
             success=True,
-            result={"results": [r.model_dump() for r in results]},
+            result={
+                "findings": findings_text,
+                "results": rows,
+            },
             metadata={"search_type": "perplexity_web_batch", "count": len(results)},
         )
 

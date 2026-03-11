@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..contracts.plan import Plan, Task
+from ..contracts.plan import ReportMaterial
 
 
 def post_order_tasks(plan: Plan) -> list[str]:
@@ -21,41 +24,29 @@ def post_order_tasks(plan: Plan) -> list[str]:
     return order
 
 
-def infer_root_task_id(tasks: list[Task]) -> str:
-    task_ids = {task.id for task in tasks}
-    deps = {dep for task in tasks for dep in task.deps}
-    sinks = sorted(task_ids - deps)
-    if len(sinks) != 1:
-        raise ValueError("cannot infer single root task")
-    return sinks[0]
-
-
 def descendant_leaf_artifacts(
     task_id: str,
     task_map: dict[str, Task],
-    leaf_artifacts: dict[str, list[dict[str, str]]],
-    cache: dict[str, list[dict[str, str]]],
-) -> list[dict[str, str]]:
+    leaf_artifacts: dict[str, list[ReportMaterial]],
+    cache: dict[str, list[ReportMaterial]],
+) -> list[ReportMaterial]:
     if task_id in cache:
         return cache[task_id]
 
     task = task_map[task_id]
-    if task.task_type == "leaf":
-        result = [
-            {"source": artifact["path"], "content": artifact["content"]}
-            for artifact in leaf_artifacts.get(task_id, [])
-        ]
+    if task.task_type != "merge":
+        result = [replace(artifact) for artifact in leaf_artifacts.get(task_id, [])]
         cache[task_id] = result
         return result
 
-    result: list[dict[str, str]] = []
+    result: list[ReportMaterial] = []
     seen_sources: set[str] = set()
     for dep in task.deps:
         for item in descendant_leaf_artifacts(dep, task_map, leaf_artifacts, cache):
-            if item["source"] in seen_sources:
+            if item.source in seen_sources:
                 continue
             result.append(item)
-            seen_sources.add(item["source"])
+            seen_sources.add(item.source)
 
     cache[task_id] = result
     return result
@@ -77,5 +68,25 @@ def descendant_leaf_task_ids(root_task_id: str, task_map: dict[str, Task]) -> se
             leaf_ids.update(collect(dep))
         cache[task_id] = leaf_ids
         return leaf_ids
+
+    return collect(root_task_id)
+
+
+def descendant_artifact_task_ids(root_task_id: str, task_map: dict[str, Task]) -> set[str]:
+    cache: dict[str, set[str]] = {}
+
+    def collect(task_id: str) -> set[str]:
+        if task_id in cache:
+            return cache[task_id]
+        task = task_map[task_id]
+        if task.task_type != "merge":
+            cache[task_id] = {task_id}
+            return cache[task_id]
+
+        artifact_ids: set[str] = set()
+        for dep in task.deps:
+            artifact_ids.update(collect(dep))
+        cache[task_id] = artifact_ids
+        return artifact_ids
 
     return collect(root_task_id)

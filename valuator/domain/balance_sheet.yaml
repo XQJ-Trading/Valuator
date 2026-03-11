@@ -1,0 +1,21 @@
+id: balance_sheet
+name: 재무제표·재무 추출
+description: B/S 중심 재무 데이터 추출 및 비율 계산을 수행한다.
+tools:
+  - web_search_tool
+  - sec_tool
+domain_tools: []
+prompt_fragment: |-
+  입력: 회사명(또는 티커/질의). sec_tool/web_search_tool로 재무제표 수치와 출처를 수집하고, 최종 보고서에서 표·추세·비율을 구성한다.
+  규칙: balance_sheet 전용 추출 툴이나 yfinance 전용 balance sheet 경로를 사용하지 않는다. 수치는 출처와 as-of 시점을 함께 유지한다.
+report_contract:
+  - 최근 5개년(절대연도 기준)의 주요 재무항목(자산, 부채, 자본, 유동성)을 표로 제시한다.
+  - 5개년 추세 변화(증감률, 구조 변화)를 명시한다.
+  - 핵심 비율(부채비율, 유동비율, 이자보상배율 등)과 계산 근거를 제시한다.
+  - 데이터 소스와 as-of 시점을 명시한다.
+tasks:
+  - id: balance_sheet_snapshot
+    name: 재무제표 스냅샷
+  - id: balance_sheet_trends
+    name: 재무 추세 분석
+depends_on: []

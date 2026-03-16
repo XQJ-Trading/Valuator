@@ -2,7 +2,6 @@ schema_version: 1
 modules:
   - ceo
   - dcf
-  - balance_sheet
   - risk_transmission
 
 # Query Analysis용 메타 (LLM 프롬프트에 주입)
@@ -17,5 +16,4 @@ selective_signals: |
 module_summaries:
   ceo: "CEO·경영진·거버넌스 평가"
   dcf: "DCF 밸류에이션 (폼·가정·계산)"
-  balance_sheet: "재무제표·재무 추출·비율"
   risk_transmission: "리스크→손익/CF 전이 분석"

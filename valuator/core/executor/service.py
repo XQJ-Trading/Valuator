@@ -8,10 +8,8 @@ from typing import Any, Awaitable, Callable
 
 from ...domain import DomainModuleContext
 from ...domain.ir import build_domain_artifact_fields
-from ...tools.balance_sheet_extraction_tool import BalanceSheetExtractionTool
-from ...tools.ceo_analysis_tool import CEOAnalysisTool
 from ...tools.code_execute_tool import ExecuteCodeTool
-from ...tools.dcf_pipeline_tool import DCFPipelineTool
+from ...tools.domain_tool import DomainTool as UnifiedDomainTool
 from ...tools.sec_tool import SECTool
 from ...tools.base import ObservationData, ToolResult
 from ...tools.specs import TOOL_SPECS
@@ -25,9 +23,7 @@ _TOOL_CLASSES: dict[str, type[Any]] = {
     "sec_tool": SECTool,
     "yfinance_balance_sheet": YFinanceBalanceSheetTool,
     "code_execute_tool": ExecuteCodeTool,
-    "ceo_analysis_tool": CEOAnalysisTool,
-    "dcf_pipeline_tool": DCFPipelineTool,
-    "balance_sheet_extraction_tool": BalanceSheetExtractionTool,
+    "domain_tool": UnifiedDomainTool,
 }
 _EXECUTOR_LEAF_CONCURRENCY = 4
 _EXECUTABLE_TASK_TYPES = frozenset({"leaf", "module"})
@@ -282,6 +278,18 @@ class Executor:
         if task.task_type != "module":
             return tool_args
 
+        if (
+            task.tool.name == "domain_tool"
+            and self._domain_context is not None
+            and task.domain_id
+        ):
+            module = self._domain_context.modules.get(task.domain_id)
+            if module is not None:
+                tool_args["domain_id"] = task.domain_id
+                tool_args["domain_guide"] = module.prompt_fragment
+                if module.pipeline_config is not None:
+                    tool_args["pipeline_config"] = module.pipeline_config
+
         context = self._dependency_context(
             task=task,
             task_map=task_map,
@@ -289,10 +297,6 @@ class Executor:
             reports=reports,
         )
         if not context:
-            return tool_args
-
-        if task.tool.name == "balance_sheet_extraction_tool":
-            tool_args["summary"] = context
             return tool_args
 
         tool_args["context"] = context

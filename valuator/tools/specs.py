@@ -123,26 +123,22 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         required=("code",),
         capability="deterministic calculations",
     ),
-    "ceo_analysis_tool": ToolSpec(
-        name="ceo_analysis_tool",
-        optional=("corp", "company_name", "ticker", "query", "context"),
-        capability="CEO & leadership analysis for long-term investors",
+    "domain_tool": ToolSpec(
+        name="domain_tool",
+        optional=(
+            "corp",
+            "company_name",
+            "ticker",
+            "query",
+            "context",
+            "domain_guide",
+            "domain_id",
+            "pipeline_config",
+        ),
+        capability="domain analysis via guide or pipeline",
         subject_requirement=SubjectRequirement(
             any_of=("company_name", "ticker", "security_code")
         ),
-    ),
-    "dcf_pipeline_tool": ToolSpec(
-        name="dcf_pipeline_tool",
-        optional=("corp", "company_name", "ticker", "query", "context"),
-        capability="end-to-end DCF valuation pipeline",
-        subject_requirement=SubjectRequirement(
-            any_of=("company_name", "ticker", "security_code")
-        ),
-    ),
-    "balance_sheet_extraction_tool": ToolSpec(
-        name="balance_sheet_extraction_tool",
-        required=("summary",),
-        capability="normalize balance-sheet summary text into structured JSON",
     ),
 }
 

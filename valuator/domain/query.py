@@ -16,9 +16,6 @@ DEFAULT_GENERIC_TOOLS = [
     "sec_tool",
     "yfinance_balance_sheet",
     "code_execute_tool",
-    "ceo_analysis_tool",
-    "dcf_pipeline_tool",
-    "balance_sheet_extraction_tool",
 ]
 
 CONCRETE_SUBJECT_KINDS = frozenset(

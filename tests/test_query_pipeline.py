@@ -123,6 +123,19 @@ class QueryAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis.units[0].domain_ids, ["dcf"])
         self.assertEqual(analysis.requirements[0].unit_ids, [0])
 
+    def test_loader_reads_domain_guides_and_pipeline_config_from_subdirectories(self) -> None:
+        loader = DomainLoader()
+        _, modules = loader.load()
+
+        self.assertIn("Integrity and Transparency", modules["ceo"].prompt_fragment)
+        self.assertIsNone(modules["ceo"].pipeline_config)
+        self.assertIsNotNone(modules["dcf"].pipeline_config)
+        self.assertEqual(len(modules["dcf"].pipeline_config.stages), 5)
+        self.assertEqual(
+            modules["dcf"].pipeline_config.result_mapping["assumptions"],
+            "{stages.extract_assumptions}",
+        )
+
     def test_build_query_breakdown_projects_steps_entities_and_relations(self) -> None:
         analysis = _canonical_analysis(
             domain_ids=["dcf", "ceo"],
@@ -176,8 +189,9 @@ class FillRoutingDefaultsTests(unittest.TestCase):
         loader = DomainLoader()
         _, modules = loader.load()
         result = fill_routing_defaults(analysis, modules)
-        self.assertIn("dcf_pipeline_tool", result.allowed_tools)
-        self.assertIn("ceo_analysis_tool", result.allowed_tools)
+        self.assertIn("domain_tool", result.allowed_tools)
+        self.assertIn("yfinance_balance_sheet", result.allowed_tools)
+        self.assertEqual(result.allowed_tools.count("domain_tool"), 1)
 
 
 class RouterAndPlannerIdentifierTests(unittest.TestCase):
@@ -192,7 +206,7 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         analyzer = _AnalyzerStub(
             _canonical_analysis(
                 domain_ids=["dcf"],
-                allowed_tools=["dcf_pipeline_tool"],
+                allowed_tools=["domain_tool"],
             )
         )
 
@@ -235,7 +249,7 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
                     )
                 ],
                 intent_tags=["recommendation"],
-                allowed_tools=["web_search_tool", "dcf_pipeline_tool"],
+                allowed_tools=["web_search_tool", "domain_tool"],
                 rationale="Recommendation query without a concrete issuer.",
             )
         )
@@ -299,22 +313,17 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         loader = DomainLoader()
         _, modules = loader.load()
         analysis = _canonical_analysis(
-            domain_ids=["balance_sheet"],
-            allowed_tools=[
-                "sec_tool",
-                "web_search_tool",
-                "yfinance_balance_sheet",
-                "balance_sheet_extraction_tool",
-            ],
+            domain_ids=["risk_transmission"],
+            allowed_tools=["sec_tool", "web_search_tool"],
             entities={"hyundai-movex": "현대무벡스"},
-            unit_objective="최근 5개년 재무제표 추출",
-            retrieval_query="현대무벡스 최근 5개년 재무제표 추출",
+            unit_objective="핵심 리스크 전이 경로 추출",
+            retrieval_query="현대무벡스 핵심 리스크 전이 경로 추출",
         )
         planner = Planner(client=_NoopClient())
         planner.bind_domain_context(
             DomainModuleContext(
-                module_ids=["balance_sheet"],
-                modules={"balance_sheet": modules["balance_sheet"]},
+                module_ids=["risk_transmission"],
+                modules={"risk_transmission": modules["risk_transmission"]},
                 query_intent=QueryIntent(
                     query="현대무벡스",
                     market="KRX",
@@ -326,18 +335,13 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
 
         self.assertEqual(planner._ticker, "")
         self.assertNotIn("sec_tool", planner._allowed_tools_for_context())
-        self.assertNotIn("yfinance_balance_sheet", planner._allowed_tools_for_context())
-        self.assertNotIn(
-            "balance_sheet_extraction_tool",
-            planner._allowed_tools_for_context(),
-        )
         tool = planner._choose_tool_deterministic(
             analysis.units[0],
             "현대무벡스",
             date(2026, 3, 6),
         )
         self.assertEqual(tool.name, "web_search_tool")
-        self.assertEqual(tool.args["query"], "현대무벡스 최근 5개년 재무제표 추출")
+        self.assertEqual(tool.args["query"], "현대무벡스 핵심 리스크 전이 경로 추출")
 
     def test_planner_uses_legacy_single_unit_plan_without_domain_context(self) -> None:
         planner = Planner(client=_NoopClient())
@@ -354,47 +358,12 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         self.assertEqual(plan.analysis.requirements[0].unit_ids, [0])
         self.assertEqual(len([task for task in plan.tasks if task.task_type == "leaf"]), 1)
 
-    def test_planner_skips_balance_sheet_module_task_when_domain_has_no_specialist_tool(
-        self,
-    ) -> None:
-        loader = DomainLoader()
-        _, modules = loader.load()
-        analysis = _canonical_analysis(
-            domain_ids=["balance_sheet"],
-            allowed_tools=["web_search_tool", "balance_sheet_extraction_tool"],
-            entities={"amazon": "Amazon"},
-            unit_objective="최근 5개년 재무제표 추출",
-            retrieval_query="Amazon recent five year balance sheet trends",
-        )
-        planner = Planner(client=_NoopClient())
-        planner.bind_domain_context(
-            DomainModuleContext(
-                module_ids=["balance_sheet"],
-                modules={"balance_sheet": modules["balance_sheet"]},
-                query_intent=QueryIntent(
-                    query="Amazon balance sheet analysis",
-                    ticker="AMZN",
-                    market="USA",
-                    company_names=["Amazon"],
-                ),
-                query_analysis=analysis,
-            )
-        )
-
-        plan = asyncio.run(planner.plan("Amazon balance sheet analysis"))
-
-        module_tasks = [task for task in plan.tasks if task.task_type == "module"]
-        leaf_tasks = [task for task in plan.tasks if task.task_type == "leaf"]
-        self.assertEqual(module_tasks, [])
-        self.assertEqual(len(leaf_tasks), 1)
-        self.assertEqual(leaf_tasks[0].tool.name, "web_search_tool")
-
     def test_planner_keeps_company_name_distinct_from_ticker(self) -> None:
         loader = DomainLoader()
         _, modules = loader.load()
         analysis = _canonical_analysis(
             domain_ids=["dcf"],
-            allowed_tools=["dcf_pipeline_tool"],
+            allowed_tools=["domain_tool"],
         )
         planner = Planner(client=_NoopClient())
         planner.bind_domain_context(
@@ -417,7 +386,7 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             date(2026, 3, 6),
         )
 
-        self.assertEqual(tool.name, "dcf_pipeline_tool")
+        self.assertEqual(tool.name, "domain_tool")
         self.assertEqual(tool.args["ticker"], "AMZN")
         self.assertEqual(tool.args["company_name"], "Amazon")
         self.assertEqual(tool.args["corp"], "Amazon")

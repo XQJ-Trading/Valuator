@@ -14,9 +14,6 @@ from .query import (
 from .query_analysis import QueryAnalyzer
 from .router import DomainRouter, analyze_query
 from .types import (
-    BalanceSheetComponent,
-    BalanceSheetSection,
-    BalanceSheetSummary,
     CeoSummary,
     DcfSummary,
     DomainIndex,
@@ -25,14 +22,14 @@ from .types import (
     DomainReportRequirement,
     DomainTask,
     DomainTool,
+    PipelineConfig,
+    PipelineStage,
     RiskTransmissionItem,
     RiskTransmissionSummary,
+    StageOutput,
 )
 
 __all__ = [
-    "BalanceSheetComponent",
-    "BalanceSheetSection",
-    "BalanceSheetSummary",
     "CeoSummary",
     "DcfSummary",
     "DomainIndex",
@@ -43,6 +40,8 @@ __all__ = [
     "DomainRouter",
     "DomainTask",
     "DomainTool",
+    "PipelineConfig",
+    "PipelineStage",
     "QueryBreakdown",
     "QueryEntity",
     "QueryAnalysis",
@@ -54,6 +53,7 @@ __all__ = [
     "QueryUnit",
     "RiskTransmissionItem",
     "RiskTransmissionSummary",
+    "StageOutput",
     "analyze_query",
     "build_query_breakdown",
     "fill_routing_defaults",

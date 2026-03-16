@@ -31,9 +31,7 @@ _SYSTEM_PROMPT = (
 _LEAF_BUILD_CONCURRENCY = 4
 _MAX_LEAF_ATTEMPTS_PER_UNIT = 2
 _PREFERRED_SPECIALIST_TOOLS = (
-    "dcf_pipeline_tool",
-    "ceo_analysis_tool",
-    "balance_sheet_extraction_tool",
+    "domain_tool",
 )
 _DOMAIN_TOOL_NAMES = frozenset(_PREFERRED_SPECIALIST_TOOLS)
 
@@ -712,9 +710,9 @@ class Planner:
                 text = req.text.strip()
                 if text:
                     lines.append(f"  - report_requirement={text}")
-            fragment = module.prompt_fragment.strip()
-            if fragment:
-                lines.append(f"  - prompt_fragment={fragment}")
+            description = module.description.strip()
+            if description:
+                lines.append(f"  - description={description}")
         return "\n".join(lines)
 
     def _domain_signals_from_feedback(self, signals: dict[str, Any]) -> dict[str, Any]:

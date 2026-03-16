@@ -82,8 +82,7 @@ def _analysis() -> QueryAnalysis:
         allowed_tools=[
             "sec_tool",
             "web_search_tool",
-            "dcf_pipeline_tool",
-            "ceo_analysis_tool",
+            "domain_tool",
         ],
         rationale="Two unit canonical analysis.",
     )
@@ -260,6 +259,9 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(len(module_tasks), 2)
         self.assertEqual(len(merge_tasks), 3)
         self.assertEqual(sorted(task.domain_id for task in module_tasks), ["ceo", "dcf"])
+        self.assertEqual(sorted(task.tool.name for task in module_tasks), ["domain_tool", "domain_tool"])
+        self.assertNotIn("domain_guide", module_tasks[0].tool.args)
+        self.assertNotIn("pipeline_config", module_tasks[0].tool.args)
         self.assertEqual(len(root_task.deps), 4)
 
     def test_replan_stops_after_two_leaf_attempts_for_same_unit(self) -> None:

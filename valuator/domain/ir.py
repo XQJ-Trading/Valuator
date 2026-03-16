@@ -4,9 +4,6 @@ from ast import literal_eval
 from typing import Any
 
 from .types import (
-    BalanceSheetComponent,
-    BalanceSheetSection,
-    BalanceSheetSummary,
     CeoSummary,
     DcfSummary,
 )
@@ -42,9 +39,6 @@ def build_domain_artifact_fields(
         return _dcf_artifact_fields(raw_result)
     if domain_id == "ceo":
         return _ceo_artifact_fields(raw_result)
-    if domain_id == "balance_sheet":
-        return _balance_sheet_artifact_fields(raw_result)
-
     return {
         "domain_id": domain_id,
         "domain_summary": str(raw_result.get("findings") or "").strip(),
@@ -138,51 +132,3 @@ def _ceo_artifact_fields(raw_result: dict[str, Any]) -> dict[str, Any]:
             "ceo": ceo_summary.model_dump(),
         },
     }
-
-
-def _balance_sheet_artifact_fields(raw_result: dict[str, Any]) -> dict[str, Any]:
-    balance_sheet = raw_result.get("balance_sheet") or {}
-    if not isinstance(balance_sheet, dict):
-        return {}
-    units = str(raw_result.get("units") or "").strip()
-    as_of = raw_result.get("as_of")
-    summary = str(raw_result.get("findings") or "").strip()
-
-    balance_sheet_summary = BalanceSheetSummary(
-        assets=_build_section(balance_sheet.get("assets") or {}),
-        liabilities=_build_section(balance_sheet.get("liabilities") or {}),
-        equity=_build_section(balance_sheet.get("equity") or {}),
-        units=units,
-        as_of=as_of,
-    )
-    return {
-        "domain_id": "balance_sheet",
-        "domain_summary": summary,
-        "domain_key_values": {
-            "assets_total": balance_sheet_summary.assets.total,
-            "liabilities_total": balance_sheet_summary.liabilities.total,
-            "equity_total": balance_sheet_summary.equity.total,
-            "units": balance_sheet_summary.units,
-        },
-        "domain_payload": {"balance_sheet": balance_sheet_summary.model_dump()},
-    }
-
-
-def _build_section(raw: Any) -> BalanceSheetSection:
-    if not isinstance(raw, dict):
-        return BalanceSheetSection(total="N/A", components=[])
-
-    components: list[BalanceSheetComponent] = []
-    for item in raw.get("components") or []:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("item") or "").strip()
-        value = str(item.get("value") or "").strip()
-        if not name or not value:
-            continue
-        components.append(BalanceSheetComponent(item=name, value=value))
-
-    return BalanceSheetSection(
-        total=str(raw.get("total") or "N/A"),
-        components=components,
-    )

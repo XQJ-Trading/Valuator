@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +34,38 @@ class DomainTask(BaseModel):
     name: str = ""
 
 
+@dataclass(slots=True)
+class StageOutput:
+    """Pipeline stage result produced at the execution boundary."""
+
+    raw: Any
+    text: str
+
+
+class PipelineStage(BaseModel):
+    """Single pipeline.yaml stage declaration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    action: Literal["llm", "llm_json", "code_execute"]
+    user_prompt: str = ""
+    system_prompt_content: str = ""
+    output_schema_content: dict[str, Any] | None = None
+    code_content: str = ""
+    inject_vars: dict[str, str] = Field(default_factory=dict)
+    output_key: str = ""
+
+
+class PipelineConfig(BaseModel):
+    """Parsed immutable pipeline declaration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stages: list[PipelineStage]
+    result_mapping: dict[str, str] = Field(default_factory=dict)
+
+
 class DomainModule(BaseModel):
     """Single domain module definition loaded from YAML."""
 
@@ -47,6 +79,7 @@ class DomainModule(BaseModel):
     tasks: list[DomainTask] = Field(default_factory=list)
     prompt_fragment: str = ""
     prompt_file: str | None = None
+    pipeline_config: PipelineConfig | None = None
     report_contract: list[DomainReportRequirement] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
 
@@ -119,32 +152,3 @@ class RiskTransmissionSummary(BaseModel):
 
     items: list[RiskTransmissionItem] = Field(default_factory=list)
 
-
-class BalanceSheetComponent(BaseModel):
-    """Single balance-sheet line item."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    item: str = Field(min_length=1)
-    value: str = Field(min_length=1)
-
-
-class BalanceSheetSection(BaseModel):
-    """Assets / Liabilities / Equity section."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    total: str = Field(default="N/A")
-    components: list[BalanceSheetComponent] = Field(default_factory=list)
-
-
-class BalanceSheetSummary(BaseModel):
-    """Normalized balance-sheet snapshot for reporting."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    assets: BalanceSheetSection
-    liabilities: BalanceSheetSection
-    equity: BalanceSheetSection
-    units: str = Field(default="")
-    as_of: str | None = None

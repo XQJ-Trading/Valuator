@@ -18,4 +18,12 @@ report_contract:
 tasks:
   - id: risk_transmission
     name: 리스크 전이 분석
+ir:
+  summary_path: findings
+  payload_paths:
+    ticker: ticker
+    year: year
+    filing_url: filing_url
+    extracts: extracts
+    findings: findings
 depends_on: []

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..models.gemini_direct import GeminiClient
 from ..utils.config import config
+from .company import find_company
 from .query import (
     QueryAnalysis,
     QueryIntent,
@@ -16,6 +16,9 @@ from .query import (
     is_concrete_subject_kind,
 )
 from .types import DomainIndex, DomainModule
+
+if TYPE_CHECKING:
+    from ..models.gemini_direct import GeminiClient
 
 _SYSTEM_PROMPT = (
     "Return concise JSON only. No markdown. "
@@ -35,7 +38,6 @@ class QueryIntentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     ticker: str = ""
-    market: str = ""
     security_code: str = ""
     company_names: list[str] = Field(default_factory=list)
 
@@ -100,12 +102,15 @@ def _build_query_analysis(
             + ", ".join(unknown_domains)
         )
 
+    company_names = _dedupe_strings(raw.query_intent.company_names)
+    company = find_company(
+        ticker=raw.query_intent.ticker,
+        security_code=raw.query_intent.security_code,
+        company_name=company_names[0] if company_names else "",
+    )
     query_intent = QueryIntent(
         query=query,
-        ticker=raw.query_intent.ticker,
-        market=raw.query_intent.market,
-        security_code=raw.query_intent.security_code,
-        company_names=_dedupe_strings(raw.query_intent.company_names),
+        company=company,
     )
 
     entities: dict[str, str] = {}
@@ -212,7 +217,11 @@ class QueryAnalyzer:
     """Analyzes the raw user query into the canonical query spec."""
 
     def __init__(self, client: GeminiClient | None = None) -> None:
-        self.client = client or GeminiClient(config.agent_model)
+        if client is None:
+            from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+            client = RuntimeGeminiClient(config.agent_model)
+        self.client = client
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.client.bind_usage_writer(usage_writer)
@@ -252,7 +261,7 @@ class QueryAnalyzer:
             f"{module_lines}\n\n"
             "Rules:\n"
             "- Return query_intent, domain_ids, entities, units, requirements, intent_tags, rationale.\n"
-            "- query_intent must include ticker, market, security_code, company_names.\n"
+            "- query_intent must include ticker, security_code, company_names.\n"
             "- Use empty strings or an empty array in query_intent when the query does not identify a concrete subject.\n"
             "- units must be semantic retrieval units, not formatting instructions.\n"
             "- Every unit must include id, objective, retrieval_query, domain_ids, entity_ids, time_scope.\n"
@@ -286,13 +295,11 @@ class QueryAnalyzer:
                     "additionalProperties": False,
                     "required": [
                         "ticker",
-                        "market",
                         "security_code",
                         "company_names",
                     ],
                     "properties": {
                         "ticker": {"type": "string"},
-                        "market": {"type": "string"},
                         "security_code": {"type": "string"},
                         "company_names": {
                             "type": "array",

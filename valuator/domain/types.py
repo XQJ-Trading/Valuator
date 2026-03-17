@@ -66,6 +66,26 @@ class PipelineConfig(BaseModel):
     result_mapping: dict[str, str] = Field(default_factory=dict)
 
 
+class IrFieldSpec(BaseModel):
+    """Declarative projection rule for a single IR field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    format: str = "{}"
+    default: Any | None = None
+
+
+class IrConfig(BaseModel):
+    """Declarative IR extraction config for a domain module."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary_path: str = ""
+    key_values: dict[str, IrFieldSpec] = Field(default_factory=dict)
+    payload_paths: dict[str, str] = Field(default_factory=dict)
+
+
 class DomainModule(BaseModel):
     """Single domain module definition loaded from YAML."""
 
@@ -80,6 +100,7 @@ class DomainModule(BaseModel):
     prompt_fragment: str = ""
     prompt_file: str | None = None
     pipeline_config: PipelineConfig | None = None
+    ir_config: IrConfig | None = None
     report_contract: list[DomainReportRequirement] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
 
@@ -106,49 +127,3 @@ class DomainModuleContext:
     modules: dict[str, DomainModule] = field(default_factory=dict)
     query_intent: QueryIntent | None = None
     query_analysis: QueryAnalysis | None = None
-
-
-class DcfSummary(BaseModel):
-    """IR extracted from a DCF calculation result."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enterprise_value: float
-    pv_explicit: float
-    terminal_value: float
-    terminal_pv: float
-    scenarios: dict[str, Any] = Field(default_factory=dict)
-    sensitivity: dict[str, Any] = Field(default_factory=dict)
-    most_impactful_variable: str = ""
-
-
-class CeoSummary(BaseModel):
-    """IR for CEO & leadership analysis."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    rating: str = Field(default="")
-    strengths: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
-    capital_allocation_style: str = Field(default="")
-    culture_themes: list[str] = Field(default_factory=list)
-
-
-class RiskTransmissionItem(BaseModel):
-    """Single risk -> transmission -> impact row."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    factor: str = Field(min_length=1)
-    path: str = Field(min_length=1)
-    impact: str = Field(min_length=1)
-    trigger: str = Field(min_length=1)
-
-
-class RiskTransmissionSummary(BaseModel):
-    """IR for risk transmission across P&L/FCF."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[RiskTransmissionItem] = Field(default_factory=list)
-

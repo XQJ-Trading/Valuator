@@ -32,11 +32,29 @@ from valuator.domain import (
     QueryIntent,
     QueryRequirement,
     QueryUnit,
+    find_company,
 )
 from valuator.domain.ir import build_domain_artifact_fields
 from valuator.tools.base import ToolResult
 from valuator.tools.specs import ToolSpec
 from valuator.utils.config import config as runtime_config
+
+
+def _intent(
+    *,
+    query: str,
+    ticker: str = "",
+    security_code: str = "",
+    company_name: str = "",
+) -> QueryIntent:
+    company = find_company(
+        ticker=ticker,
+        security_code=security_code,
+        company_name=company_name,
+    )
+    if company is None:
+        return QueryIntent(query=query)
+    return QueryIntent(query=query, company=company)
 
 
 def _analysis() -> QueryAnalysis:
@@ -237,11 +255,10 @@ class PlannerTests(unittest.TestCase):
             DomainModuleContext(
                 module_ids=["dcf", "ceo"],
                 modules={module_id: modules[module_id] for module_id in ["dcf", "ceo"]},
-                query_intent=QueryIntent(
+                query_intent=_intent(
                     query="Analyze Amazon as an investment",
                     ticker="AMZN",
-                    market="USA",
-                    company_names=["Amazon"],
+                    company_name="Amazon",
                 ),
                 query_analysis=_analysis(),
             )
@@ -528,9 +545,10 @@ class AggregationTests(unittest.TestCase):
             DomainModuleContext(
                 module_ids=["dcf", "ceo"],
                 modules={module_id: modules[module_id] for module_id in ["dcf", "ceo"]},
-                query_intent=QueryIntent(
+                query_intent=_intent(
                     query="Recommend stocks",
-                    company_names=["Amazon"],
+                    ticker="AMZN",
+                    company_name="Amazon",
                 ),
                 query_analysis=analysis,
             )
@@ -560,6 +578,36 @@ class AggregationTests(unittest.TestCase):
 
 
 class DomainEvidenceTests(unittest.TestCase):
+    def test_declared_ir_config_projects_nested_dcf_payload(self) -> None:
+        loader = DomainLoader()
+        _, modules = loader.load()
+
+        output = build_domain_artifact_fields(
+            tool_name="domain_tool",
+            raw_result={
+                "company_name": "Amazon",
+                "assumptions": {"discount_rate": 0.1},
+                "calculation": {
+                    "output": (
+                        "{'enterprise_value': 123.456, 'pv_explicit': 45.6, "
+                        "'terminal_value': 100.0, 'terminal_pv': 77.856}"
+                    )
+                },
+                "findings": "DCF summary",
+            },
+            metadata={"tool_type": "domain", "domain": "dcf"},
+            module=modules["dcf"],
+        )
+
+        self.assertEqual(output["domain_id"], "dcf")
+        self.assertEqual(output["domain_summary"], "DCF summary")
+        self.assertEqual(output["domain_key_values"]["enterprise_value"], "123.46")
+        self.assertEqual(output["domain_payload"]["company_name"], "Amazon")
+        self.assertEqual(
+            output["domain_payload"]["dcf"]["terminal_pv"],
+            77.856,
+        )
+
     def test_generic_domain_artifact_fields_fall_back_to_task_domain_id(self) -> None:
         output = build_domain_artifact_fields(
             tool_name="sec_tool",

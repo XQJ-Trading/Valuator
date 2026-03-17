@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .company import Company
+
 if TYPE_CHECKING:
     from .types import DomainModule
 
@@ -36,28 +38,17 @@ def is_concrete_subject_kind(kind: str) -> bool:
 @dataclass(slots=True)
 class QueryIntent:
     query: str
-    ticker: str = ""
-    market: str = ""
-    security_code: str = ""
-    company_names: list[str] = field(default_factory=list)
+    company: Company | None = None
     entities: list[str] = field(default_factory=list)
-
-    @property
-    def company_name(self) -> str:
-        for candidate in self.company_names:
-            text = candidate.strip()
-            if text:
-                return text
-        return ""
 
     def concrete_values(self) -> list[str]:
         values: list[str] = []
-        for candidate in [
-            *self.company_names,
-            *self.entities,
-            self.ticker,
-            self.security_code,
-        ]:
+        candidates: list[str] = list(self.entities)
+        if self.company is not None:
+            candidates.append(self.company.issuer_name)
+            candidates.append(self.company.security_code)
+            candidates.extend(self.company.vendor_symbols.values())
+        for candidate in candidates:
             text = candidate.strip()
             if text and text not in values:
                 values.append(text)

@@ -1,5 +1,11 @@
 from typing import Any, Dict
 
+from ..domain.knowledge.financial import (
+    DERIVED_DIFFERENCES,
+    DERIVED_RATIOS,
+    STATEMENT_FIELDS,
+    VALUATION_INFO_KEYS,
+)
 from .base import BaseTool, ToolResult
 
 
@@ -48,8 +54,6 @@ class YFinanceBalanceSheetTool(BaseTool):
             min_year = int(min_year)
 
         ticker_candidates = [symbol]
-        if symbol.isdigit() and len(symbol) == 6:
-            ticker_candidates = [f"{symbol}.KS", f"{symbol}.KQ", symbol]
 
         def fetch(attr):
             for cand in ticker_candidates:
@@ -127,27 +131,12 @@ class YFinanceBalanceSheetTool(BaseTool):
                     return float(val), row
             return None, None
 
-        total_assets, assets_row_used = pick(
-            bs,
-            ("Total Assets", "Total Assets Net Minority Interest", "Total Assets USD"),
-        )
+        field_map = {field.canonical: field for field in STATEMENT_FIELDS}
+        total_assets, assets_row_used = pick(bs, field_map["total_assets"].aliases)
         total_liabilities, liab_row_used = pick(
-            bs,
-            (
-                "Total Liabilities Net Minority Interest",
-                "Total Liabilities",
-                "Total Liabilities & Stockholders' Equity",
-            ),
+            bs, field_map["total_liabilities"].aliases
         )
-        total_equity, equity_row_used = pick(
-            bs,
-            (
-                "Stockholders Equity",
-                "Total Stockholder Equity",
-                "Total Equity Gross Minority Interest",
-                "Total Equity Net Minority Interest",
-            ),
-        )
+        total_equity, equity_row_used = pick(bs, field_map["total_equity"].aliases)
         if total_assets is None and total_liabilities is None and total_equity is None:
             return ToolResult(
                 success=False,
@@ -169,32 +158,12 @@ class YFinanceBalanceSheetTool(BaseTool):
         fin = t.financials
         if fin is None or fin.empty:
             fin = t.quarterly_financials
-        current_assets, _ = pick(
-            bs, ("Total Current Assets", "Current Assets", "Total Current Assets USD")
-        )
-        current_liabilities, _ = pick(
-            bs,
-            (
-                "Total Current Liabilities",
-                "Current Liabilities",
-                "Total Current Liabilities USD",
-            ),
-        )
-        operating_income, _ = pick(
-            fin, ("Operating Income", "Operating Income or Loss")
-        )
-        interest_expense, _ = pick(
-            fin,
-            ("Interest Expense", "Interest Expense and Debt", "Interest Expense, Net"),
-        )
-        operating_cash_flow, _ = pick(
-            cf,
-            (
-                "Total Cash From Operating Activities",
-                "Cash Flow From Continuing Operating Activities",
-            ),
-        )
-        capex, _ = pick(cf, ("Capital Expenditures", "Capital Expenditure"))
+        current_assets, _ = pick(bs, field_map["current_assets"].aliases)
+        current_liabilities, _ = pick(bs, field_map["current_liabilities"].aliases)
+        operating_income, _ = pick(fin, field_map["operating_income"].aliases)
+        interest_expense, _ = pick(fin, field_map["interest_expense"].aliases)
+        operating_cash_flow, _ = pick(cf, field_map["operating_cash_flow"].aliases)
+        capex, _ = pick(cf, field_map["capex"].aliases)
         result = {
             "ticker": used_ticker,
             "requested_year": year_label,
@@ -208,22 +177,26 @@ class YFinanceBalanceSheetTool(BaseTool):
             "interest_expense": interest_expense,
             "operating_cash_flow": operating_cash_flow,
             "capex": capex,
-            "market_cap": info.get("marketCap"),
-            "current_price": info.get("currentPrice"),
-            "trailing_pe": info.get("trailingPE"),
-            "forward_pe": info.get("forwardPE"),
-            "price_to_book": info.get("priceToBook"),
-            "enterprise_value": info.get("enterpriseValue"),
-            "currency": info.get("currency"),
         }
-        if total_liabilities is not None and total_equity:
-            result["debt_to_equity"] = total_liabilities / total_equity
-        if current_assets is not None and current_liabilities:
-            result["current_ratio"] = current_assets / current_liabilities
-        if operating_income is not None and interest_expense:
-            result["interest_coverage"] = operating_income / abs(interest_expense)
-        if operating_cash_flow is not None and capex is not None:
-            result["free_cash_flow"] = operating_cash_flow - capex
+        for result_key, info_key in VALUATION_INFO_KEYS:
+            result[result_key] = info.get(info_key)
+
+        for metric in DERIVED_RATIOS:
+            numerator = result.get(metric.numerator)
+            denominator = result.get(metric.denominator)
+            if numerator is None or denominator in (None, 0):
+                continue
+            denominator_value = abs(denominator) if metric.abs_denominator else denominator
+            if not denominator_value:
+                continue
+            result[metric.name] = numerator / denominator_value
+
+        for metric in DERIVED_DIFFERENCES:
+            minuend = result.get(metric.minuend)
+            subtrahend = result.get(metric.subtrahend)
+            if minuend is None or subtrahend is None:
+                continue
+            result[metric.name] = minuend - subtrahend
         summary_parts = [
             f"ticker={result['ticker']}",
             f"year={result['year']}",

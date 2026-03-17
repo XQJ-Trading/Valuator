@@ -207,6 +207,7 @@ class Executor:
         args_hash = self._hash_args(tool_args)
         cached = workspace.find_cached_output(tool_name, args_hash)
         domain_fields: dict[str, Any] = {}
+        module = self._domain_module(task.domain_id)
         if cached is not None:
             content = cached
             raw_result = self._extract_raw_result_from_markdown(cached)
@@ -214,6 +215,7 @@ class Executor:
                 tool_name=tool_name,
                 raw_result=raw_result,
                 metadata={},
+                module=module,
                 fallback_domain_id=task.domain_id.strip(),
             )
         else:
@@ -227,6 +229,13 @@ class Executor:
                 if fallback is None:
                     raise ValueError(result.error or "tool returned failure")
                 content, raw_result = fallback
+                domain_fields = build_domain_artifact_fields(
+                    tool_name=tool_name,
+                    raw_result=raw_result,
+                    metadata={},
+                    module=module,
+                    fallback_domain_id=task.domain_id.strip(),
+                )
             else:
                 payload = result.result
                 if isinstance(payload, ObservationData):
@@ -243,6 +252,7 @@ class Executor:
                     tool_name=tool_name,
                     raw_result=raw_result,
                     metadata=result.metadata or {},
+                    module=module,
                     fallback_domain_id=task.domain_id.strip(),
                 )
 
@@ -385,6 +395,11 @@ class Executor:
                 reports=reports,
                 lines=lines,
             )
+
+    def _domain_module(self, domain_id: str):
+        if self._domain_context is None or not domain_id:
+            return None
+        return self._domain_context.modules.get(domain_id)
 
     async def _run_failure_fallback(
         self,

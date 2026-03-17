@@ -19,5 +19,24 @@ tasks:
     name: DCF 밸류에이션
   - id: dcf_sensitivity
     name: DCF 민감도 분석
+ir:
+  summary_path: findings
+  key_values:
+    enterprise_value:
+      path: calculation.output.enterprise_value
+      format: "{:.2f}"
+    pv_explicit:
+      path: calculation.output.pv_explicit
+      format: "{:.2f}"
+    terminal_value:
+      path: calculation.output.terminal_value
+      format: "{:.2f}"
+    terminal_pv:
+      path: calculation.output.terminal_pv
+      format: "{:.2f}"
+  payload_paths:
+    company_name: company_name
+    assumptions: assumptions
+    dcf: calculation.output
 depends_on:
   []

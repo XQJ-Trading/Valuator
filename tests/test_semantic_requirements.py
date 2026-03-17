@@ -21,7 +21,25 @@ from valuator.domain import (
     QueryIntent,
     QueryRequirement,
     QueryUnit,
+    find_company,
 )
+
+
+def _intent(
+    *,
+    query: str,
+    ticker: str = "",
+    security_code: str = "",
+    company_name: str = "",
+) -> QueryIntent:
+    company = find_company(
+        ticker=ticker,
+        security_code=security_code,
+        company_name=company_name,
+    )
+    if company is None:
+        return QueryIntent(query=query)
+    return QueryIntent(query=query, company=company)
 
 
 def _query_analysis() -> QueryAnalysis:
@@ -154,11 +172,10 @@ class ReviewerCoverageTests(unittest.TestCase):
         self.domain_context = DomainModuleContext(
             module_ids=["dcf", "ceo"],
             modules={module_id: modules[module_id] for module_id in ["dcf", "ceo"]},
-            query_intent=QueryIntent(
+            query_intent=_intent(
                 query="Analyze Amazon as an investment",
                 ticker="AMZN",
-                market="USA",
-                company_names=["Amazon"],
+                company_name="Amazon",
             ),
             query_analysis=_query_analysis(),
         )

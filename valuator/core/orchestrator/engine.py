@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ...domain import (
     DomainLoader,
@@ -10,7 +10,6 @@ from ...domain import (
     DomainRouter,
     QueryIntent,
 )
-from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..aggregator.service import Aggregation
 from ..contracts.plan import Plan, ReviewResult
@@ -20,6 +19,9 @@ from ..executor.service import Executor
 from ..planner.service import Planner
 from ..workspace.service import Workspace
 from .state import RoundState
+
+if TYPE_CHECKING:
+    from ...models.gemini_direct import GeminiClient
 
 
 LeafStartCallback = Callable[[Any], Awaitable[None]]
@@ -69,7 +71,9 @@ class Engine:
         base_dir: Path | None = None,
         model: str | None = None,
     ) -> "Engine":
-        client = GeminiClient(model or config.agent_model)
+        from ...models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+        client = RuntimeGeminiClient(model or config.agent_model)
         workspace = Workspace(session_id=session_id, base_dir=base_dir)
         planner = Planner(client=client)
         executor = Executor()

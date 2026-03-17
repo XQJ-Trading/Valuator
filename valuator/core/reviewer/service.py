@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...domain import (
     DomainModuleContext,
     QueryRequirement,
     build_query_breakdown,
 )
-from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..contracts.plan import (
     AggregationResult,
@@ -26,10 +25,17 @@ from .prompts import (
     build_reviewer_user_prompt,
 )
 
+if TYPE_CHECKING:
+    from ...models.gemini_direct import GeminiClient
+
 
 class Reviewer:
     def __init__(self, client: GeminiClient | None = None) -> None:
-        self.client = client or GeminiClient(config.agent_model)
+        if client is None:
+            from ...models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+            client = RuntimeGeminiClient(config.agent_model)
+        self.client = client
         self._now_utc_iso: str | None = None
         self._domain_context: DomainModuleContext | None = None
 

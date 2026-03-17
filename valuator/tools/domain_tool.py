@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain.types import PipelineConfig, PipelineStage, StageOutput
-from ..models.gemini_direct import GeminiClient
 from ..utils.config import config
 from .base import BaseTool, ToolResult
 from .code_execute_tool import ExecuteCodeTool
+
+if TYPE_CHECKING:
+    from ..models.gemini_direct import GeminiClient
 
 _PLACEHOLDER_RE = re.compile(r"\{(stages\.(\w+)|corp|company_name|context|today)\}")
 _STAGE_DIRECT_RE = re.compile(r"^\{stages\.(\w+)\}$")
@@ -22,7 +24,9 @@ class DomainTool(BaseTool):
             name="domain_tool",
             description="Execute guide-based or pipeline-based domain analysis.",
         )
-        self.client = GeminiClient(config.agent_model, usage_writer=usage_writer)
+        from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+        self.client = RuntimeGeminiClient(config.agent_model, usage_writer=usage_writer)
         self.code_tool = ExecuteCodeTool()
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:

@@ -17,6 +17,7 @@ from valuator.domain import (
     QueryUnit,
     analyze_query,
     build_query_breakdown,
+    find_company,
     fill_routing_defaults,
 )
 from valuator.tools.specs import registered_tool_names
@@ -92,27 +93,72 @@ class _QueryAnalyzerClient:
         return dict(self.payload)
 
 
+def _intent(
+    *,
+    query: str,
+    ticker: str = "",
+    security_code: str = "",
+    company_name: str = "",
+) -> QueryIntent:
+    company = find_company(
+        ticker=ticker,
+        security_code=security_code,
+        company_name=company_name,
+    )
+    if company is None:
+        return QueryIntent(query=query)
+    return QueryIntent(query=query, company=company)
+
+
+def _ticker(intent: QueryIntent) -> str:
+    company = intent.company
+    if company is None:
+        return ""
+    return company.yahoo_symbol
+
+
+def _market(intent: QueryIntent) -> str:
+    company = intent.company
+    if company is None:
+        return ""
+    return company.legacy_market
+
+
+def _security_code(intent: QueryIntent) -> str:
+    company = intent.company
+    return company.security_code if company is not None else ""
+
+
+def _company_name(intent: QueryIntent) -> str:
+    company = intent.company
+    return company.issuer_name if company is not None else ""
+
+
+def _company_names(intent: QueryIntent) -> list[str]:
+    company_name = _company_name(intent)
+    return [company_name] if company_name else []
+
+
 class QueryIntentTests(unittest.TestCase):
     def test_query_intent_minimal(self) -> None:
         intent = QueryIntent(query="Amazon DCF valuation")
         self.assertEqual(intent.query, "Amazon DCF valuation")
-        self.assertEqual(intent.ticker, "")
-        self.assertEqual(intent.market, "")
-        self.assertEqual(intent.security_code, "")
-        self.assertEqual(intent.company_names, [])
         self.assertEqual(intent.entities, [])
-        self.assertEqual(intent.company_name, "")
+        self.assertEqual(_ticker(intent), "")
+        self.assertEqual(_market(intent), "")
+        self.assertEqual(_security_code(intent), "")
+        self.assertEqual(_company_names(intent), [])
+        self.assertEqual(_company_name(intent), "")
 
-    def test_query_intent_prefers_first_company_name(self) -> None:
-        intent = QueryIntent(
+    def test_query_intent_projects_company_fields(self) -> None:
+        intent = _intent(
             query="Amazon",
             ticker="AMZN",
-            market="USA",
-            company_names=["Amazon", "Amazon.com"],
+            company_name="Amazon",
         )
-        self.assertEqual(intent.ticker, "AMZN")
-        self.assertEqual(intent.market, "USA")
-        self.assertEqual(intent.company_name, "Amazon")
+        self.assertEqual(_ticker(intent), "AMZN")
+        self.assertEqual(_market(intent), "USA")
+        self.assertEqual(_company_name(intent), "Amazon")
 
 
 class QueryAnalysisTests(unittest.TestCase):
@@ -129,11 +175,21 @@ class QueryAnalysisTests(unittest.TestCase):
 
         self.assertIn("Integrity and Transparency", modules["ceo"].prompt_fragment)
         self.assertIsNone(modules["ceo"].pipeline_config)
+        self.assertIsNotNone(modules["ceo"].ir_config)
+        self.assertEqual(
+            modules["ceo"].ir_config.key_values["subject"].default,
+            "CEO / Leadership",
+        )
         self.assertIsNotNone(modules["dcf"].pipeline_config)
+        self.assertIsNotNone(modules["dcf"].ir_config)
         self.assertEqual(len(modules["dcf"].pipeline_config.stages), 5)
         self.assertEqual(
             modules["dcf"].pipeline_config.result_mapping["assumptions"],
             "{stages.extract_assumptions}",
+        )
+        self.assertEqual(
+            modules["dcf"].ir_config.key_values["enterprise_value"].path,
+            "calculation.output.enterprise_value",
         )
 
     def test_build_query_breakdown_projects_steps_entities_and_relations(self) -> None:
@@ -198,10 +254,10 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
     def test_router_preserves_identifier_fields_and_hydrates_company_names(self) -> None:
         loader = DomainLoader()
         index, modules = loader.load()
-        intent = QueryIntent(
+        intent = _intent(
             query="Amazon valuation",
             ticker="AMZN",
-            market="USA",
+            company_name="Amazon",
         )
         analyzer = _AnalyzerStub(
             _canonical_analysis(
@@ -214,9 +270,9 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             analyze_query(intent, index, modules, analyzer=analyzer)
         )
 
-        self.assertEqual(updated_intent.ticker, "AMZN")
-        self.assertEqual(updated_intent.market, "USA")
-        self.assertEqual(updated_intent.company_names, ["Amazon"])
+        self.assertEqual(_ticker(updated_intent), "AMZN")
+        self.assertEqual(_market(updated_intent), "USA")
+        self.assertEqual(_company_names(updated_intent), ["Amazon"])
         self.assertEqual(updated_intent.entities, ["Amazon"])
         self.assertEqual(analysis.domain_ids, ["dcf"])
 
@@ -258,8 +314,8 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             analyze_query(intent, index, modules, analyzer=analyzer)
         )
 
-        self.assertEqual(updated_intent.company_names, [])
-        self.assertEqual(updated_intent.company_name, "")
+        self.assertEqual(_company_names(updated_intent), [])
+        self.assertEqual(_company_name(updated_intent), "")
         self.assertEqual(analysis.intent_tags, ["recommendation"])
 
     def test_router_promotes_subject_from_query_analysis_boundary(self) -> None:
@@ -269,11 +325,10 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         analyzer = _AnalyzerStub(
             QueryAnalysis(
                 domain_ids=["dcf"],
-                query_intent=QueryIntent(
+                query_intent=_intent(
                     query="Amazon valuation",
                     ticker="AMZN",
-                    market="USA",
-                    company_names=["Amazon"],
+                    company_name="Amazon",
                 ),
                 entities={},
                 units=[
@@ -304,9 +359,9 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             analyze_query(intent, index, modules, analyzer=analyzer)
         )
 
-        self.assertEqual(updated_intent.ticker, "AMZN")
-        self.assertEqual(updated_intent.market, "USA")
-        self.assertEqual(updated_intent.company_names, ["Amazon"])
+        self.assertEqual(_ticker(updated_intent), "AMZN")
+        self.assertEqual(_market(updated_intent), "USA")
+        self.assertEqual(_company_names(updated_intent), ["Amazon"])
         self.assertEqual(updated_intent.entities, ["Amazon"])
 
     def test_planner_excludes_sec_tool_without_us_ticker(self) -> None:
@@ -324,16 +379,16 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             DomainModuleContext(
                 module_ids=["risk_transmission"],
                 modules={"risk_transmission": modules["risk_transmission"]},
-                query_intent=QueryIntent(
+                query_intent=_intent(
                     query="현대무벡스",
-                    market="KRX",
                     security_code="319400",
+                    company_name="현대무벡스",
                 ),
                 query_analysis=analysis,
             )
         )
 
-        self.assertEqual(planner._ticker, "")
+        self.assertEqual(planner._ticker, "319400.KQ")
         self.assertNotIn("sec_tool", planner._allowed_tools_for_context())
         tool = planner._choose_tool_deterministic(
             analysis.units[0],
@@ -370,11 +425,10 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             DomainModuleContext(
                 module_ids=["dcf"],
                 modules={"dcf": modules["dcf"]},
-                query_intent=QueryIntent(
+                query_intent=_intent(
                     query="Analyze Amazon",
                     ticker="AMZN",
-                    market="USA",
-                    company_names=["Amazon"],
+                    company_name="Amazon",
                 ),
                 query_analysis=analysis,
             )
@@ -403,7 +457,6 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
                 {
                     "query_intent": {
                         "ticker": "AMZN",
-                        "market": "USA",
                         "security_code": "",
                         "company_names": ["Amazon"],
                     },
@@ -442,9 +495,10 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(analysis.query_intent.ticker, "AMZN")
-        self.assertEqual(analysis.query_intent.market, "USA")
-        self.assertEqual(analysis.query_intent.company_names, ["Amazon"])
+        self.assertIsNotNone(analysis.query_intent.company)
+        self.assertEqual(_ticker(analysis.query_intent), "AMZN")
+        self.assertEqual(_market(analysis.query_intent), "USA")
+        self.assertEqual(_company_names(analysis.query_intent), ["Amazon"])
 
     def test_query_analyzer_maps_unit_id_strings_to_zero_based_indices(self) -> None:
         analyzer = QueryAnalyzer(

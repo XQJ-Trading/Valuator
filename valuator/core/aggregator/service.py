@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ...domain import DomainModuleContext
-from ...models.gemini_direct import GeminiClient
 from ...utils.config import config
 from ..contracts.plan import (
     AggregationResult,
@@ -29,6 +28,9 @@ from .materials import (
     query_unit_ids_for_leaf_tasks,
 )
 
+if TYPE_CHECKING:
+    from ...models.gemini_direct import GeminiClient
+
 _SYSTEM_PROMPT = "한글 마크다운 보고서만 반환하십시오."
 _DIRECT_NUMERIC_DISCREPANCY_MARKERS = (
     "단위 불일치",
@@ -51,7 +53,11 @@ _SCALE_SENSITIVE_ROW_TOKENS = (
 
 class Aggregation:
     def __init__(self, client: GeminiClient | None = None):
-        self.client = client or GeminiClient(config.agent_model)
+        if client is None:
+            from ...models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+            client = RuntimeGeminiClient(config.agent_model)
+        self.client = client
         self._domain_context: DomainModuleContext | None = None
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:

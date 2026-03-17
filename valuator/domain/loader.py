@@ -7,8 +7,10 @@ from typing import Any
 
 import yaml
 
+from .knowledge import INDEX_PATH, KNOWLEDGE_ROOT, MODULES_ROOT
 from .types import (
     DomainIndex,
+    IrConfig,
     DomainModule,
     DomainReportRequirement,
     DomainTask,
@@ -26,17 +28,18 @@ class DomainLoader:
     """
 
     def __init__(self, root: Path | None = None) -> None:
-        self._root = root or Path(__file__).resolve().parent
+        self._root = root or KNOWLEDGE_ROOT
+        self._index_path = self._resolve_index_path(self._root)
+        self._modules_root = self._resolve_modules_root(self._root)
 
     def load(self) -> tuple[DomainIndex, dict[str, DomainModule]]:
         """Load index and all referenced modules."""
-        index_path = self._root / "index.yaml"
-        index_data = self._read_yaml(index_path)
+        index_data = self._read_yaml(self._index_path)
         index = DomainIndex.model_validate(index_data)
 
         modules: dict[str, DomainModule] = {}
         for module_id in index.modules:
-            subdir_path = self._root / module_id / "module.yaml"
+            subdir_path = self._modules_root / module_id / "module.yaml"
             flat_path = self._root / f"{module_id}.yaml"
             if subdir_path.is_file():
                 module_path = subdir_path
@@ -101,10 +104,16 @@ class DomainLoader:
                 )
             prompt_fragment = prompt_path.read_text(encoding="utf-8").strip()
 
+        ir_raw = data.get("ir")
         payload = dict(data)
+        payload.pop("ir", None)
         payload["report_contract"] = report_contract
         payload["tasks"] = tasks
         payload["prompt_fragment"] = prompt_fragment
+        if ir_raw is not None:
+            if not isinstance(ir_raw, dict):
+                raise ValueError(f"ir must be a mapping in domain module: {path}")
+            payload["ir_config"] = IrConfig.model_validate(ir_raw)
         pipeline_path = path.parent / "pipeline.yaml"
         if pipeline_path.is_file():
             raw_pipeline = self._read_yaml(pipeline_path)
@@ -240,3 +249,24 @@ class DomainLoader:
 
         for module_id in modules:
             _dfs(module_id)
+
+    def _resolve_index_path(self, root: Path) -> Path:
+        if (root / "index.yaml").is_file():
+            return root / "index.yaml"
+        legacy_knowledge_index = root / "knowledge" / "index.yaml"
+        if legacy_knowledge_index.is_file():
+            return legacy_knowledge_index
+        if root == KNOWLEDGE_ROOT:
+            return INDEX_PATH
+        return root / "index.yaml"
+
+    def _resolve_modules_root(self, root: Path) -> Path:
+        modules_root = root / "modules"
+        if modules_root.is_dir():
+            return modules_root
+        legacy_modules_root = root / "knowledge" / "modules"
+        if legacy_modules_root.is_dir():
+            return legacy_modules_root
+        if root == KNOWLEDGE_ROOT:
+            return MODULES_ROOT
+        return root

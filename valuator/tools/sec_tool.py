@@ -5,15 +5,17 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import requests
 
-from ..models.gemini_direct import GeminiClient
 from ..utils.config import config
 from ..utils.logger import logger
 from .base import BaseTool, ToolResult
+
+if TYPE_CHECKING:
+    from ..models.gemini_direct import GeminiClient
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -180,7 +182,9 @@ class SECTool(BaseTool):
             "sec_tool",
             "Retrieve relevant 10-K details from SEC EDGAR for a ticker/year/query.",
         )
-        self.client = GeminiClient(config.agent_model, usage_writer=usage_writer)
+        from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+        self.client = RuntimeGeminiClient(config.agent_model, usage_writer=usage_writer)
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.client.bind_usage_writer(usage_writer)

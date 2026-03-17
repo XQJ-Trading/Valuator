@@ -1,25 +1,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Iterable, Mapping
 
 from ..domain.query import QueryIntent
 
+class SubjectIdentityLevel(str, Enum):
+    NAME = "name"
+    CANONICAL = "canonical"
+    VENDOR_SYMBOL = "vendor_symbol"
+
 
 @dataclass(frozen=True)
 class SubjectRequirement:
-    any_of: tuple[str, ...] = ()
+    identity_level: SubjectIdentityLevel | None = None
     market: str = ""
 
     def accepts(self, intent: QueryIntent) -> bool:
-        if self.market and intent.market.strip().upper() != self.market:
+        company = intent.company
+        if company is None:
+            return self.identity_level is None
+        if self.market and company.legacy_market != self.market:
             return False
-        if not self.any_of:
+        if self.identity_level is None:
             return True
-        return any(
-            _present(_subject_field(intent, field_name))
-            for field_name in self.any_of
-        )
+        if self.identity_level is SubjectIdentityLevel.NAME:
+            return bool(company.issuer_name)
+        if self.identity_level is SubjectIdentityLevel.CANONICAL:
+            return True
+        return bool(company.yahoo_symbol)
 
 
 @dataclass(frozen=True)
@@ -30,11 +40,18 @@ class ToolExecutionContext:
     unit_query: str
 
     def values(self) -> dict[str, Any]:
-        company_name = self.intent.company_name.strip()
+        company = self.intent.company
+        ticker = ""
+        security_code = ""
+        company_name = ""
+        if company is not None:
+            ticker = company.yahoo_symbol
+            security_code = company.security_code
+            company_name = company.issuer_name
         query_text = self.unit_query.strip() or self.query.strip()
         return {
-            "ticker": self.intent.ticker.strip(),
-            "security_code": self.intent.security_code.strip(),
+            "ticker": ticker,
+            "security_code": security_code,
             "company_name": company_name,
             "corp": company_name,
             "year": self.reference_year,
@@ -81,18 +98,10 @@ class ToolSpec:
         return args
 
 
-def _subject_field(intent: QueryIntent, field_name: str) -> Any:
-    if field_name == "company_name":
-        return intent.company_name
-    return getattr(intent, field_name, "")
-
-
 def _present(value: Any) -> bool:
     if value is None:
         return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    return True
+    return value != ""
 
 
 TOOL_SPECS: dict[str, ToolSpec] = {
@@ -105,7 +114,10 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="sec_tool",
         required=("ticker", "year", "query"),
         capability="10-K filings and disclosures",
-        subject_requirement=SubjectRequirement(any_of=("ticker",), market="USA"),
+        subject_requirement=SubjectRequirement(
+            identity_level=SubjectIdentityLevel.CANONICAL,
+            market="USA",
+        ),
     ),
     "yfinance_balance_sheet": ToolSpec(
         name="yfinance_balance_sheet",
@@ -115,8 +127,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "financial statements plus valuation/pricing coordinates "
             "(market_cap, price, PE, PBR)"
         ),
-        arg_sources={"ticker": ("ticker", "security_code")},
-        subject_requirement=SubjectRequirement(any_of=("ticker", "security_code")),
+        subject_requirement=SubjectRequirement(
+            identity_level=SubjectIdentityLevel.VENDOR_SYMBOL
+        ),
     ),
     "code_execute_tool": ToolSpec(
         name="code_execute_tool",
@@ -136,9 +149,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "pipeline_config",
         ),
         capability="domain analysis via guide or pipeline",
-        subject_requirement=SubjectRequirement(
-            any_of=("company_name", "ticker", "security_code")
-        ),
+        subject_requirement=SubjectRequirement(identity_level=SubjectIdentityLevel.NAME),
     ),
 }
 

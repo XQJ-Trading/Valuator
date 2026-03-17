@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import replace
 
 from .query import QueryAnalysis, QueryIntent, QueryRequirement, fill_routing_defaults
@@ -32,20 +31,15 @@ async def analyze_query(
             break
 
     analyzed_intent = analysis.query_intent
-    concrete_labels = list(dict.fromkeys(analysis.entities.values()))
     updated_intent = QueryIntent(
         query=intent.query,
-        ticker=intent.ticker or analyzed_intent.ticker,
-        market=intent.market or analyzed_intent.market,
-        security_code=intent.security_code or analyzed_intent.security_code,
-        company_names=(
-            intent.company_names or analyzed_intent.company_names or concrete_labels
-        ),
+        company=intent.company or analyzed_intent.company,
         entities=list(
             dict.fromkeys(
                 [
                     *analysis.entities.values(),
-                    *analyzed_intent.company_names,
+                    *_intent_labels(analyzed_intent),
+                    *_intent_labels(intent),
                     *intent.entities,
                 ]
             )
@@ -92,34 +86,53 @@ def _infer_intent_tags(*, query: str, analysis: QueryAnalysis) -> list[str]:
     tags: list[str] = []
     concrete_entities = list(
         dict.fromkeys(
-            [*analysis.query_intent.concrete_values(), *analysis.entities.values()]
+            [
+                *analysis.entities.values(),
+                *_intent_labels(analysis.query_intent),
+            ]
         )
     )
 
-    recommend_patterns = (
-        r"\b(recommend|recommended|pick|picks|idea|ideas|top|best)\b",
-        r"(추천|종목\s*추천|픽|유망주|매수\s*추천)",
-    )
-    compare_patterns = (
-        r"\b(compare|comparison|versus|vs\.)\b",
-        r"(비교|대비|vs)",
-    )
-    screen_patterns = (
-        r"\b(screen|screening|shortlist|candidate|candidates)\b",
-        r"(선별|스크리닝|후보|찾아줘)",
-    )
-    portfolio_patterns = (
-        r"\b(portfolio|allocation|weighting|basket)\b",
-        r"(포트폴리오|비중|배분|바스켓)",
-    )
-
-    if any(re.search(pattern, text) for pattern in recommend_patterns):
+    if _contains_any(
+        text,
+        (
+            "recommend",
+            "recommended",
+            "pick",
+            "picks",
+            "idea",
+            "ideas",
+            "top",
+            "best",
+            "추천",
+            "종목 추천",
+            "픽",
+            "유망주",
+            "매수 추천",
+        ),
+    ):
         tags.append("recommendation")
-    if any(re.search(pattern, text) for pattern in screen_patterns):
+    if _contains_any(
+        text,
+        (
+            "screen",
+            "screening",
+            "shortlist",
+            "candidate",
+            "candidates",
+            "선별",
+            "스크리닝",
+            "후보",
+            "찾아줘",
+        ),
+    ):
         tags.append("screening")
-    if any(re.search(pattern, text) for pattern in compare_patterns):
+    if _contains_any(text, ("compare", "comparison", "versus", "vs.", "비교", "대비", "vs")):
         tags.append("comparison")
-    if any(re.search(pattern, text) for pattern in portfolio_patterns):
+    if _contains_any(
+        text,
+        ("portfolio", "allocation", "weighting", "basket", "포트폴리오", "비중", "배분", "바스켓"),
+    ):
         tags.append("portfolio")
 
     if concrete_entities:
@@ -153,3 +166,13 @@ def _append_recommendation_requirement(analysis: QueryAnalysis) -> QueryAnalysis
         provenance="Derived from recommendation/screening intent in the user query.",
     )
     return replace(analysis, requirements=[*analysis.requirements, requirement])
+
+
+def _intent_labels(intent: QueryIntent) -> list[str]:
+    if intent.company is not None:
+        return [intent.company.issuer_name]
+    return []
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)

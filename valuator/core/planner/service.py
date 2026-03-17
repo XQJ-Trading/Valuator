@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import replace
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...domain import (
     DomainModule,
@@ -14,7 +14,6 @@ from ...domain import (
     QueryRequirement,
     QueryUnit,
 )
-from ...models.gemini_direct import GeminiClient
 from ...tools.specs import (
     ToolExecutionContext,
     filter_tool_names,
@@ -23,6 +22,9 @@ from ...tools.specs import (
 )
 from ...utils.config import config
 from ..contracts.plan import Plan, ReviewResult, Task, ToolCall
+
+if TYPE_CHECKING:
+    from ...models.gemini_direct import GeminiClient
 
 _SYSTEM_PROMPT = (
     "Return concise JSON only. No markdown. "
@@ -41,7 +43,11 @@ class Planner:
         self,
         client: GeminiClient | None = None,
     ) -> None:
-        self.client = client or GeminiClient(config.agent_model)
+        if client is None:
+            from ...models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+            client = RuntimeGeminiClient(config.agent_model)
+        self.client = client
         self._now_utc: datetime | None = None
         self._domain_context: DomainModuleContext | None = None
 
@@ -492,7 +498,10 @@ class Planner:
 
     @property
     def _ticker(self) -> str:
-        return self._intent.ticker
+        company = self._intent.company
+        if company is None:
+            return ""
+        return company.yahoo_symbol
 
     @property
     def _intent(self) -> QueryIntent:
@@ -684,14 +693,7 @@ class Planner:
         return ""
 
     def _has_concrete_subject(self) -> bool:
-        subject = self._intent
-        return any(
-            (
-                subject.company_name.strip(),
-                subject.ticker.strip(),
-                subject.security_code.strip(),
-            )
-        )
+        return self._intent.company is not None
 
     def _domain_context_block(self) -> str:
         ctx = self._domain_context

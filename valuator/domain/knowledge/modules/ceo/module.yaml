@@ -16,4 +16,14 @@ report_contract:
 tasks:
   - id: ceo_report
     name: CEO·리더십 분석 리포트
+ir:
+  summary_path: findings
+  key_values:
+    subject:
+      path: corp
+      format: "{}"
+      default: CEO / Leadership
+  payload_paths:
+    corp: corp
+    findings: findings
 depends_on: []

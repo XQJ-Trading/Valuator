@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from valuator.utils.dataclass_compat import dataclass
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,26 +4,25 @@ import asyncio
 import json
 from dataclasses import asdict
 from hashlib import sha256
+from importlib import import_module
 from typing import Any, Awaitable, Callable
 
 from ...domain import DomainModuleContext
-from ...tools.code_execute_tool import ExecuteCodeTool
-from ...tools.domain_tool import DomainTool as UnifiedDomainTool
-from ...tools.sec_tool import SECTool
 from ...tools.base import ObservationData, ToolResult
 from ...tools.specs import TOOL_SPECS
-from ...tools.web_search_tool import PerplexitySearchTool
-from ...tools.yfinance_tool import YFinanceBalanceSheetTool
 from ..contracts.plan import ExecutionArtifact, ExecutionResult, Plan, Task, TaskReport
 from .domain_fields import build_domain_artifact_fields
 from ..workspace.service import Workspace
 
-_TOOL_CLASSES: dict[str, type[Any]] = {
-    "web_search_tool": PerplexitySearchTool,
-    "sec_tool": SECTool,
-    "yfinance_balance_sheet": YFinanceBalanceSheetTool,
-    "code_execute_tool": ExecuteCodeTool,
-    "domain_tool": UnifiedDomainTool,
+_TOOL_CLASS_PATHS: dict[str, tuple[str, str]] = {
+    "web_search_tool": ("valuator.tools.web_search_tool", "PerplexitySearchTool"),
+    "sec_tool": ("valuator.tools.sec_tool", "SECTool"),
+    "yfinance_balance_sheet": (
+        "valuator.tools.yfinance_tool",
+        "YFinanceBalanceSheetTool",
+    ),
+    "code_execute_tool": ("valuator.tools.code_execute_tool", "ExecuteCodeTool"),
+    "domain_tool": ("valuator.tools.domain_tool", "DomainTool"),
 }
 _EXECUTOR_LEAF_CONCURRENCY = 4
 _EXECUTABLE_TASK_TYPES = frozenset({"leaf", "module"})
@@ -31,7 +30,7 @@ _EXECUTABLE_TASK_TYPES = frozenset({"leaf", "module"})
 
 class Executor:
     def __init__(self) -> None:
-        if set(_TOOL_CLASSES) != set(TOOL_SPECS):
+        if set(_TOOL_CLASS_PATHS) != set(TOOL_SPECS):
             raise ValueError("planner/executor tool keys mismatch")
         self._tool_cache: dict[str, Any] = {}
         self._usage_writer: Any | None = None
@@ -413,7 +412,7 @@ class Executor:
         if not fallback_tool_name:
             raise ValueError("fallback.tool_name is required")
         fallback_tool_args = dict(fallback.get("tool_args") or {})
-        if fallback_tool_name not in _TOOL_CLASSES:
+        if fallback_tool_name not in _TOOL_CLASS_PATHS:
             raise ValueError(f"unsupported fallback tool: {fallback_tool_name}")
 
         fallback_tool = self._get_tool(fallback_tool_name)
@@ -449,10 +448,12 @@ class Executor:
             return cached
 
         try:
-            tool_class = _TOOL_CLASSES[tool_name]
+            module_name, class_name = _TOOL_CLASS_PATHS[tool_name]
         except KeyError as exc:
             raise RuntimeError(f"executor tool registry mismatch: {tool_name}") from exc
 
+        module = import_module(module_name)
+        tool_class = getattr(module, class_name)
         tool = tool_class()
         self._tool_cache[tool_name] = tool
         tool.bind_usage_writer(self._usage_writer)

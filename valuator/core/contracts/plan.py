@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from valuator.utils.dataclass_compat import dataclass, field
 
 from ...domain.query import QueryAnalysis
 

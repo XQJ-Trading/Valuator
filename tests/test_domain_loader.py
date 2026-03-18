@@ -32,7 +32,107 @@ class DomainLoaderTests(unittest.TestCase):
             self._write_root(root, modules)
             return DomainLoader(root=root).load()
 
-    def test_loader_reads_persona_rubric_format_and_contract(self) -> None:
+    def test_loader_reads_knowledge_markdown_sections(self) -> None:
+        _, modules = self._load(
+            {
+                "ceo": {
+                    "knowledge.md": """
+                    ## Format
+
+                    - Use aspect headers.
+
+                    ## Persona
+
+                    Long-term leadership analyst.
+
+                    ## Notes
+
+                    Ignore this section.
+
+                    ## Checks
+
+                    - **leadership_defined**: Leadership conclusion is explicit.
+                      → integrity
+
+                    ## Aspects
+
+                    ### integrity — Integrity [HIGH]
+                    Transparency and honesty.
+
+                    ### governance - Governance [medium]
+                    Board quality.
+                    """,
+                    "module.yaml": """
+                    id: ceo
+                    name: CEO
+                    description: Leadership module.
+                    depends_on: []
+                    """,
+                }
+            }
+        )
+
+        module = modules["ceo"]
+        self.assertEqual(module.persona, "Long-term leadership analyst.")
+        self.assertEqual(module.format_spec, "- Use aspect headers.")
+        self.assertEqual([aspect.id for aspect in module.rubric], ["integrity", "governance"])
+        self.assertEqual([aspect.priority for aspect in module.rubric], ["high", "medium"])
+        self.assertEqual(module.contract[0].requires, ["integrity"])
+
+    def test_loader_supports_minimal_knowledge_markdown(self) -> None:
+        _, modules = self._load(
+            {
+                "simple": {
+                    "knowledge.md": """
+                    ## Persona
+                    기업 가치 분석가입니다.
+
+                    ## Aspects
+                    ### revenue — 매출 분석 [HIGH]
+                    매출 추이와 성장 동인
+                    """,
+                    "module.yaml": """
+                    id: simple
+                    name: Simple
+                    description: Minimal module.
+                    depends_on: []
+                    """,
+                }
+            }
+        )
+
+        module = modules["simple"]
+        self.assertEqual(module.persona, "기업 가치 분석가입니다.")
+        self.assertEqual(module.format_spec, "")
+        self.assertEqual(module.contract, [])
+        self.assertEqual([aspect.id for aspect in module.rubric], ["revenue"])
+
+    def test_loader_accepts_custom_knowledge_reference(self) -> None:
+        _, modules = self._load(
+            {
+                "custom": {
+                    "guide.md": """
+                    ## Persona
+                    Persona
+
+                    ## Aspects
+                    ### quality — Quality [HIGH]
+                    Quality aspect.
+                    """,
+                    "module.yaml": """
+                    id: custom
+                    name: Custom
+                    description: Custom knowledge path.
+                    knowledge: guide.md
+                    depends_on: []
+                    """,
+                }
+            }
+        )
+
+        self.assertEqual(modules["custom"].persona, "Persona")
+
+    def test_loader_reads_legacy_split_files(self) -> None:
         _, modules = self._load(
             {
                 "ceo": {
@@ -74,7 +174,6 @@ class DomainLoaderTests(unittest.TestCase):
         self.assertEqual(module.persona, "Long-term leadership analyst.")
         self.assertEqual(module.format_spec, "Use aspect headers.")
         self.assertEqual([aspect.id for aspect in module.rubric], ["integrity", "governance"])
-        self.assertEqual(module.rubric[0].priority, "high")
         self.assertEqual(module.contract[0].requires, ["integrity"])
 
     def test_loader_accepts_acceptance_criteria_alias(self) -> None:
@@ -109,19 +208,202 @@ class DomainLoaderTests(unittest.TestCase):
 
         self.assertEqual(modules["legacy_contract"].contract[0].requires, ["quality"])
 
+    def test_loader_requires_persona_section(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "knowledge\\.md에 '## Persona' 섹션이 필요합니다\\.",
+        ):
+            self._load(
+                {
+                    "broken": {
+                        "knowledge.md": """
+                        ## Aspects
+                        ### integrity — Integrity [HIGH]
+                        Description
+                        """,
+                        "module.yaml": """
+                        id: broken
+                        name: Broken
+                        description: Broken module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
+    def test_loader_requires_aspects_section(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "knowledge\\.md에 '## Aspects' 섹션이 필요합니다\\.",
+        ):
+            self._load(
+                {
+                    "broken": {
+                        "knowledge.md": """
+                        ## Persona
+                        Persona
+                        """,
+                        "module.yaml": """
+                        id: broken
+                        name: Broken
+                        description: Broken module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
+    def test_loader_requires_at_least_one_aspect(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "'## Aspects' 섹션에 최소 1개의 aspect가 필요합니다\\.",
+        ):
+            self._load(
+                {
+                    "broken": {
+                        "knowledge.md": """
+                        ## Persona
+                        Persona
+
+                        ## Aspects
+                        """,
+                        "module.yaml": """
+                        id: broken
+                        name: Broken
+                        description: Broken module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
+    def test_loader_rejects_invalid_aspect_heading(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "aspect 형식이 올바르지 않습니다: '### integrity : Integrity \\[HIGH\\]'",
+        ):
+            self._load(
+                {
+                    "broken": {
+                        "knowledge.md": """
+                        ## Persona
+                        Persona
+
+                        ## Aspects
+                        ### integrity : Integrity [HIGH]
+                        Description
+                        """,
+                        "module.yaml": """
+                        id: broken
+                        name: Broken
+                        description: Broken module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
+    def test_loader_rejects_duplicate_aspect_ids_in_knowledge_markdown(self) -> None:
+        with self.assertRaisesRegex(ValueError, "aspect id 'integrity'가 중복됩니다\\."):
+            self._load(
+                {
+                    "dup_aspects": {
+                        "knowledge.md": """
+                        ## Persona
+                        Persona
+
+                        ## Aspects
+                        ### integrity — First [HIGH]
+                        First description.
+
+                        ### integrity — Second [LOW]
+                        Second description.
+                        """,
+                        "module.yaml": """
+                        id: dup_aspects
+                        name: Duplicate Aspects
+                        description: Invalid module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
+    def test_loader_rejects_invalid_check_references_in_knowledge_markdown(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "check 'leadership_defined'의 참조 'intgrity'가 aspects에 없습니다\\. 사용 가능: integrity",
+        ):
+            self._load(
+                {
+                    "broken": {
+                        "knowledge.md": """
+                        ## Persona
+                        Persona
+
+                        ## Aspects
+                        ### integrity — Integrity [HIGH]
+                        Description
+
+                        ## Checks
+                        - **leadership_defined**: Leadership conclusion is explicit.
+                          → intgrity
+                        """,
+                        "module.yaml": """
+                        id: broken
+                        name: Broken
+                        description: Broken module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
+    def test_loader_rejects_invalid_check_references_in_legacy_yaml(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "check 'quality_defined'의 참조 'missing'가 aspects에 없습니다\\. 사용 가능: quality",
+        ):
+            self._load(
+                {
+                    "broken": {
+                        "persona.md": "Persona",
+                        "rubric.yaml": """
+                        aspects:
+                          - id: quality
+                            label: Quality
+                            description: Quality aspect.
+                        """,
+                        "format.md": "Format",
+                        "contract.yaml": """
+                        checks:
+                          - id: quality_defined
+                            text: Quality is covered.
+                            requires:
+                              - missing
+                        """,
+                        "module.yaml": """
+                        id: broken
+                        name: Broken
+                        description: Broken module.
+                        depends_on: []
+                        """,
+                    }
+                }
+            )
+
     def test_loader_preserves_module_dependencies(self) -> None:
         _, modules = self._load(
             {
                 "upstream": {
-                    "persona.md": "Upstream",
-                    "rubric.yaml": """
-                    aspects:
-                      - id: upstream_signal
-                        label: Upstream signal
-                        description: Upstream detail.
+                    "knowledge.md": """
+                    ## Persona
+                    Upstream
+
+                    ## Aspects
+                    ### upstream_signal — Upstream signal [HIGH]
+                    Upstream detail.
                     """,
-                    "format.md": "Format",
-                    "contract.yaml": "checks: []",
                     "module.yaml": """
                     id: upstream
                     name: Upstream
@@ -130,15 +412,14 @@ class DomainLoaderTests(unittest.TestCase):
                     """,
                 },
                 "downstream": {
-                    "persona.md": "Downstream",
-                    "rubric.yaml": """
-                    aspects:
-                      - id: downstream_signal
-                        label: Downstream signal
-                        description: Downstream detail.
+                    "knowledge.md": """
+                    ## Persona
+                    Downstream
+
+                    ## Aspects
+                    ### downstream_signal — Downstream signal [HIGH]
+                    Downstream detail.
                     """,
-                    "format.md": "Format",
-                    "contract.yaml": "checks: []",
                     "module.yaml": """
                     id: downstream
                     name: Downstream
@@ -152,47 +433,19 @@ class DomainLoaderTests(unittest.TestCase):
 
         self.assertEqual(modules["downstream"].depends_on, ["upstream"])
 
-    def test_loader_rejects_duplicate_aspect_ids(self) -> None:
-        with self.assertRaisesRegex(ValueError, "duplicate aspect ids"):
-            self._load(
-                {
-                    "dup_aspects": {
-                        "persona.md": "Persona",
-                        "rubric.yaml": """
-                        aspects:
-                          - id: repeated
-                            label: First
-                            description: First description.
-                          - id: repeated
-                            label: Second
-                            description: Second description.
-                        """,
-                        "format.md": "Format",
-                        "contract.yaml": "checks: []",
-                        "module.yaml": """
-                        id: dup_aspects
-                        name: Duplicate Aspects
-                        description: Invalid module.
-                        depends_on: []
-                        """,
-                    }
-                }
-            )
-
     def test_loader_rejects_dependency_cycles(self) -> None:
         with self.assertRaisesRegex(ValueError, "cycle detected"):
             self._load(
                 {
                     "a": {
-                        "persona.md": "A",
-                        "rubric.yaml": """
-                        aspects:
-                          - id: aspect_a
-                            label: A
-                            description: A
+                        "knowledge.md": """
+                        ## Persona
+                        A
+
+                        ## Aspects
+                        ### aspect_a — A [HIGH]
+                        A
                         """,
-                        "format.md": "Format",
-                        "contract.yaml": "checks: []",
                         "module.yaml": """
                         id: a
                         name: A
@@ -202,15 +455,14 @@ class DomainLoaderTests(unittest.TestCase):
                         """,
                     },
                     "b": {
-                        "persona.md": "B",
-                        "rubric.yaml": """
-                        aspects:
-                          - id: aspect_b
-                            label: B
-                            description: B
+                        "knowledge.md": """
+                        ## Persona
+                        B
+
+                        ## Aspects
+                        ### aspect_b — B [HIGH]
+                        B
                         """,
-                        "format.md": "Format",
-                        "contract.yaml": "checks: []",
                         "module.yaml": """
                         id: b
                         name: B

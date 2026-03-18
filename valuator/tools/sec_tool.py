@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 import requests
 
 from ..utils.config import config
@@ -16,6 +15,14 @@ from .base import BaseTool, ToolResult
 
 if TYPE_CHECKING:
     from ..models.gemini_direct import GeminiClient
+
+try:
+    import pandas as pd
+except Exception as exc:  # pragma: no cover - environment-dependent import failure
+    pd = None
+    _PANDAS_IMPORT_ERROR = exc
+else:
+    _PANDAS_IMPORT_ERROR = None
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,16 +64,28 @@ class SecToolError(Exception):
         self.recoverable = recoverable
 
 
+def _require_pandas() -> Any:
+    if pd is not None:
+        return pd
+    detail = str(_PANDAS_IMPORT_ERROR) if _PANDAS_IMPORT_ERROR else "unknown error"
+    raise SecToolError(
+        f"pandas dependency is unavailable: {detail}",
+        error_code="dependency_missing",
+        recoverable=True,
+    )
+
+
 def load_ticker_table() -> pd.DataFrame:
+    pandas = _require_pandas()
     if TICKER_PATH.exists():
-        return pd.read_json(TICKER_PATH)
+        return pandas.read_json(TICKER_PATH)
     response = requests.get(
         "https://www.sec.gov/files/company_tickers.json",
         headers=SEC_HEADERS,
         timeout=20,
     )
     response.raise_for_status()
-    df = pd.DataFrame(response.json()).T
+    df = pandas.DataFrame(response.json()).T
     df.to_json(TICKER_PATH, orient="records", force_ascii=False)
     return df
 

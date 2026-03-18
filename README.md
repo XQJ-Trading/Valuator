@@ -41,9 +41,10 @@ Valuator/
 
 1. **의존성 설치**
    ```bash
-   pip install -r requirements.txt
+   python3 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
    ```
-   - Gemini 3.x 모델 지원을 위해 `google-genai`가 requirements에 포함되어 있습니다.
+   - Gemini 3.x 모델 지원을 위해 `google-genai==1.62.0`을 사용합니다.
 
 2. **환경 변수 설정**
    
@@ -65,7 +66,7 @@ Valuator/
 
 3. **서버 실행**
    ```bash
-   python3 -m uvicorn server.main:app --reload --port 8001
+   .venv/bin/python -m uvicorn server.main:app --reload --port 8001
    ```
 
 ### 프론트엔드 설정

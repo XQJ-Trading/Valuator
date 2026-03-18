@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,7 +67,7 @@ class QueryRequirementPayload(BaseModel):
 
     id: str = ""
     acceptance: str = Field(min_length=1)
-    unit_ids: list[int | str] = Field(default_factory=list, min_length=1)
+    unit_ids: list[Union[int, str]] = Field(default_factory=list, min_length=1)
     domain_ids: list[str] = Field(default_factory=list, min_length=1)
     entity_ids: list[str] = Field(default_factory=list)
     provenance: str = Field(min_length=1)

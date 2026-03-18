@@ -28,15 +28,9 @@ class DomainTool(BaseTool):
         persona = str(kwargs.get("domain_persona") or "").strip()
         rubric = str(kwargs.get("domain_rubric") or "").strip()
         format_spec = str(kwargs.get("domain_format") or "").strip()
-        if not guide and not persona:
-            return ToolResult(
-                success=False,
-                result=None,
-                error="'domain_persona' or 'domain_guide' is required",
-            )
         corp = corp or query
         context = str(kwargs.get("context") or "").strip()
-        system_prompt = persona or guide
+        system_prompt = persona or guide or "당신은 기업 가치 분석가입니다."
         prompt = (
             f"[ANALYSIS_TARGET]\n{corp}\n\n"
             f"[RUBRIC_ASPECTS]\n{rubric or '(none)'}\n\n"

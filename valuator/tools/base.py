@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Base tool implementation for AI Agent"""
 
 import asyncio

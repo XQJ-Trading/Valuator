@@ -92,7 +92,7 @@ def main() -> int:
     parser.add_argument(
         "--query-index",
         type=int,
-        default=0,
+        default=3,
         help="Default query index when --query is empty",
     )
     parser.add_argument("--session-id", type=str, default="", help="Session ID")

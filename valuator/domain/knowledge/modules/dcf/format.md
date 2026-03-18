@@ -1,6 +1,0 @@
-- 15년 명시기간 기준으로 DCF workflow를 수행한다.
-- assumptions는 기계 판독 가능한 구조화 JSON을 포함해야 한다.
-- calculation은 코드 실행 결과를 그대로 보존한다.
-- findings는 투자자가 바로 읽을 수 있는 한글 마크다운 해설이어야 한다.
-- 각 aspect는 반드시 `### [ASPECT:{aspect_id}] {label}` 헤더 아래에 작성한다.
-- enterprise value, 시나리오 비교, 민감도, 가장 영향이 큰 변수를 빠짐없이 포함한다.

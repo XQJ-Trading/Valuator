@@ -1,9 +1,5 @@
 id: dcf
 name: DCF 밸류에이션
 description: DCF 폼 설계, 가정 채우기, 할인/NPV 계산을 수행한다.
-persona: persona.md
-rubric: rubric.yaml
-format: format.md
-contract: contract.yaml
 depends_on:
   - risk_transmission

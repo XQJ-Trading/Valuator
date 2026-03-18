@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from valuator.utils.dataclass_compat import dataclass, field
 
 from .company import Company
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -7,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +17,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
 from valuator.core import Engine
+from valuator.models.gemini_direct import ensure_supported_google_genai_runtime
 from valuator.utils.config import config
 from valuator.utils.logger import logger
 from .repositories import (
@@ -500,6 +503,8 @@ task_rewrite_service: Optional[TaskRewriteService] = None
 async def lifespan(_app: FastAPI):
     # Startup
     global history_repository, task_rewrite_repository, session_service, task_rewrite_service
+    google_genai_version = ensure_supported_google_genai_runtime()
+    logger.info("google-genai runtime verified: %s", google_genai_version)
     history_repository = create_history_repository()
     print(f"History repository initialized: {type(history_repository).__name__}")
 
@@ -560,7 +565,7 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     thinking_level: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
-    valuation_profile: Optional[str | bool] = None
+    valuation_profile: Optional[Union[str, bool]] = None
     system_context: Optional[str] = None
 
     @field_validator("model")

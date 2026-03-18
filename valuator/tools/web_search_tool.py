@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Web search tool for AI Agent."""
 
 import asyncio

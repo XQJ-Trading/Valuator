@@ -59,6 +59,7 @@ class QueryUnitPayload(BaseModel):
     domain_ids: list[str] = Field(default_factory=list, min_length=1)
     entity_ids: list[str] = Field(default_factory=list)
     time_scope: str = ""
+    parent_unit_id: str = ""
 
 
 class QueryRequirementPayload(BaseModel):
@@ -103,10 +104,18 @@ def _build_query_analysis(
         )
 
     company_names = _dedupe_strings(raw.query_intent.company_names)
+    has_strong_company_identifier = bool(
+        raw.query_intent.ticker or raw.query_intent.security_code
+    )
+    company_name_arg = (
+        ""
+        if has_strong_company_identifier
+        else (company_names[0] if company_names else "")
+    )
     company = find_company(
         ticker=raw.query_intent.ticker,
         security_code=raw.query_intent.security_code,
-        company_name=company_names[0] if company_names else "",
+        company_name=company_name_arg,
     )
     query_intent = QueryIntent(
         query=query,
@@ -147,6 +156,7 @@ def _build_query_analysis(
                 domain_ids=unit_domains,
                 entity_ids=entity_ids,
                 time_scope=item.time_scope,
+                parent_unit_id=item.parent_unit_id,
             )
         )
 
@@ -351,6 +361,7 @@ class QueryAnalyzer:
                                 "items": {"type": "string", "minLength": 1},
                             },
                             "time_scope": {"type": "string"},
+                            "parent_unit_id": {"type": "string"},
                         },
                     },
                 },

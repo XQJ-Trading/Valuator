@@ -65,6 +65,7 @@ class QueryUnit:
     domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
+    parent_unit_id: str = ""
 
 
 @dataclass(slots=True)
@@ -106,6 +107,7 @@ class QueryStep:
     domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
+    parent_unit_id: str = ""
 
 
 @dataclass(slots=True)
@@ -140,6 +142,7 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
             domain_ids=list(unit.domain_ids),
             entity_ids=list(unit.entity_ids),
             time_scope=unit.time_scope,
+            parent_unit_id=unit.parent_unit_id,
         )
         for index, unit in enumerate(analysis.units)
     ]
@@ -164,9 +167,9 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
 
 def fill_routing_defaults(
     analysis: QueryAnalysis,
-    modules: dict[str, DomainModule],
+    _modules: dict[str, DomainModule],
 ) -> QueryAnalysis:
-    """Fill allowed_tools from domain modules when empty."""
+    """Fill allowed_tools when the query analysis omitted them."""
     if not analysis.domain_ids:
         analysis.allowed_tools = list(DEFAULT_GENERIC_TOOLS)
         return analysis
@@ -174,10 +177,13 @@ def fill_routing_defaults(
     if analysis.allowed_tools:
         return analysis
 
-    tool_ids: set[str] = set()
-    for domain_id in analysis.domain_ids:
-        module = modules.get(domain_id)
-        if module is not None:
-            tool_ids.update(module.tools)
-    analysis.allowed_tools = sorted(tool_ids) if tool_ids else list(DEFAULT_GENERIC_TOOLS)
+    analysis.allowed_tools = sorted(
+        {
+            "code_execute_tool",
+            "domain_tool",
+            "sec_tool",
+            "web_search_tool",
+            "yfinance_balance_sheet",
+        }
+    )
     return analysis

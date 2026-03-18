@@ -1,0 +1,25 @@
+aspects:
+  - id: revenue_growth
+    label: 매출 성장 경로
+    description: 기준 매출, 성장률 경로, 세그먼트 성장 동인, 성장률 페이드 가정
+    priority: high
+  - id: profitability
+    label: 수익성 구조
+    description: 영업이익률 또는 EBITDA margin, mix shift, operating leverage, 정상화 마진
+    priority: high
+  - id: reinvestment
+    label: 재투자와 자본집약도
+    description: CAPEX, 감가상각, 운전자본, reinvestment rate, 투자 지속 가능성
+    priority: medium
+  - id: discount_rate
+    label: 할인율과 자본비용
+    description: 무위험수익률, beta, ERP, cost of debt, 세율, WACC 근거
+    priority: high
+  - id: terminal_assumption
+    label: 터미널 가정
+    description: 터미널 성장률, 말기 마진, 장기 ROIC, TV 비중과 보수성
+    priority: medium
+  - id: scenario_sensitivity
+    label: 시나리오와 민감도
+    description: base/bull/bear 비교, 주요 민감도 축, enterprise value 변동 요인
+    priority: medium

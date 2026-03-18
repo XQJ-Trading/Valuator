@@ -17,6 +17,7 @@ from valuator.domain import (
     QueryUnit,
     analyze_query,
     build_query_breakdown,
+    expand,
     find_company,
     fill_routing_defaults,
 )
@@ -169,28 +170,67 @@ class QueryAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis.units[0].domain_ids, ["dcf"])
         self.assertEqual(analysis.requirements[0].unit_ids, [0])
 
-    def test_loader_reads_domain_guides_and_pipeline_config_from_subdirectories(self) -> None:
+    def test_loader_reads_domain_relationship_files_only(self) -> None:
         loader = DomainLoader()
         _, modules = loader.load()
 
-        self.assertIn("Integrity and Transparency", modules["ceo"].prompt_fragment)
-        self.assertIsNone(modules["ceo"].pipeline_config)
-        self.assertIsNotNone(modules["ceo"].ir_config)
+        self.assertIn("Warren Buffett", modules["ceo"].persona)
         self.assertEqual(
-            modules["ceo"].ir_config.key_values["subject"].default,
-            "CEO / Leadership",
+            [aspect.id for aspect in modules["ceo"].rubric],
+            [
+                "integrity",
+                "capital_allocation",
+                "governance",
+                "strategic_vision",
+                "talent_culture",
+            ],
         )
-        self.assertIsNotNone(modules["dcf"].pipeline_config)
-        self.assertIsNotNone(modules["dcf"].ir_config)
-        self.assertEqual(len(modules["dcf"].pipeline_config.stages), 5)
+        self.assertIn("### [ASPECT:{aspect_id}]", modules["ceo"].format_spec)
         self.assertEqual(
-            modules["dcf"].pipeline_config.result_mapping["assumptions"],
-            "{stages.extract_assumptions}",
+            [check.id for check in modules["ceo"].contract],
+            ["rating_defined", "risks_explained", "investment_view_defined"],
         )
-        self.assertEqual(
-            modules["dcf"].ir_config.key_values["enterprise_value"].path,
-            "calculation.output.enterprise_value",
+        self.assertEqual(modules["dcf"].depends_on, ["risk_transmission"])
+        self.assertIn("discount_rate", [aspect.id for aspect in modules["dcf"].rubric])
+        self.assertIn("assumptions", modules["dcf"].format_spec)
+
+    def test_expand_splits_dense_high_priority_units(self) -> None:
+        loader = DomainLoader()
+        _, modules = loader.load()
+        analysis = QueryAnalysis(
+            domain_ids=["ceo", "risk_transmission"],
+            entities={"amazon": "Amazon"},
+            units=[
+                QueryUnit(
+                    id="Q-001",
+                    objective="Analyze governance and transmission",
+                    retrieval_query="Amazon governance and transmission",
+                    domain_ids=["ceo", "risk_transmission"],
+                    entity_ids=["amazon"],
+                    time_scope="2021-01-01 to 2026-03-06",
+                )
+            ],
+            requirements=[
+                QueryRequirement(
+                    id="R-001",
+                    acceptance="Cover governance and transmission.",
+                    unit_ids=[0],
+                    domain_ids=["ceo", "risk_transmission"],
+                    entity_ids=["amazon"],
+                    provenance="Derived from user query.",
+                )
+            ],
+            rationale="Expansion candidate.",
         )
+
+        expanded = expand(
+            analysis,
+            {module_id: modules[module_id] for module_id in ["ceo", "risk_transmission"]},
+        )
+
+        self.assertEqual(len(expanded.units), 2)
+        self.assertTrue(all(unit.parent_unit_id == "Q-001" for unit in expanded.units))
+        self.assertTrue(all(unit.id.startswith("Q-001_") for unit in expanded.units))
 
     def test_build_query_breakdown_projects_steps_entities_and_relations(self) -> None:
         analysis = _canonical_analysis(

@@ -9,6 +9,7 @@ from ...domain import (
     DomainModuleContext,
     DomainRouter,
     QueryIntent,
+    expand,
 )
 from ...utils.config import config
 from ..aggregator.service import Aggregation
@@ -185,6 +186,7 @@ class Engine:
                 for module_id in analysis.domain_ids
                 if module_id in modules
             }
+            analysis = expand(analysis, selected_modules)
             domain_context = DomainModuleContext(
                 module_ids=list(selected_modules),
                 modules=selected_modules,

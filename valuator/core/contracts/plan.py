@@ -58,10 +58,25 @@ class ExecutionArtifact:
 
 
 @dataclass(slots=True)
+class AspectFacts:
+    aspect_id: str
+    facts: dict[str, str] = field(default_factory=dict)
+    evidence: str = ""
+
+
+@dataclass(slots=True)
+class ExtractionResult:
+    aspect_facts: list[AspectFacts] = field(default_factory=list)
+    uncovered_aspects: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ReportMaterial:
     source: str
     content: str = ""
     facts: dict[str, str] = field(default_factory=dict)
+    aspect_facts: list[AspectFacts] = field(default_factory=list)
+    uncovered_aspects: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +106,7 @@ class AggregationResult:
     missing_requirement_ids: list[str] = field(default_factory=list)
     covered_requirement_ids: list[str] = field(default_factory=list)
     domain_coverage: DomainCoverage = field(default_factory=DomainCoverage)
+    aspect_coverage: dict[str, str] = field(default_factory=dict)
     aggregation_error: str = ""
 
 

@@ -1,31 +1,16 @@
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from .knowledge import INDEX_PATH, KNOWLEDGE_ROOT, MODULES_ROOT
-from .types import (
-    DomainIndex,
-    IrConfig,
-    DomainModule,
-    DomainReportRequirement,
-    DomainTask,
-    PipelineConfig,
-)
-
-_STAGE_REF_RE = re.compile(r"^\{stages\.(\w+)\}$")
-_STAGE_REF_IN_TEXT_RE = re.compile(r"\{stages\.(\w+)\}")
+from .types import AcceptanceCheck, DomainIndex, DomainModule, RubricAspect
 
 
 class DomainLoader:
-    """Load and validate domain modules from YAML files.
-
-    This is a boundary for YAML configuration: all schema checks happen here.
-    """
+    """Load and validate domain modules from YAML files."""
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root or KNOWLEDGE_ROOT
@@ -33,222 +18,165 @@ class DomainLoader:
         self._modules_root = self._resolve_modules_root(self._root)
 
     def load(self) -> tuple[DomainIndex, dict[str, DomainModule]]:
-        """Load index and all referenced modules."""
-        index_data = self._read_yaml(self._index_path)
-        index = DomainIndex.model_validate(index_data)
-
+        index = DomainIndex.model_validate(self._read_yaml(self._index_path))
         modules: dict[str, DomainModule] = {}
         for module_id in index.modules:
-            subdir_path = self._modules_root / module_id / "module.yaml"
-            flat_path = self._root / f"{module_id}.yaml"
-            if subdir_path.is_file():
-                module_path = subdir_path
-            elif flat_path.is_file():
-                module_path = flat_path
-            else:
-                raise FileNotFoundError(
-                    f"domain module config not found for '{module_id}': {subdir_path}"
-                )
-            module_data = self._read_yaml(module_path)
-            module = self._build_module(module_data, path=module_path)
+            module_path = self._module_path(module_id)
+            module = self._build_module(self._read_yaml(module_path), path=module_path)
             if module.id != module_id:
                 raise ValueError(
                     f"domain module id mismatch: file={module_id}.yaml id={module.id}"
                 )
             modules[module_id] = module
-
         self._ensure_no_cycles(modules)
         return index, modules
+
+    def _module_path(self, module_id: str) -> Path:
+        subdir_path = self._modules_root / module_id / "module.yaml"
+        flat_path = self._root / f"{module_id}.yaml"
+        if subdir_path.is_file():
+            return subdir_path
+        if flat_path.is_file():
+            return flat_path
+        raise FileNotFoundError(
+            f"domain module config not found for '{module_id}': {subdir_path}"
+        )
 
     def _read_yaml(self, path: Path) -> dict[str, Any]:
         if not path.is_file():
             raise FileNotFoundError(f"domain config not found: {path}")
-        text = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(text) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             raise ValueError(f"domain YAML root must be a mapping: {path}")
         return data
 
     def _build_module(self, data: dict[str, Any], *, path: Path) -> DomainModule:
-        report_contract_raw = data.get("report_contract") or []
-        if not isinstance(report_contract_raw, list):
-            raise ValueError(
-                f"report_contract must be a list in domain module: {path}"
+        self._validate_module_keys(data, path=path)
+        base_dir = path.parent
+        persona_ref = self._ref(data, "persona", "persona_file") or "persona.md"
+        rubric_ref = self._ref(data, "rubric", "rubric_file") or "rubric.yaml"
+        format_ref = self._ref(data, "format", "format_file") or "format.md"
+        contract_ref = self._ref(data, "contract", "contract_file") or "contract.yaml"
+        return DomainModule(
+            id=str(data["id"]).strip(),
+            name=str(data["name"]).strip(),
+            description=str(data.get("description") or "").strip(),
+            persona=self._read_text(base_dir / persona_ref),
+            rubric=self._load_rubric(base_dir / rubric_ref, path=path),
+            format_spec=self._read_text(base_dir / format_ref),
+            contract=self._load_contract(base_dir / contract_ref, path=path),
+            depends_on=self._string_list(
+                data.get("depends_on"),
+                field_name="depends_on",
+                path=path,
+            ),
+        )
+
+    def _validate_module_keys(self, data: dict[str, Any], *, path: Path) -> None:
+        allowed = {
+            "id",
+            "name",
+            "description",
+            "persona",
+            "persona_file",
+            "rubric",
+            "rubric_file",
+            "format",
+            "format_file",
+            "contract",
+            "contract_file",
+            "depends_on",
+        }
+        unknown = sorted(key for key in data if key not in allowed)
+        if unknown:
+            raise ValueError(f"unsupported domain module keys in {path}: {unknown}")
+
+    def _load_rubric(self, ref: Path, *, path: Path) -> list[RubricAspect]:
+        raw = self._read_yaml(ref).get("aspects")
+        if not isinstance(raw, list):
+            raise ValueError(f"aspects must be a list in domain module: {path}")
+        aspects: list[RubricAspect] = []
+        seen_ids: set[str] = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError(f"aspect item must be a mapping in domain module: {path}")
+            aspect_id = str(item.get("id") or "").strip()
+            label = str(item.get("label") or "").strip()
+            description = str(item.get("description") or "").strip()
+            priority = str(item.get("priority") or "medium").strip().lower() or "medium"
+            if not aspect_id or not label or not description:
+                raise ValueError(f"aspect must include id/label/description in domain module: {path}")
+            if aspect_id in seen_ids:
+                raise ValueError(f"duplicate aspect ids in domain module '{path.stem}': {aspect_id}")
+            seen_ids.add(aspect_id)
+            aspects.append(
+                RubricAspect(
+                    id=aspect_id,
+                    label=label,
+                    description=description,
+                    priority=priority,
+                )
             )
-        report_contract = [
-            DomainReportRequirement(text=str(item).strip())
-            for item in report_contract_raw
-            if str(item).strip()
-        ]
+        return aspects
 
-        tasks_raw = data.get("tasks") or []
-        if not isinstance(tasks_raw, list):
-            raise ValueError(f"tasks must be a list in domain module: {path}")
-        tasks = []
-        for t in tasks_raw:
-            if isinstance(t, dict) and "id" in t:
-                tasks.append(
-                    DomainTask(
-                        id=str(t["id"]).strip(),
-                        name=str(t.get("name") or "").strip(),
-                    )
-                )
+    def _load_contract(self, ref: Path, *, path: Path) -> list[AcceptanceCheck]:
+        raw = self._read_yaml(ref)
+        checks = raw.get("checks", raw.get("acceptance_criteria"))
+        if not isinstance(checks, list):
+            raise ValueError(f"checks must be a list in domain module: {path}")
+        return [self._build_check(item, path=path) for item in checks]
 
-        prompt_fragment = str(data.get("prompt_fragment") or "").strip()
-        prompt_file = data.get("prompt_file")
-        if prompt_file and not prompt_fragment:
-            prompt_path = (path.parent / str(prompt_file)).resolve()
-            if not prompt_path.is_file():
-                raise FileNotFoundError(
-                    f"prompt_file not found for domain module {path}: {prompt_path}"
-                )
-            prompt_fragment = prompt_path.read_text(encoding="utf-8").strip()
+    def _build_check(self, item: Any, *, path: Path) -> AcceptanceCheck:
+        if not isinstance(item, dict):
+            raise ValueError(f"check item must be a mapping in domain module: {path}")
+        payload = dict(item)
+        payload["requires"] = payload.pop("requires", payload.pop("required_outputs", []))
+        return AcceptanceCheck.model_validate(payload)
 
-        ir_raw = data.get("ir")
-        payload = dict(data)
-        payload.pop("ir", None)
-        payload["report_contract"] = report_contract
-        payload["tasks"] = tasks
-        payload["prompt_fragment"] = prompt_fragment
-        if ir_raw is not None:
-            if not isinstance(ir_raw, dict):
-                raise ValueError(f"ir must be a mapping in domain module: {path}")
-            payload["ir_config"] = IrConfig.model_validate(ir_raw)
-        pipeline_path = path.parent / "pipeline.yaml"
-        if pipeline_path.is_file():
-            raw_pipeline = self._read_yaml(pipeline_path)
-            payload["pipeline_config"] = self._build_pipeline_config(
-                raw_pipeline,
-                base_dir=path.parent,
-            )
-        return DomainModule.model_validate(payload)
-
-    def _build_pipeline_config(
-        self,
-        raw: dict[str, Any],
-        *,
-        base_dir: Path,
-    ) -> PipelineConfig:
-        payload = dict(raw)
-        stages_raw = payload.get("stages")
-        if isinstance(stages_raw, list):
-            payload["stages"] = [
-                dict(stage) if isinstance(stage, dict) else stage
-                for stage in stages_raw
-            ]
-        self._resolve_pipeline_files(payload, base_dir=base_dir)
-
-        config = PipelineConfig.model_validate(payload)
-        stage_ids = [stage.id for stage in config.stages]
-        if len(stage_ids) != len(set(stage_ids)):
-            raise ValueError(f"duplicate pipeline stage ids in {base_dir / 'pipeline.yaml'}")
-
-        known_stage_ids = set(stage_ids)
-        for stage in config.stages:
-            for var_name, stage_id in stage.inject_vars.items():
-                if stage_id not in known_stage_ids:
-                    raise ValueError(
-                        f"inject_vars '{var_name}' references unknown stage '{stage_id}'"
-                    )
-            self._validate_template_refs(stage.user_prompt, known_stage_ids)
-            self._validate_template_refs(stage.system_prompt_content, known_stage_ids)
-
-        for key, template in config.result_mapping.items():
-            direct_ref = self._stage_ref_id(template)
-            if direct_ref is not None and direct_ref not in known_stage_ids:
-                raise ValueError(
-                    f"result_mapping '{key}' references unknown stage '{direct_ref}'"
-                )
-            self._validate_template_refs(template, known_stage_ids)
-
-        return config
-
-    def _resolve_pipeline_files(
-        self,
-        raw: dict[str, Any],
-        *,
-        base_dir: Path,
-    ) -> None:
-        stages = raw.get("stages")
-        if not isinstance(stages, list):
-            return
-
-        for stage in stages:
-            if not isinstance(stage, dict):
+    def _ref(self, data: dict[str, Any], *names: str) -> str | None:
+        for name in names:
+            value = data.get(name)
+            if value is None:
                 continue
-
-            system_prompt_file = stage.pop("system_prompt_file", None)
-            if system_prompt_file:
-                stage["system_prompt_content"] = self._read_text(
-                    base_dir / str(system_prompt_file)
-                )
-
-            output_schema_file = stage.pop("output_schema_file", None)
-            if output_schema_file:
-                schema_text = self._read_text(base_dir / str(output_schema_file))
-                stage["output_schema_content"] = json.loads(schema_text)
-
-            code_file = stage.pop("code_file", None)
-            if code_file:
-                stage["code_content"] = self._read_text(base_dir / str(code_file))
-
-            inject_vars = stage.get("inject_vars")
-            if isinstance(inject_vars, dict):
-                stage["inject_vars"] = {
-                    str(name): self._normalize_stage_ref(str(value))
-                    for name, value in inject_vars.items()
-                }
+            text = str(value).strip()
+            if text:
+                return text
+        return None
 
     def _read_text(self, path: Path) -> str:
-        resolved = path.resolve()
-        if not resolved.is_file():
-            raise FileNotFoundError(f"referenced domain file not found: {resolved}")
-        return resolved.read_text(encoding="utf-8").strip()
+        if not path.is_file():
+            raise FileNotFoundError(f"referenced domain file not found: {path}")
+        return path.read_text(encoding="utf-8").strip()
 
-    def _normalize_stage_ref(self, value: str) -> str:
-        stage_id = self._stage_ref_id(value)
-        if stage_id is not None:
-            return stage_id
-        return value.strip()
-
-    def _stage_ref_id(self, value: str) -> str | None:
-        match = _STAGE_REF_RE.match(value.strip())
-        if match is None:
-            return None
-        return match.group(1)
-
-    def _validate_template_refs(
-        self,
-        template: str,
-        stage_ids: set[str],
-    ) -> None:
-        for stage_id in _STAGE_REF_IN_TEXT_RE.findall(template):
-            if stage_id not in stage_ids:
-                raise ValueError(f"template references unknown stage '{stage_id}'")
+    def _string_list(self, raw: Any, *, field_name: str, path: Path) -> list[str]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise ValueError(f"{field_name} must be a list in domain module: {path}")
+        return list(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
 
     def _ensure_no_cycles(self, modules: dict[str, DomainModule]) -> None:
         visiting: set[str] = set()
         visited: set[str] = set()
 
-        def _dfs(node: str) -> None:
-            if node in visited:
+        def walk(module_id: str) -> None:
+            if module_id in visited:
                 return
-            if node in visiting:
-                raise ValueError(f"cycle detected in domain depends_on: {node}")
-            visiting.add(node)
-            module = modules.get(node)
-            if module is not None:
-                for dep in module.depends_on:
-                    if dep not in modules:
-                        raise ValueError(
-                            f"unknown dependency '{dep}' in domain module '{node}'"
-                        )
-                    _dfs(dep)
-            visiting.remove(node)
-            visited.add(node)
+            if module_id in visiting:
+                raise ValueError(f"cycle detected in domain depends_on: {module_id}")
+            visiting.add(module_id)
+            for dependency in modules[module_id].depends_on:
+                if dependency not in modules:
+                    raise ValueError(
+                        f"unknown dependency '{dependency}' in domain module '{module_id}'"
+                    )
+                walk(dependency)
+            visiting.remove(module_id)
+            visited.add(module_id)
 
         for module_id in modules:
-            _dfs(module_id)
+            walk(module_id)
+
 
     def _resolve_index_path(self, root: Path) -> Path:
         if (root / "index.yaml").is_file():

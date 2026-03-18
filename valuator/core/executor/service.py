@@ -7,7 +7,6 @@ from hashlib import sha256
 from typing import Any, Awaitable, Callable
 
 from ...domain import DomainModuleContext
-from ...domain.ir import build_domain_artifact_fields
 from ...tools.code_execute_tool import ExecuteCodeTool
 from ...tools.domain_tool import DomainTool as UnifiedDomainTool
 from ...tools.sec_tool import SECTool
@@ -16,6 +15,7 @@ from ...tools.specs import TOOL_SPECS
 from ...tools.web_search_tool import PerplexitySearchTool
 from ...tools.yfinance_tool import YFinanceBalanceSheetTool
 from ..contracts.plan import ExecutionArtifact, ExecutionResult, Plan, Task, TaskReport
+from .domain_fields import build_domain_artifact_fields
 from ..workspace.service import Workspace
 
 _TOOL_CLASSES: dict[str, type[Any]] = {
@@ -192,22 +192,9 @@ class Executor:
             completed=completed,
             reports=reports,
         )
-        if self._domain_context is not None and self._domain_context.module_ids:
-            allowed: set[str] = set()
-            for module_id in self._domain_context.module_ids:
-                module = self._domain_context.modules.get(module_id)
-                if module is None:
-                    continue
-                for name in module.tools:
-                    allowed.add(name)
-            if allowed and tool_name not in allowed:
-                raise ValueError(
-                    f"tool '{tool_name}' is not allowed for current domain context"
-                )
         args_hash = self._hash_args(tool_args)
         cached = workspace.find_cached_output(tool_name, args_hash)
         domain_fields: dict[str, Any] = {}
-        module = self._domain_module(task.domain_id)
         if cached is not None:
             content = cached
             raw_result = self._extract_raw_result_from_markdown(cached)
@@ -215,7 +202,6 @@ class Executor:
                 tool_name=tool_name,
                 raw_result=raw_result,
                 metadata={},
-                module=module,
                 fallback_domain_id=task.domain_id.strip(),
             )
         else:
@@ -233,7 +219,6 @@ class Executor:
                     tool_name=tool_name,
                     raw_result=raw_result,
                     metadata={},
-                    module=module,
                     fallback_domain_id=task.domain_id.strip(),
                 )
             else:
@@ -252,7 +237,6 @@ class Executor:
                     tool_name=tool_name,
                     raw_result=raw_result,
                     metadata=result.metadata or {},
-                    module=module,
                     fallback_domain_id=task.domain_id.strip(),
                 )
 
@@ -296,9 +280,9 @@ class Executor:
             module = self._domain_context.modules.get(task.domain_id)
             if module is not None:
                 tool_args["domain_id"] = task.domain_id
-                tool_args["domain_guide"] = module.prompt_fragment
-                if module.pipeline_config is not None:
-                    tool_args["pipeline_config"] = module.pipeline_config
+                tool_args["domain_persona"] = module.persona
+                tool_args["domain_rubric"] = self._rubric_text(module.rubric)
+                tool_args["domain_format"] = module.format_spec
 
         context = self._dependency_context(
             task=task,
@@ -311,6 +295,25 @@ class Executor:
 
         tool_args["context"] = context
         return tool_args
+
+    def _rubric_text(self, rubric: list[Any]) -> str:
+        if not rubric:
+            return ""
+        lines: list[str] = []
+        for aspect in rubric:
+            aspect_id = str(getattr(aspect, "id", "")).strip()
+            label = str(getattr(aspect, "label", "")).strip()
+            description = str(getattr(aspect, "description", "")).strip()
+            priority = str(getattr(aspect, "priority", "medium")).strip() or "medium"
+            if not aspect_id:
+                continue
+            line = f"- {aspect_id} ({priority})"
+            if label:
+                line += f": {label}"
+            if description:
+                line += f" - {description}"
+            lines.append(line)
+        return "\n".join(lines)
 
     def _required_executable_dependencies(
         self,
@@ -395,11 +398,6 @@ class Executor:
                 reports=reports,
                 lines=lines,
             )
-
-    def _domain_module(self, domain_id: str):
-        if self._domain_context is None or not domain_id:
-            return None
-        return self._domain_context.modules.get(domain_id)
 
     async def _run_failure_fallback(
         self,

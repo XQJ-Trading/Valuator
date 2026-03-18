@@ -21,6 +21,7 @@ from valuator.core.contracts.plan import (
     TaskReport,
     ToolCall,
 )
+from valuator.core.executor.domain_fields import build_domain_artifact_fields
 from valuator.core.executor.service import Executor
 from valuator.core.orchestrator.engine import Engine
 from valuator.core.planner.service import Planner
@@ -34,7 +35,6 @@ from valuator.domain import (
     QueryUnit,
     find_company,
 )
-from valuator.domain.ir import build_domain_artifact_fields
 from valuator.tools.base import ToolResult
 from valuator.tools.specs import ToolSpec
 from valuator.utils.config import config as runtime_config
@@ -578,10 +578,7 @@ class AggregationTests(unittest.TestCase):
 
 
 class DomainEvidenceTests(unittest.TestCase):
-    def test_declared_ir_config_projects_nested_dcf_payload(self) -> None:
-        loader = DomainLoader()
-        _, modules = loader.load()
-
+    def test_generic_domain_artifact_fields_keep_raw_payload(self) -> None:
         output = build_domain_artifact_fields(
             tool_name="domain_tool",
             raw_result={
@@ -596,16 +593,14 @@ class DomainEvidenceTests(unittest.TestCase):
                 "findings": "DCF summary",
             },
             metadata={"tool_type": "domain", "domain": "dcf"},
-            module=modules["dcf"],
         )
 
         self.assertEqual(output["domain_id"], "dcf")
         self.assertEqual(output["domain_summary"], "DCF summary")
-        self.assertEqual(output["domain_key_values"]["enterprise_value"], "123.46")
-        self.assertEqual(output["domain_payload"]["company_name"], "Amazon")
+        self.assertEqual(output["domain_key_values"], {})
         self.assertEqual(
-            output["domain_payload"]["dcf"]["terminal_pv"],
-            77.856,
+            output["domain_payload"]["raw_result"]["company_name"],
+            "Amazon",
         )
 
     def test_generic_domain_artifact_fields_fall_back_to_task_domain_id(self) -> None:

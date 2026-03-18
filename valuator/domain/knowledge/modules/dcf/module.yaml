@@ -1,42 +1,9 @@
 id: dcf
 name: DCF 밸류에이션
 description: DCF 폼 설계, 가정 채우기, 할인/NPV 계산을 수행한다.
-tools:
-  - domain_tool
-  - yfinance_balance_sheet
-  - sec_tool
-  - code_execute_tool
-domain_tools:
-  - tool: domain_tool
-    enabled: true
-prompt_file: guide.md
-report_contract:
-  - 내재가치(Enterprise value, 필요시 Equity value)와 Base/Bull/Bear 시나리오 및 현재 가격 대비 괴리를 제시한다.
-  - 핵심 가정값(성장률·WACC·터미널 성장률 등)과 근거 출처를 표로 제시한다.
-  - 민감도 결과와 가장 영향이 큰 변수를 명시한다.
-tasks:
-  - id: dcf_valuation
-    name: DCF 밸류에이션
-  - id: dcf_sensitivity
-    name: DCF 민감도 분석
-ir:
-  summary_path: findings
-  key_values:
-    enterprise_value:
-      path: calculation.output.enterprise_value
-      format: "{:.2f}"
-    pv_explicit:
-      path: calculation.output.pv_explicit
-      format: "{:.2f}"
-    terminal_value:
-      path: calculation.output.terminal_value
-      format: "{:.2f}"
-    terminal_pv:
-      path: calculation.output.terminal_pv
-      format: "{:.2f}"
-  payload_paths:
-    company_name: company_name
-    assumptions: assumptions
-    dcf: calculation.output
+persona: persona.md
+rubric: rubric.yaml
+format: format.md
+contract: contract.yaml
 depends_on:
-  []
+  - risk_transmission

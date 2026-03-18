@@ -1,29 +1,8 @@
 id: risk_transmission
 name: 리스크 전이
 description: 리스크가 손익/현금흐름 line-item으로 전이되는 경로를 분석한다.
-tools:
-  - web_search_tool
-  - sec_tool
-  - code_execute_tool
-domain_tools:
-  - tool: sec_tool
-    enabled: true
-    lookback_years: 3
-prompt_file: guide.md
-report_contract:
-  - 최근 3개년(절대연도 기준) 리스크별 전이 경로(원인→손익/CF 항목→영향)를 제시한다.
-  - 각 리스크에 대해 현금흐름(영업현금흐름/FCF) line-item 연결을 명시한다.
-  - 영향 범위를 구간(예: -3%~-7%)으로 제시한다.
-  - 모니터링 트리거 지표를 제시한다.
-tasks:
-  - id: risk_transmission
-    name: 리스크 전이 분석
-ir:
-  summary_path: findings
-  payload_paths:
-    ticker: ticker
-    year: year
-    filing_url: filing_url
-    extracts: extracts
-    findings: findings
+persona: persona.md
+rubric: rubric.yaml
+format: format.md
+contract: contract.yaml
 depends_on: []

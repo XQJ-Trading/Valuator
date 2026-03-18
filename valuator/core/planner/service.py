@@ -7,7 +7,6 @@ from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from ...domain import (
-    DomainModule,
     DomainModuleContext,
     QueryAnalysis,
     QueryIntent,
@@ -235,10 +234,39 @@ class Planner:
 
         unit_merge_ids: dict[int, str] = {}
         root_deps: list[str] = []
+        merge_groups: dict[str, list[tuple[int, Task, Task]]] = {}
+        group_order: list[str] = []
         for unit_idx, (leaf_task, merge_task) in enumerate(built_units):
             tasks.append(leaf_task)
+            unit = analysis.units[unit_idx]
+            group_key = unit.parent_unit_id or unit.id
+            if group_key not in merge_groups:
+                group_order.append(group_key)
+            merge_groups.setdefault(group_key, []).append((unit_idx, leaf_task, merge_task))
+
+        for merge_number, group_key in enumerate(group_order, start=1):
+            grouped = merge_groups[group_key]
+            first_unit = analysis.units[grouped[0][0]]
+            if first_unit.parent_unit_id:
+                description = self._parent_description(grouped, analysis.units)
+            else:
+                description = grouped[0][2].description
+            merge_task = Task(
+                id=self._merge_id(merge_number),
+                task_type="merge",
+                query_unit_ids=[unit_idx for unit_idx, *_ in grouped],
+                deps=[leaf_task.id for _, leaf_task, _ in grouped],
+                description=description,
+                node_goal=description,
+                depth=1,
+                merge_instruction=(
+                    "Combine child analyses into one coherent sub-report. "
+                    "Preserve quantitative facts, table coordinates, and source-backed claims."
+                ),
+            )
             tasks.append(merge_task)
-            unit_merge_ids[unit_idx] = merge_task.id
+            for unit_idx, _, _ in grouped:
+                unit_merge_ids[unit_idx] = merge_task.id
             root_deps.append(merge_task.id)
 
         ctx = ToolExecutionContext(
@@ -257,9 +285,7 @@ class Planner:
             if not relevant_unit_ids:
                 continue
             module = self._domain_context.modules[module_id]
-            tool_name = self._primary_domain_tool_name(module)
-            if tool_name is None:
-                continue
+            tool_name = "domain_tool"
             tool_spec = get_tool_spec(tool_name)
             if not tool_spec.accepts(self._intent):
                 continue
@@ -304,6 +330,20 @@ class Planner:
             )
         )
         return tasks
+
+    def _parent_description(
+        self,
+        grouped: list[tuple[int, Task, Task]],
+        units: list[QueryUnit],
+    ) -> str:
+        objectives = [units[unit_idx].objective.strip() for unit_idx, _, _ in grouped]
+        prefixes = [objective.split(": ", 1)[0].strip() for objective in objectives if objective]
+        if prefixes and len(set(prefixes)) == 1:
+            return prefixes[0]
+        for objective in objectives:
+            if objective:
+                return objective
+        return grouped[0][2].description
 
     def _query_analysis_for_plan(self, query: str) -> QueryAnalysis:
         if self._domain_context is None or self._domain_context.query_analysis is None:
@@ -457,23 +497,15 @@ class Planner:
         if self._domain_context is None or self._domain_context.query_analysis is None:
             return registered_tool_names()
 
-        module_allowed = self._module_allowed_tools()
         analysis = self._domain_context.query_analysis
         if analysis is not None and analysis.allowed_tools:
             valid = filter_tool_names(analysis.allowed_tools, intent=self._intent)
-            if module_allowed:
-                scoped = sorted(name for name in valid if name in set(module_allowed))
-                if scoped:
-                    return scoped
-                return module_allowed
             if valid:
                 return sorted(valid)
 
         if not self._domain_context.module_ids:
             return registered_tool_names()
 
-        if module_allowed:
-            return module_allowed
         fallback = filter_tool_names(registered_tool_names(), intent=self._intent)
         return fallback or ["web_search_tool"]
 
@@ -481,20 +513,6 @@ class Planner:
         base = self._allowed_tools_for_context()
         retrieval = [t for t in base if t not in _DOMAIN_TOOL_NAMES]
         return retrieval or ["web_search_tool"]
-
-    def _module_allowed_tools(self) -> list[str]:
-        if self._domain_context is None or not self._domain_context.module_ids:
-            return []
-
-        allowed: set[str] = set()
-        for module_id in self._domain_context.module_ids:
-            module = self._domain_context.modules.get(module_id)
-            if module is None:
-                continue
-            for tool_name in module.tools:
-                if tool_name in registered_tool_names():
-                    allowed.add(tool_name)
-        return filter_tool_names(allowed, intent=self._intent)
 
     @property
     def _ticker(self) -> str:
@@ -508,12 +526,6 @@ class Planner:
         if not self._domain_context or self._domain_context.query_intent is None:
             return QueryIntent(query="")
         return self._domain_context.query_intent
-
-    def _primary_domain_tool_name(self, module: DomainModule) -> str | None:
-        for dt in module.domain_tools:
-            if dt.enabled:
-                return dt.tool
-        return None
 
     def _active_module_ids(self) -> list[str]:
         if self._domain_context is None:
@@ -706,12 +718,10 @@ class Planner:
             if module is None:
                 continue
             lines.append(f"- module={module.id} name={module.name}")
-            if module.tools:
-                lines.append(f"  - tools={', '.join(module.tools)}")
-            for req in module.report_contract:
-                text = req.text.strip()
+            for check in module.contract:
+                text = check.text.strip()
                 if text:
-                    lines.append(f"  - report_requirement={text}")
+                    lines.append(f"  - contract={text}")
             description = module.description.strip()
             if description:
                 lines.append(f"  - description={description}")

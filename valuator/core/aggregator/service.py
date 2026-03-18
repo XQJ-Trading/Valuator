@@ -4,10 +4,11 @@ import json
 import re
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from ...domain import DomainModuleContext
+from ...domain import DomainModuleContext, RubricAspect
 from ...utils.config import config
 from ..contracts.plan import (
     AggregationResult,
+    AspectFacts,
     DomainCoverage,
     ExecutionArtifact,
     ExecutionResult,
@@ -19,6 +20,7 @@ from ..contracts.plan import (
     parse_contract_coverage,
 )
 from ..workspace.service import Workspace
+from .extractor import StructuredExtractor
 from .graph_ops import descendant_leaf_task_ids, post_order_tasks
 from .materials import (
     collect_domain_artifacts,
@@ -58,6 +60,7 @@ class Aggregation:
 
             client = RuntimeGeminiClient(config.agent_model)
         self.client = client
+        self.extractor = StructuredExtractor(client=client)
         self._domain_context: DomainModuleContext | None = None
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
@@ -119,6 +122,13 @@ class Aggregation:
         reports: dict[str, TaskReport],
     ) -> TaskReport:
         task = task_map[task_id]
+        if task.task_type != "merge":
+            await self._map_report_materials_for_task(
+                plan=plan,
+                task=task,
+                artifact_materials=artifact_materials,
+                artifact_index=artifact_index,
+            )
         materials = collect_materials(
             task,
             task_map,
@@ -195,6 +205,13 @@ class Aggregation:
             final_markdown=final_md,
             domain_artifacts=root_domain_artifacts,
         )
+        aspect_coverage = self._aspect_coverage_summary(
+            final_markdown=final_md,
+            root_domain_artifacts=root_domain_artifacts,
+            task_map=task_map,
+            root_task_id=root_task_id or "",
+            artifact_materials=artifact_materials,
+        )
         aggregation_error = self._detect_aggregation_error(final_md)
         return AggregationResult(
             final_markdown=final_md,
@@ -208,6 +225,7 @@ class Aggregation:
             missing_requirement_ids=missing_contract_items,
             covered_requirement_ids=covered_contract_item_ids,
             domain_coverage=domain_coverage,
+            aspect_coverage=aspect_coverage,
             aggregation_error=aggregation_error,
         )
 
@@ -223,7 +241,15 @@ class Aggregation:
         else:
             for mat in materials:
                 lines.append(f"## source: {mat.source}")
-                lines.append(mat.content.strip() or "(empty)")
+                if mat.aspect_facts:
+                    lines.extend(self._render_aspect_facts(mat.aspect_facts))
+                else:
+                    lines.append(mat.content.strip() or "(empty)")
+                if mat.uncovered_aspects:
+                    lines.append("")
+                    lines.append("### uncovered_aspects")
+                    for aspect_id in mat.uncovered_aspects:
+                        lines.append(f"- {aspect_id}")
                 if mat.facts:
                     lines.append("")
                     lines.append("### key-value facts")
@@ -231,6 +257,35 @@ class Aggregation:
                         lines.append(f"- {key}: {value}")
                 lines.append("")
         return TaskReport(task_id=task.id, markdown="\n".join(lines).strip())
+
+    async def _map_report_materials_for_task(
+        self,
+        *,
+        plan: Plan,
+        task: Task,
+        artifact_materials: dict[str, list[ReportMaterial]],
+        artifact_index: dict[str, list[ExecutionArtifact]],
+    ) -> None:
+        materials = artifact_materials.get(task.id, [])
+        artifacts = artifact_index.get(task.id, [])
+        if not materials or not artifacts:
+            return
+
+        rubric = self._task_rubric(plan=plan, task=task)
+        if not rubric:
+            return
+
+        is_aspect_tagged = task.task_type == "module"
+        for material, artifact in zip(materials, artifacts):
+            if material.aspect_facts:
+                continue
+            extraction = await self.extractor.extract(
+                material.content or artifact.content,
+                rubric,
+                is_aspect_tagged=is_aspect_tagged,
+            )
+            material.aspect_facts = list(extraction.aspect_facts)
+            material.uncovered_aspects = list(extraction.uncovered_aspects)
 
     async def _synthesize(
         self,
@@ -275,16 +330,11 @@ class Aggregation:
         contract_section: str,
     ) -> str:
         title = task.description.strip() or task.id
-        material_sections = []
-        for mat in materials:
-            block = f"--- source: {mat.source} ---\n{mat.content}"
-            if mat.facts:
-                fact_lines = "\n".join(
-                    f"- {key}: {value}" for key, value in mat.facts.items()
-                )
-                block += f"\n[KEY_VALUE_FACTS]\n{fact_lines}"
-            material_sections.append(block)
-        materials_text = "\n\n".join(material_sections)
+        aspect_text = self._aspect_facts_section(
+            materials=materials,
+            scoped_domain_ids=scoped_domain_ids,
+        )
+        supporting_text = self._supporting_materials_section(materials)
 
         instruction = ""
         if task.merge_instruction.strip():
@@ -309,7 +359,8 @@ class Aggregation:
         scoped_domain_text = ", ".join(scoped_domain_ids) or "(none)"
         prompt = (
             "당신은 정량적 금융 분석가입니다.\n"
-            "아래 계약과 자료를 빠짐없이 활용하여 보고서 마크다운을 작성하십시오.\n\n"
+            "아래 계약과 자료를 빠짐없이 활용하여 보고서 마크다운을 작성하십시오.\n"
+            "aspect facts가 있으면 그것을 우선적인 합성 입력으로 사용하고, key:value와 evidence를 생략하지 마십시오.\n\n"
             f"[TASK]\n{title}\n\n"
             f"[QUERY]\n{query}\n"
             f"[SCOPED_DOMAINS]\n{scoped_domain_text}\n"
@@ -318,8 +369,11 @@ class Aggregation:
             f"{guidance_text}\n"
             f"{domain_overview_text}\n"
             f"{domain_detail_text}\n"
-            f"[MATERIALS]\n{materials_text}\n\n"
         )
+        if aspect_text:
+            prompt += f"[ASPECT_FACTS]\n{aspect_text}\n\n"
+        if supporting_text:
+            prompt += f"[SUPPORTING_MATERIALS]\n{supporting_text}\n\n"
         if is_root:
             intent_text = self._intent_guidance_text()
             if intent_text:
@@ -331,8 +385,10 @@ class Aggregation:
                 "- 먼저 `## 개괄` 섹션에서 핵심 결론/핵심 가정/핵심 리스크를 요약.\n"
                 "- 이후 `## 도메인 상세` 섹션에서 현재 TASK에 실제로 관련된 도메인만 상세히 작성.\n"
                 "- 도메인 상세 헤더는 `### [DOMAIN:<module_id>] <module_name>` 형식을 사용. `<module_id>`는 반드시 `[SCOPED_DOMAINS]`에 나온 id만 사용.\n"
+                "- aspect facts가 있는 경우 각 도메인 아래에서 `#### [ASPECT:<aspect_id>] <aspect_label>` 형식으로 정리한다.\n"
                 "- 도메인 모듈에 해당하지 않는 내용은 `### [SECTION:제목]` 형태로 작성한다.\n"
-                "- `DOMAIN_EVIDENCE_OVERVIEW`와 `KEY_VALUE_FACTS`를 우선 사용해 key:value를 본문에 명시한다.\n"
+                "- `[ASPECT_FACTS]`와 `DOMAIN_EVIDENCE_OVERVIEW`를 우선 사용해 key:value를 본문에 명시한다.\n"
+                "- `[ASPECT_FACTS]`의 facts key-value는 본문에서 누락하지 않는다.\n"
                 "- Quant 관점으로 재해석하되, 원본 정보와 key:value를 생략하지 않는다.\n"
                 "- 시점은 반드시 절대 표현으로 작성한다 (예: 2025Q3, 2026-01-08).\n"
                 "- 상대 시점 표현(최근, 향후, 단기, 장기, 작년, 내년)을 사용하지 않는다.\n"
@@ -351,6 +407,8 @@ class Aggregation:
             + "규칙:\n"
             + "- 이것은 최종 보고서가 아니라 현재 TASK 전용 중간 합성본이다.\n"
             + "- `[SCOPED_DOMAINS]` 밖의 도메인, 일반 시장 서론, unrelated macro narrative를 추가하지 않는다.\n"
+            + "- aspect facts가 있으면 `### [ASPECT:<aspect_id>] <aspect_label>` 섹션을 사용한다.\n"
+            + "- facts key:value와 evidence를 가능한 한 구조적으로 유지한다.\n"
             + "- 모든 정량 데이터, 종목명, 티커, 가격 좌표, 출처 단서를 빠짐없이 유지한다.\n"
             + "- `### [DOMAIN:<module_id>] <module_name>` 형식은 `[SCOPED_DOMAINS]`에 포함된 도메인에만 사용한다.\n"
             + "- 비도메인 내용은 `### [SECTION:제목]`으로 작성한다.\n"
@@ -415,8 +473,8 @@ class Aggregation:
             if module is None:
                 continue
             lines.append(f"- module={module.id} name={module.name}")
-            for req in module.report_contract:
-                text = req.text
+            for check in module.contract:
+                text = check.text
                 if not text:
                     continue
                 lines.append(f"  - {text}")
@@ -433,11 +491,222 @@ class Aggregation:
             if module is None:
                 continue
             lines.append(f"- module={module.id} name={module.name}")
-            fragment = module.prompt_fragment.strip()
-            if not fragment:
+            guidance = module.persona.strip()
+            if not guidance:
                 continue
-            lines.append(f"  - guidance={fragment}")
+            lines.append(f"  - guidance={guidance}")
         return "\n".join(lines)
+
+    def _task_rubric(self, *, plan: Plan, task: Task) -> list[RubricAspect]:
+        if self._domain_context is None:
+            return []
+        seen: set[tuple[str, str]] = set()
+        rubric: list[RubricAspect] = []
+        module_ids = self._task_domain_ids(plan=plan, task=task)
+        for module_id in module_ids:
+            module = self._domain_context.modules.get(module_id)
+            if module is None:
+                continue
+            for aspect in module.rubric:
+                key = (module_id, aspect.id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rubric.append(aspect)
+        return rubric
+
+    def _render_aspect_facts(self, aspect_facts: list[AspectFacts]) -> list[str]:
+        lines: list[str] = []
+        labels = self._aspect_labels()
+        for item in aspect_facts:
+            label = labels.get(item.aspect_id, "")
+            heading = f"### [ASPECT:{item.aspect_id}]"
+            if label:
+                heading += f" {label}"
+            lines.append(heading)
+            if item.facts:
+                for key, value in item.facts.items():
+                    lines.append(f"- {key}: {value}")
+            if item.evidence.strip():
+                lines.append(f"- evidence: {item.evidence.strip()}")
+            lines.append("")
+        if lines and not lines[-1]:
+            lines.pop()
+        return lines
+
+    def _aspect_facts_section(
+        self,
+        *,
+        materials: list[ReportMaterial],
+        scoped_domain_ids: list[str],
+    ) -> str:
+        grouped: dict[str, list[AspectFacts]] = {}
+        for mat in materials:
+            for item in mat.aspect_facts:
+                grouped.setdefault(item.aspect_id, []).append(item)
+        if not grouped:
+            return ""
+
+        labels = self._aspect_labels()
+        priorities = self._aspect_priorities()
+        lines: list[str] = []
+        for aspect_id, facts_list in grouped.items():
+            label = labels.get(aspect_id, "")
+            heading = f"### {aspect_id}"
+            if label:
+                heading += f" | {label}"
+            lines.append(heading)
+            lines.append(f"- priority: {priorities.get(aspect_id, 'medium')}")
+            for index, facts in enumerate(facts_list, start=1):
+                if facts.facts:
+                    lines.append(f"- facts#{index}:")
+                    for key, value in facts.facts.items():
+                        lines.append(f"  - {key}: {value}")
+                evidence = self._evidence_by_priority(
+                    facts.evidence,
+                    priorities.get(aspect_id, "medium"),
+                )
+                if evidence:
+                    lines.append(f"- evidence#{index}: {evidence}")
+            lines.append("")
+        uncovered = sorted(
+            {
+                aspect_id
+                for mat in materials
+                for aspect_id in mat.uncovered_aspects
+                if aspect_id not in grouped
+            }
+        )
+        if uncovered:
+            lines.append("### uncovered_aspects")
+            for aspect_id in uncovered:
+                lines.append(f"- {aspect_id}")
+            lines.append("")
+        if scoped_domain_ids:
+            lines.append(f"- scoped_domains: {', '.join(scoped_domain_ids)}")
+        return "\n".join(lines).strip()
+
+    def _supporting_materials_section(self, materials: list[ReportMaterial]) -> str:
+        blocks: list[str] = []
+        for mat in materials:
+            block = f"--- source: {mat.source} ---\n{mat.content}"
+            if mat.facts:
+                fact_lines = "\n".join(
+                    f"- {key}: {value}" for key, value in mat.facts.items()
+                )
+                block += f"\n[KEY_VALUE_FACTS]\n{fact_lines}"
+            blocks.append(block)
+        return "\n\n".join(blocks).strip()
+
+    def _aspect_coverage_summary(
+        self,
+        *,
+        final_markdown: str,
+        root_domain_artifacts: list[ExecutionArtifact],
+        task_map: dict[str, Task],
+        root_task_id: str,
+        artifact_materials: dict[str, list[ReportMaterial]],
+    ) -> dict[str, str]:
+        covered_ids = self._parse_aspect_coverage_ids(final_markdown)
+        if not covered_ids:
+            covered_ids = {
+                item.aspect_id
+                for task_id in descendant_leaf_task_ids(root_task_id, task_map)
+                for material in artifact_materials.get(task_id, [])
+                for item in material.aspect_facts
+                if item.aspect_id != "_uncategorized"
+            }
+            covered_ids.update(
+                item.aspect_id
+                for artifact in root_domain_artifacts
+                for item in self._artifact_aspect_facts(artifact)
+                if item.aspect_id != "_uncategorized"
+            )
+        all_ids = [
+            aspect.id
+            for aspect in self._all_active_aspects()
+        ]
+        if not all_ids and root_domain_artifacts:
+            all_ids = sorted(
+                {
+                    item.aspect_id
+                    for artifact in root_domain_artifacts
+                    for item in self._artifact_aspect_facts(artifact)
+                }
+            )
+        return {
+            aspect_id: ("covered" if aspect_id in covered_ids else "uncovered")
+            for aspect_id in all_ids
+        }
+
+    def _parse_aspect_coverage_ids(self, markdown: str) -> set[str]:
+        return {
+            match.group(1).strip()
+            for match in re.finditer(r"\[ASPECT:([^\]]+)\]", markdown or "")
+            if match.group(1).strip()
+        }
+
+    def _aspect_labels(self) -> dict[str, str]:
+        labels: dict[str, str] = {}
+        for aspect in self._all_active_aspects():
+            labels.setdefault(aspect.id, aspect.label)
+        return labels
+
+    def _aspect_priorities(self) -> dict[str, str]:
+        priorities: dict[str, str] = {}
+        for aspect in self._all_active_aspects():
+            priorities.setdefault(aspect.id, aspect.priority)
+        return priorities
+
+    def _all_active_aspects(self) -> list[RubricAspect]:
+        ctx = self._domain_context
+        if ctx is None:
+            return []
+        seen: set[tuple[str, str]] = set()
+        aspects: list[RubricAspect] = []
+        for module_id in ctx.module_ids:
+            module = ctx.modules.get(module_id)
+            if module is None:
+                continue
+            for aspect in module.rubric:
+                key = (module_id, aspect.id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                aspects.append(aspect)
+        return aspects
+
+    def _artifact_aspect_facts(self, artifact: ExecutionArtifact) -> list[AspectFacts]:
+        raw_result = artifact.raw_result or {}
+        findings = str(raw_result.get("findings") or raw_result.get("summary") or "").strip()
+        if not findings:
+            return []
+        rubric = self._module_rubric(artifact.domain_id)
+        if not rubric:
+            return []
+        extraction = self.extractor._parse_tagged(findings, rubric)
+        return extraction.aspect_facts
+
+    def _module_rubric(self, module_id: str) -> list[RubricAspect]:
+        ctx = self._domain_context
+        if ctx is None:
+            return []
+        module = ctx.modules.get(module_id)
+        if module is None:
+            return []
+        return list(module.rubric)
+
+    def _evidence_by_priority(self, evidence: str, priority: str) -> str:
+        text = " ".join((evidence or "").split())
+        if not text:
+            return ""
+        normalized = priority.strip().lower()
+        if normalized == "low":
+            return ""
+        if normalized == "medium":
+            sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
+            return sentence or text
+        return text
 
     def _domain_evidence_sections(
         self,

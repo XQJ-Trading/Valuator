@@ -23,12 +23,6 @@ async def analyze_query(
     )
     intent_tags = _merged_intent_tags(intent.query, analysis)
     domain_ids = analysis.domain_ids or list(domain_index.modules)
-    primary_task_id = None
-    for domain_id in domain_ids:
-        module = modules.get(domain_id)
-        if module and module.tasks:
-            primary_task_id = module.tasks[0].id
-            break
 
     analyzed_intent = analysis.query_intent
     updated_intent = QueryIntent(
@@ -49,7 +43,7 @@ async def analyze_query(
         analysis,
         domain_ids=domain_ids,
         intent_tags=intent_tags,
-        primary_task_id=primary_task_id,
+        primary_task_id=None,
     )
     routed_analysis = _append_recommendation_requirement(routed_analysis)
     routed_analysis = fill_routing_defaults(routed_analysis, modules)

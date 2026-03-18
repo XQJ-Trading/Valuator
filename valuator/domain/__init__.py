@@ -17,19 +17,13 @@ from .query import (
 )
 
 __all__ = [
+    "AcceptanceCheck",
     "Company",
     "DomainIndex",
     "DomainLoader",
     "DomainModule",
     "DomainModuleContext",
-    "DomainReportRequirement",
     "DomainRouter",
-    "DomainTask",
-    "DomainTool",
-    "IrConfig",
-    "IrFieldSpec",
-    "PipelineConfig",
-    "PipelineStage",
     "QueryBreakdown",
     "QueryEntity",
     "QueryAnalysis",
@@ -39,7 +33,8 @@ __all__ = [
     "QueryRequirement",
     "QueryStep",
     "QueryUnit",
-    "StageOutput",
+    "RubricAspect",
+    "expand",
     "analyze_query",
     "build_query_breakdown",
     "fill_routing_defaults",
@@ -47,20 +42,15 @@ __all__ = [
 ]
 
 _LAZY_EXPORTS = {
+    "AcceptanceCheck": (".types", "AcceptanceCheck"),
     "DomainIndex": (".types", "DomainIndex"),
     "DomainLoader": (".loader", "DomainLoader"),
     "DomainModule": (".types", "DomainModule"),
     "DomainModuleContext": (".types", "DomainModuleContext"),
-    "DomainReportRequirement": (".types", "DomainReportRequirement"),
     "DomainRouter": (".router", "DomainRouter"),
-    "DomainTask": (".types", "DomainTask"),
-    "DomainTool": (".types", "DomainTool"),
-    "IrConfig": (".types", "IrConfig"),
-    "IrFieldSpec": (".types", "IrFieldSpec"),
-    "PipelineConfig": (".types", "PipelineConfig"),
-    "PipelineStage": (".types", "PipelineStage"),
     "QueryAnalyzer": (".query_analysis", "QueryAnalyzer"),
-    "StageOutput": (".types", "StageOutput"),
+    "RubricAspect": (".types", "RubricAspect"),
+    "expand": (".expander", "expand"),
     "analyze_query": (".router", "analyze_query"),
 }
 

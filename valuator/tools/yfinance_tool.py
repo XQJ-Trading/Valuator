@@ -162,6 +162,10 @@ class YFinanceBalanceSheetTool(BaseTool):
         current_liabilities, _ = pick(bs, field_map["current_liabilities"].aliases)
         operating_income, _ = pick(fin, field_map["operating_income"].aliases)
         interest_expense, _ = pick(fin, field_map["interest_expense"].aliases)
+        total_revenue, _ = pick(fin, field_map["total_revenue"].aliases)
+        gross_profit, _ = pick(fin, field_map["gross_profit"].aliases)
+        net_income, _ = pick(fin, field_map["net_income"].aliases)
+        ebitda, _ = pick(fin, field_map["ebitda"].aliases)
         operating_cash_flow, _ = pick(cf, field_map["operating_cash_flow"].aliases)
         capex, _ = pick(cf, field_map["capex"].aliases)
         result = {
@@ -175,6 +179,10 @@ class YFinanceBalanceSheetTool(BaseTool):
             "current_liabilities": current_liabilities,
             "operating_income": operating_income,
             "interest_expense": interest_expense,
+            "total_revenue": total_revenue,
+            "gross_profit": gross_profit,
+            "net_income": net_income,
+            "ebitda": ebitda,
             "operating_cash_flow": operating_cash_flow,
             "capex": capex,
         }
@@ -204,8 +212,11 @@ class YFinanceBalanceSheetTool(BaseTool):
             f"current_price={result.get('current_price')}",
             f"trailing_pe={result.get('trailing_pe')}",
             f"price_to_book={result.get('price_to_book')}",
+            f"total_revenue={result.get('total_revenue')}",
+            f"net_income={result.get('net_income')}",
             f"debt_to_equity={result.get('debt_to_equity')}",
             f"current_ratio={result.get('current_ratio')}",
+            f"gross_margin={result.get('gross_margin')}",
             f"interest_coverage={result.get('interest_coverage')}",
             f"free_cash_flow={result.get('free_cash_flow')}",
         ]

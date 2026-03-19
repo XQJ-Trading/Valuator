@@ -194,6 +194,7 @@ class Executor:
         args_hash = self._hash_args(tool_args)
         cached = workspace.find_cached_output(tool_name, args_hash)
         domain_fields: dict[str, Any] = {}
+        tool_metadata: dict[str, Any] = {}
         if cached is not None:
             content = cached
             raw_result = self._extract_raw_result_from_markdown(cached)
@@ -213,46 +214,48 @@ class Executor:
                 )
                 if fallback is None:
                     raise ValueError(result.error or "tool returned failure")
-                content, raw_result = fallback
+                content, raw_result, tool_metadata = fallback
                 domain_fields = build_domain_artifact_fields(
                     tool_name=tool_name,
                     raw_result=raw_result,
-                    metadata={},
+                    metadata=tool_metadata,
                     fallback_domain_id=task.domain_id.strip(),
                 )
             else:
                 payload = result.result
                 if isinstance(payload, ObservationData):
                     payload = payload.data
+                tool_metadata = dict(result.metadata or {})
                 content = self._render_tool_markdown(
                     task_id=task.id,
                     tool_name=tool_name,
                     tool_args=tool_args,
                     payload=payload,
-                    metadata=result.metadata,
+                    metadata=tool_metadata,
                 )
                 raw_result = payload
                 domain_fields = build_domain_artifact_fields(
                     tool_name=tool_name,
                     raw_result=raw_result,
-                    metadata=result.metadata or {},
+                    metadata=tool_metadata,
                     fallback_domain_id=task.domain_id.strip(),
                 )
 
         leaf_output_path = workspace.leaf_output_path(task.id)
         workspace.write_leaf_output(task.id, content)
-        workspace.write_output_metadata(
-            leaf_output_path,
-            {
-                "tool": tool_name,
-                "args_hash": args_hash,
-            },
-        )
+        output_metadata = {
+            "tool": tool_name,
+            "args_hash": args_hash,
+        }
+        if tool_metadata:
+            output_metadata["retrieval"] = tool_metadata
+        workspace.write_output_metadata(leaf_output_path, output_metadata)
         return ExecutionArtifact(
             task_id=task.id,
             path=leaf_output_path,
             content=content,
             raw_result=raw_result,
+            tool_metadata=tool_metadata,
             domain_id=str(domain_fields.get("domain_id") or ""),
             domain_summary=str(domain_fields.get("domain_summary") or ""),
             domain_key_values=dict(domain_fields.get("domain_key_values") or {}),
@@ -303,10 +306,9 @@ class Executor:
             aspect_id = str(getattr(aspect, "id", "")).strip()
             label = str(getattr(aspect, "label", "")).strip()
             description = str(getattr(aspect, "description", "")).strip()
-            priority = str(getattr(aspect, "priority", "medium")).strip() or "medium"
             if not aspect_id:
                 continue
-            line = f"- {aspect_id} ({priority})"
+            line = f"- {aspect_id}"
             if label:
                 line += f": {label}"
             if description:
@@ -404,7 +406,7 @@ class Executor:
         task: Task,
         tool_name: str,
         failure: ToolResult,
-    ) -> tuple[str, Any] | None:
+    ) -> tuple[str, Any, dict[str, Any]] | None:
         fallback = failure.metadata.get("fallback")
         if fallback is None:
             return None
@@ -439,7 +441,7 @@ class Executor:
             payload=payload,
             metadata=fallback_result.metadata,
         )
-        return content, payload
+        return content, payload, dict(fallback_result.metadata or {})
 
     def _get_tool(self, tool_name: str) -> Any:
         cached = self._tool_cache.get(tool_name)

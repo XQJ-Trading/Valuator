@@ -20,7 +20,7 @@ from ...tools.specs import (
     registered_tool_names,
 )
 from ...utils.config import config
-from ..contracts.plan import Plan, ReviewResult, Task, ToolCall
+from ..contracts.plan import AggregationResult, Plan, ReviewResult, Task, ToolCall
 
 if TYPE_CHECKING:
     from ...models.gemini_direct import GeminiClient
@@ -82,7 +82,12 @@ class Planner:
             tasks=tasks,
         )
 
-    async def replan(self, current_plan: Plan, review: ReviewResult) -> Plan:
+    async def replan(
+        self,
+        current_plan: Plan,
+        review: ReviewResult,
+        aggregation: AggregationResult | None = None,
+    ) -> Plan:
         action_map = self._action_reasons_by_unit(
             actions=review.actions,
             unit_count=len(current_plan.analysis.units),
@@ -114,6 +119,7 @@ class Planner:
         existing_signatures = self._existing_leaf_signatures(current_plan.tasks)
         next_leaf_num = self._next_leaf_number(current_plan.tasks)
         reference_date = self._reference_date()
+        aspect_coverage_hint = self._aspect_coverage_text(aggregation)
         sem = asyncio.Semaphore(_LEAF_BUILD_CONCURRENCY)
 
         async def _refresh(unit_idx: int, leaf_number: int) -> Task | None:
@@ -126,6 +132,7 @@ class Planner:
                     items=item_map.get(unit_idx, []),
                     reasons=action_map[unit_idx],
                     domain_coverage_hint=domain_hint,
+                    aspect_coverage_hint=aspect_coverage_hint,
                 )
                 focused_unit = replace(unit, retrieval_query=focused_query)
                 tool = await self._select_tool_for_unit(
@@ -670,6 +677,7 @@ class Planner:
         items: list[Any],
         reasons: list[str],
         domain_coverage_hint: str = "",
+        aspect_coverage_hint: str = "",
     ) -> str:
         chunks: list[str] = [
             f"[OBJECTIVE]\n{unit.objective}",
@@ -683,6 +691,13 @@ class Planner:
             chunks.append(f"[TIME_SCOPE]\n{unit.time_scope.strip()}")
         if domain_coverage_hint.strip():
             chunks.append(domain_coverage_hint.strip())
+        if aspect_coverage_hint.strip():
+            chunks.append(
+                "[ASPECT_COVERAGE]\n"
+                "아래 aspect는 이전 round에서 커버되지 않았다. "
+                "이 aspect를 타겟하는 검색을 설계하라.\n"
+                + aspect_coverage_hint.strip()
+            )
         if items:
             lines = [f"- [{item.id}] {item.acceptance}" for item in items]
             chunks.append("[REQUIREMENTS TO FILL]\n" + "\n".join(lines))
@@ -698,6 +713,21 @@ class Planner:
             if reason_lines:
                 chunks.append("[REVIEW_GAPS]\n" + "\n".join(reason_lines))
         return "\n\n".join(chunks)
+
+    def _aspect_coverage_text(
+        self,
+        aggregation: AggregationResult | None,
+    ) -> str:
+        if aggregation is None or not aggregation.aspect_coverage:
+            return ""
+
+        uncovered: list[str] = []
+        for aspect_id, status in aggregation.aspect_coverage.items():
+            if status == "uncovered":
+                uncovered.append(aspect_id)
+        if not uncovered:
+            return ""
+        return "\n".join(f"- {aspect_id}" for aspect_id in uncovered)
 
     def _task_domain_id_from_unit(self, unit: QueryUnit) -> str:
         if len(unit.domain_ids) == 1:

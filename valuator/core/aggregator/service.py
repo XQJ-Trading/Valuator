@@ -131,10 +131,8 @@ class Aggregation:
             )
         materials = collect_materials(
             task,
-            task_map,
             artifact_materials,
             reports,
-            {},
         )
         domain_artifacts = collect_domain_artifacts(
             task,
@@ -243,8 +241,14 @@ class Aggregation:
                 lines.append(f"## source: {mat.source}")
                 if mat.aspect_facts:
                     lines.extend(self._render_aspect_facts(mat.aspect_facts))
-                else:
-                    lines.append(mat.content.strip() or "(empty)")
+                content = mat.content.strip()
+                if content:
+                    if mat.aspect_facts:
+                        lines.append("")
+                        lines.append("### supporting_content")
+                    lines.append(content)
+                elif not mat.aspect_facts:
+                    lines.append("(empty)")
                 if mat.uncovered_aspects:
                     lines.append("")
                     lines.append("### uncovered_aspects")
@@ -256,7 +260,11 @@ class Aggregation:
                     for key, value in mat.facts.items():
                         lines.append(f"- {key}: {value}")
                 lines.append("")
-        return TaskReport(task_id=task.id, markdown="\n".join(lines).strip())
+        return TaskReport(
+            task_id=task.id,
+            markdown="\n".join(lines).strip(),
+            aspect_facts=self._collect_aspect_facts(materials),
+        )
 
     async def _map_report_materials_for_task(
         self,
@@ -317,7 +325,11 @@ class Aggregation:
         markdown = raw.strip()
         if not markdown:
             raise ValueError(f"empty synthesis output: {task.id}")
-        return TaskReport(task_id=task.id, markdown=markdown)
+        return TaskReport(
+            task_id=task.id,
+            markdown=markdown,
+            aspect_facts=self._collect_aspect_facts(materials),
+        )
 
     def _build_prompt(
         self,
@@ -397,6 +409,8 @@ class Aggregation:
                 "- 투자 액션/트리거는 반드시 수치 임계치를 포함한다.\n"
                 "- QUERY/CONTRACT에 명시된 핵심 기업/티커, 추천 형식, 비교 형식, 시장 제약을 유지하고 다른 종목/테마로 대체하지 않는다.\n"
                 "- [CONTRACT]가 있으면 requirement를 모두 충족하되, 중복 문장/중복 섹션은 만들지 않는다.\n"
+                "- `[SUPPORTING_MATERIALS]`에 근거가 없는 정량 수치는 생성하지 않는다.\n"
+                "- 근거 부족 수치는 '데이터 부족'으로 명시한다.\n"
                 "- 문서 마지막에 `[CONTRACT_COVERAGE]` 한 줄을 추가하고, [CONTRACT_IDS]에 있는 항목 중 본문에서 충족한 모든 requirement id를 쉼표로 빠짐없이 나열한다.\n"
                 "- 마크다운 텍스트만 반환한다 (JSON 래핑 없이).\n"
             )
@@ -534,6 +548,15 @@ class Aggregation:
             lines.pop()
         return lines
 
+    def _collect_aspect_facts(
+        self,
+        materials: list[ReportMaterial],
+    ) -> tuple[AspectFacts, ...]:
+        facts: list[AspectFacts] = []
+        for material in materials:
+            facts.extend(material.aspect_facts)
+        return tuple(facts)
+
     def _aspect_facts_section(
         self,
         *,
@@ -548,7 +571,6 @@ class Aggregation:
             return ""
 
         labels = self._aspect_labels()
-        priorities = self._aspect_priorities()
         lines: list[str] = []
         for aspect_id, facts_list in grouped.items():
             label = labels.get(aspect_id, "")
@@ -556,16 +578,12 @@ class Aggregation:
             if label:
                 heading += f" | {label}"
             lines.append(heading)
-            lines.append(f"- priority: {priorities.get(aspect_id, 'medium')}")
             for index, facts in enumerate(facts_list, start=1):
                 if facts.facts:
                     lines.append(f"- facts#{index}:")
                     for key, value in facts.facts.items():
                         lines.append(f"  - {key}: {value}")
-                evidence = self._evidence_by_priority(
-                    facts.evidence,
-                    priorities.get(aspect_id, "medium"),
-                )
+                evidence = self._evidence_text(facts.evidence)
                 if evidence:
                     lines.append(f"- evidence#{index}: {evidence}")
             lines.append("")
@@ -652,12 +670,6 @@ class Aggregation:
             labels.setdefault(aspect.id, aspect.label)
         return labels
 
-    def _aspect_priorities(self) -> dict[str, str]:
-        priorities: dict[str, str] = {}
-        for aspect in self._all_active_aspects():
-            priorities.setdefault(aspect.id, aspect.priority)
-        return priorities
-
     def _all_active_aspects(self) -> list[RubricAspect]:
         ctx = self._domain_context
         if ctx is None:
@@ -696,17 +708,8 @@ class Aggregation:
             return []
         return list(module.rubric)
 
-    def _evidence_by_priority(self, evidence: str, priority: str) -> str:
-        text = " ".join((evidence or "").split())
-        if not text:
-            return ""
-        normalized = priority.strip().lower()
-        if normalized == "low":
-            return ""
-        if normalized == "medium":
-            sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
-            return sentence or text
-        return text
+    def _evidence_text(self, evidence: str) -> str:
+        return " ".join((evidence or "").split())
 
     def _domain_evidence_sections(
         self,

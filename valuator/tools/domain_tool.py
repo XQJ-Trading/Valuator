@@ -38,8 +38,9 @@ class DomainTool(BaseTool):
             f"[CONTEXT]\n{context or '(none)'}\n\n"
             "[INSTRUCTION]\n"
             "각 aspect별로 `### [ASPECT:{aspect_id}]` 헤더 아래 분석을 작성하라.\n"
-            "high priority aspects는 반드시 커버하라.\n"
             "정량 데이터와 절대 시점은 그대로 유지하라.\n"
+            "[CONTEXT]에 없는 정량 수치(금액, 비율, 날짜)는 생성하지 마라.\n"
+            "정량 근거가 부족하면 '데이터 부족'으로 표시하고 필요한 추가 소스를 명시하라.\n"
         )
         report = await self.client.generate(
             prompt=prompt,

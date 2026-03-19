@@ -75,6 +75,26 @@ STATEMENT_FIELDS: tuple[StatementField, ...] = (
         "income",
     ),
     StatementField(
+        "total_revenue",
+        ("Total Revenue", "Total Revenue USD"),
+        "income",
+    ),
+    StatementField(
+        "gross_profit",
+        ("Gross Profit",),
+        "income",
+    ),
+    StatementField(
+        "net_income",
+        ("Net Income Common Stockholders", "Net Income"),
+        "income",
+    ),
+    StatementField(
+        "ebitda",
+        ("EBITDA", "Normalized EBITDA"),
+        "income",
+    ),
+    StatementField(
         "operating_cash_flow",
         (
             "Total Cash From Operating Activities",
@@ -92,6 +112,7 @@ STATEMENT_FIELDS: tuple[StatementField, ...] = (
 DERIVED_RATIOS: tuple[DerivedMetric, ...] = (
     DerivedMetric("debt_to_equity", "total_liabilities", "total_equity"),
     DerivedMetric("current_ratio", "current_assets", "current_liabilities"),
+    DerivedMetric("gross_margin", "gross_profit", "total_revenue"),
     DerivedMetric(
         "interest_coverage",
         "operating_income",

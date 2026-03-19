@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 from ..contracts.plan import Plan, Task
-from ..contracts.plan import ReportMaterial
 
 
 def post_order_tasks(plan: Plan) -> list[str]:
@@ -22,34 +19,6 @@ def post_order_tasks(plan: Plan) -> list[str]:
     for task_id in sorted(task_map):
         visit(task_id)
     return order
-
-
-def descendant_leaf_artifacts(
-    task_id: str,
-    task_map: dict[str, Task],
-    leaf_artifacts: dict[str, list[ReportMaterial]],
-    cache: dict[str, list[ReportMaterial]],
-) -> list[ReportMaterial]:
-    if task_id in cache:
-        return cache[task_id]
-
-    task = task_map[task_id]
-    if task.task_type != "merge":
-        result = [replace(artifact) for artifact in leaf_artifacts.get(task_id, [])]
-        cache[task_id] = result
-        return result
-
-    result: list[ReportMaterial] = []
-    seen_sources: set[str] = set()
-    for dep in task.deps:
-        for item in descendant_leaf_artifacts(dep, task_map, leaf_artifacts, cache):
-            if item.source in seen_sources:
-                continue
-            result.append(item)
-            seen_sources.add(item.source)
-
-    cache[task_id] = result
-    return result
 
 
 def descendant_leaf_task_ids(root_task_id: str, task_map: dict[str, Task]) -> set[str]:

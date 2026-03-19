@@ -4,12 +4,58 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+
+def _field(default=..., *, default_factory=None, **_kwargs):
+    if default_factory is not None:
+        return default_factory()
+    if default is ...:
+        return None
+    return default
+
+
+class _BaseModel:
+    def __init__(self, **data: object) -> None:
+        for name, value in self.__class__.__dict__.items():
+            if name.startswith("_") or callable(value):
+                continue
+            if name in data:
+                continue
+            if isinstance(value, dict):
+                setattr(self, name, dict(value))
+                continue
+            if isinstance(value, list):
+                setattr(self, name, list(value))
+                continue
+            setattr(self, name, value)
+        for key, value in data.items():
+            setattr(self, key, value)
+
+    @classmethod
+    def model_validate(cls, payload: dict[str, object]) -> "_BaseModel":
+        return cls(**payload)
+
+    def model_dump(self) -> dict[str, object]:
+        return dict(self.__dict__)
+
+
+sys.modules.setdefault(
+    "dotenv",
+    SimpleNamespace(load_dotenv=lambda *_args, **_kwargs: None),
+)
+sys.modules.setdefault(
+    "pydantic",
+    SimpleNamespace(BaseModel=_BaseModel, ConfigDict=dict, Field=_field),
+)
+
+from valuator.core.aggregator.extractor import StructuredExtractor
 from valuator.core.aggregator.service import Aggregation
 from valuator.core.contracts.plan import (
     AggregationResult,
@@ -36,7 +82,6 @@ from valuator.domain import (
     find_company,
 )
 from valuator.tools.base import ToolResult
-from valuator.tools.specs import ToolSpec
 from valuator.utils.config import config as runtime_config
 
 
@@ -126,6 +171,21 @@ class _PlannerClient:
         }
 
 
+class _CapturePlannerClient:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def bind_usage_writer(self, _usage_writer: object) -> None:
+        return None
+
+    async def generate_json(self, **kwargs: object) -> dict[str, object]:
+        self.prompts.append(str(kwargs["prompt"]))
+        return {
+            "tool_name": "web_search_tool",
+            "tool_args": {"query": "aspect gap search"},
+        }
+
+
 class _SynthesisClient:
     def bind_usage_writer(self, _usage_writer: object) -> None:
         return None
@@ -158,6 +218,18 @@ class _FakeGenericDomainTool:
         )
 
 
+class _ThinRetrievalTool:
+    def bind_usage_writer(self, _usage_writer: object) -> None:
+        return None
+
+    async def execute(self, **_kwargs: object) -> ToolResult:
+        return ToolResult(
+            success=True,
+            result={"findings": "No chunks selected"},
+            metadata={"selected_count": 0, "source": "test"},
+        )
+
+
 class _NoopPlanner:
     def bind_usage_writer(self, _usage_writer: object) -> None:
         return None
@@ -179,7 +251,12 @@ class _SamePlanPlanner(_NoopPlanner):
             raise AssertionError("plan_to_return is required")
         return self.plan_to_return
 
-    async def replan(self, current_plan: Plan, _review: ReviewResult) -> Plan:
+    async def replan(
+        self,
+        current_plan: Plan,
+        _review: ReviewResult,
+        _aggregation: AggregationResult | None = None,
+    ) -> Plan:
         self.replan_calls += 1
         return current_plan
 
@@ -244,6 +321,33 @@ class _ReviseReviewer(_PassReviewer):
             status="revise",
             actions=[{"node": 0, "reason": "coverage gap"}],
         )
+
+
+class _ReviewerClient:
+    def bind_usage_writer(self, _usage_writer: object) -> None:
+        return None
+
+    async def generate_json(self, **_kwargs: object) -> dict[str, object]:
+        assessment = {"verdict": "pass", "reason": "ok"}
+        quant = {"grade": "equal", "reason": "ok", "evidence": ["ok"]}
+        return {
+            "missing_requirement_ids": [],
+            "missing_final_domain_ids": [],
+            "actions": [],
+            "self_assessment": {
+                "decomposition": assessment,
+                "execution": assessment,
+                "propagation": assessment,
+                "overall": "ok",
+            },
+            "quant_axes": {
+                "time_alignment": quant,
+                "segment_economics": quant,
+                "capital_efficiency": quant,
+                "risk_transmission": quant,
+                "actionability": quant,
+            },
+        }
 
 
 class PlannerTests(unittest.TestCase):
@@ -334,8 +438,76 @@ class PlannerTests(unittest.TestCase):
 
         self.assertIs(replanned, plan)
 
+    def test_replan_includes_uncovered_aspect_coverage_hint(self) -> None:
+        plan = Plan(
+            query="Analyze Amazon as an investment",
+            analysis=_analysis(),
+            root_task_id="T-ROOT",
+            tasks=[
+                Task(
+                    id="T-LEAF-1",
+                    task_type="leaf",
+                    query_unit_ids=[0],
+                    tool=ToolCall(
+                        name="sec_tool",
+                        args={"ticker": "AMZN", "year": 2025, "query": "valuation"},
+                    ),
+                    domain_id="dcf",
+                    output="/execution/outputs/T-LEAF-1/result.md",
+                    description="Analyze valuation drivers",
+                    depth=2,
+                ),
+                Task(
+                    id="T-MERGE-1",
+                    task_type="merge",
+                    query_unit_ids=[0],
+                    deps=["T-LEAF-1"],
+                    description="Valuation unit",
+                    depth=1,
+                ),
+                Task(
+                    id="T-ROOT",
+                    task_type="merge",
+                    query_unit_ids=[0, 1],
+                    deps=["T-MERGE-1"],
+                    description="Final synthesis",
+                    depth=0,
+                ),
+            ],
+        )
+        review = ReviewResult(actions=[{"node": 0, "reason": "coverage gap"}])
+        aggregation = AggregationResult(
+            aspect_coverage={
+                "discount_rate": "uncovered",
+                "profitability": "covered",
+            }
+        )
+        client = _CapturePlannerClient()
+        planner = Planner(client=client)
+
+        replanned = asyncio.run(planner.replan(plan, review, aggregation))
+
+        self.assertIsNot(replanned, plan)
+        self.assertGreaterEqual(len(client.prompts), 1)
+        self.assertIn("[ASPECT_COVERAGE]", client.prompts[0])
+        self.assertIn("- discount_rate", client.prompts[0])
+        self.assertNotIn("- profitability", client.prompts[0])
+
 
 class AggregationTests(unittest.TestCase):
+    def test_extractor_preserves_full_tagged_evidence_text(self) -> None:
+        evidence = ("discount-rate calibration " * 80) + "TAIL-MARKER"
+        extractor = StructuredExtractor()
+
+        result = extractor._parse_tagged(
+            "### [ASPECT:discount_rate] 할인율과 자본비용\n"
+            f"- summary: {evidence}",
+            [],
+        )
+
+        self.assertEqual(len(result.aspect_facts), 1)
+        self.assertIn("TAIL-MARKER", result.aspect_facts[0].evidence)
+
     def test_aggregation_maps_requirement_coverage_to_final_unit_ids(self) -> None:
         plan = Plan(
             query="Analyze Amazon as an investment",
@@ -466,6 +638,7 @@ class AggregationTests(unittest.TestCase):
         loader = DomainLoader()
         _, modules = loader.load()
         analysis = replace(_analysis(), intent_tags=["recommendation", "single_subject"])
+        long_evidence = ("discount-rate calibration " * 80) + "TAIL-MARKER"
         plan = Plan(
             query="Recommend stocks",
             analysis=analysis,
@@ -520,7 +693,11 @@ class AggregationTests(unittest.TestCase):
                     path="leaf1.md",
                     content="leaf1",
                     raw_result={
-                        "findings": "Valuation evidence",
+                        "findings": (
+                            "### [ASPECT:discount_rate] 할인율과 자본비용\n"
+                            "- wacc: 10%\n"
+                            f"- note: {long_evidence}"
+                        ),
                         "sources": ["https://example.com/dcf"],
                     },
                     domain_id="dcf",
@@ -531,7 +708,10 @@ class AggregationTests(unittest.TestCase):
                     path="leaf2.md",
                     content="leaf2",
                     raw_result={
-                        "findings": "Governance evidence",
+                        "findings": (
+                            "### [ASPECT:governance] 지배구조·이사회 독립성\n"
+                            "- independence: majority independent"
+                        ),
                         "sources": ["https://example.com/ceo"],
                     },
                     domain_id="ceo",
@@ -574,7 +754,14 @@ class AggregationTests(unittest.TestCase):
         self.assertNotIn("module=ceo name=CEO·리더십 분석", non_root_prompt)
         self.assertIn("--- source: leaf1.md ---", non_root_prompt)
         self.assertIn("[SOURCES]\n- https://example.com/dcf", non_root_prompt)
-        self.assertIn("--- source: leaf1.md ---", root_prompt)
+        self.assertIn("[ASPECT_FACTS]", root_prompt)
+        self.assertIn("discount_rate", root_prompt)
+        self.assertIn("TAIL-MARKER", root_prompt)
+        self.assertIn("--- source: report:T-MERGE-1 ---", root_prompt)
+        self.assertIn("## source: leaf1.md", root_prompt)
+        self.assertIn("### supporting_content", root_prompt)
+        self.assertIn("[SOURCES]\n- https://example.com/dcf", root_prompt)
+        self.assertNotIn("--- source: leaf1.md ---", root_prompt)
 
 
 class DomainEvidenceTests(unittest.TestCase):
@@ -660,27 +847,141 @@ class DomainEvidenceTests(unittest.TestCase):
             workspace = Workspace(session_id="S-TEST", base_dir=Path(tmpdir))
             workspace.prepare()
             workspace.set_round(1)
-            with patch.dict(
-                "valuator.core.executor.service._TOOL_CLASSES",
-                {"fake_generic_domain_tool": _FakeGenericDomainTool},
-                clear=False,
-            ), patch.dict(
-                "valuator.tools.specs.TOOL_SPECS",
-                {
-                    "fake_generic_domain_tool": ToolSpec(
-                        name="fake_generic_domain_tool",
-                        required=("query",),
-                        capability="fake test tool",
-                    )
-                },
-                clear=False,
-            ):
-                executor = Executor()
-                result = asyncio.run(executor.execute("module evidence test", plan, workspace))
+            executor = Executor()
+            executor._tool_cache["fake_generic_domain_tool"] = _FakeGenericDomainTool()
+            result = asyncio.run(executor.execute("module evidence test", plan, workspace))
 
         self.assertEqual(result.completed_leaf_task_ids, [])
         self.assertEqual(result.artifacts[0].task_id, "T-MOD-1")
         self.assertEqual(result.artifacts[0].domain_id, "risk_transmission")
+
+    def test_executor_persists_tool_metadata_on_artifacts_and_meta_json(self) -> None:
+        analysis = QueryAnalysis(
+            domain_ids=[],
+            entities={},
+            units=[
+                QueryUnit(
+                    id="Q-001",
+                    objective="Inspect retrieval quality",
+                    retrieval_query="Inspect retrieval quality",
+                    domain_ids=[],
+                    entity_ids=[],
+                    time_scope="2021-01-01 to 2026-03-06",
+                )
+            ],
+            requirements=[],
+            rationale="One-unit analysis.",
+        )
+        plan = Plan(
+            query="thin retrieval metadata",
+            analysis=analysis,
+            root_task_id="T-ROOT",
+            tasks=[
+                Task(
+                    id="T-LEAF-1",
+                    task_type="leaf",
+                    query_unit_ids=[0],
+                    tool=ToolCall(name="fake_thin_tool", args={"query": "thin"}),
+                    output="/execution/outputs/T-LEAF-1/result.md",
+                    description="Thin retrieval test",
+                ),
+                Task(
+                    id="T-ROOT",
+                    task_type="merge",
+                    query_unit_ids=[0],
+                    deps=["T-LEAF-1"],
+                    description="Root",
+                ),
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(session_id="S-TEST", base_dir=Path(tmpdir))
+            workspace.prepare()
+            workspace.set_round(1)
+            executor = Executor()
+            executor._tool_cache["fake_thin_tool"] = _ThinRetrievalTool()
+            result = asyncio.run(executor.execute("thin retrieval metadata", plan, workspace))
+            meta_path = (
+                workspace.session_dir
+                / "execution"
+                / "round-01"
+                / "outputs"
+                / "T-LEAF-1"
+                / "result.md.meta.json"
+            )
+            meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.artifacts[0].tool_metadata["selected_count"], 0)
+        self.assertEqual(meta_payload["retrieval"]["selected_count"], 0)
+
+
+class ReviewerTests(unittest.TestCase):
+    def test_reviewer_forces_fallback_for_thin_retrieval(self) -> None:
+        analysis = QueryAnalysis(
+            domain_ids=[],
+            entities={},
+            units=[
+                QueryUnit(
+                    id="Q-001",
+                    objective="Inspect retrieval quality",
+                    retrieval_query="Inspect retrieval quality",
+                    domain_ids=[],
+                    entity_ids=[],
+                    time_scope="2021-01-01 to 2026-03-06",
+                )
+            ],
+            requirements=[],
+            rationale="One-unit analysis.",
+        )
+        plan = Plan(
+            query="thin retrieval fallback",
+            analysis=analysis,
+            root_task_id="T-ROOT",
+            tasks=[
+                Task(
+                    id="T-LEAF-1",
+                    task_type="leaf",
+                    query_unit_ids=[0],
+                    tool=ToolCall(name="web_search_tool", args={"query": "thin"}),
+                    output="/execution/outputs/T-LEAF-1/result.md",
+                    description="Thin retrieval test",
+                ),
+                Task(
+                    id="T-ROOT",
+                    task_type="merge",
+                    query_unit_ids=[0],
+                    deps=["T-LEAF-1"],
+                    description="Root",
+                ),
+            ],
+        )
+        execution = ExecutionResult(
+            completed_leaf_task_ids=["T-LEAF-1"],
+            artifacts=[
+                ExecutionArtifact(
+                    task_id="T-LEAF-1",
+                    path="leaf1.md",
+                    content="leaf1",
+                    raw_result={"findings": "No chunks selected"},
+                    tool_metadata={"selected_count": 0},
+                )
+            ],
+        )
+        aggregation = AggregationResult(
+            final_markdown="# Final",
+            aggregated_query_unit_ids=[0],
+            final_included_query_unit_ids=[0],
+        )
+        from valuator.core.reviewer.service import Reviewer
+
+        reviewer = Reviewer(client=_ReviewerClient())
+
+        result = asyncio.run(reviewer.review(plan, execution, aggregation))
+
+        self.assertEqual(result.status, "revise")
+        self.assertEqual(result.actions[0]["node"], 0)
+        self.assertEqual(result.coverage_feedback["signals"]["thin_retrieval"], 1)
 
 
 class EngineFinalMarkdownTests(unittest.TestCase):

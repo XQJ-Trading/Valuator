@@ -85,6 +85,16 @@ class Reviewer:
             units_without_leaf_mapping=units_without_leaf_mapping,
             final_empty=final_empty,
         )
+        artifacts_by_task = {artifact.task_id: artifact for artifact in execution.artifacts}
+        thin_retrieval_unit_ids: list[int] = []
+        for task in leaf_tasks.values():
+            artifact = artifacts_by_task.get(task.id)
+            if artifact is None:
+                continue
+            if artifact.tool_metadata.get("selected_count", -1) != 0:
+                continue
+            thin_retrieval_unit_ids.extend(task.query_unit_ids)
+        thin_retrieval_unit_ids = sorted(set(thin_retrieval_unit_ids))
         requirement_ids = [item.id for item in plan.analysis.requirements]
         active_domain_ids = self._active_domain_ids(plan)
         diagnostics = {
@@ -154,6 +164,7 @@ class Reviewer:
             "missing_mapping": len(units_without_leaf_mapping),
             "missing_leaf": len(missing_leaf_task_ids),
             "missing_contract": len(query_signals["missing_ids"]),
+            "thin_retrieval": len(thin_retrieval_unit_ids),
             "final_empty": final_empty,
         }
         aggregation_error = aggregation.aggregation_error.strip()
@@ -171,6 +182,7 @@ class Reviewer:
                 missing_plan_domain_ids=domain_signals["missing_ids_in_plan"],
                 missing_evidence_domain_ids=domain_signals["missing_ids_in_evidence"],
                 unsupported_final_domain_ids=domain_signals["unsupported_final_ids"],
+                thin_retrieval_unit_ids=thin_retrieval_unit_ids,
                 semantic_below_axes=semantic_below_axes,
                 final_empty=final_empty,
                 aggregation_error=bool(aggregation_error),
@@ -195,6 +207,7 @@ class Reviewer:
                             f"unsupported_final_domains={len(domain_signals['unsupported_final_ids'])}, "
                             f"missing_leaf={len(missing_leaf_task_ids)}, "
                             f"missing_mapping={len(units_without_leaf_mapping)}, "
+                            f"thin_retrieval={len(thin_retrieval_unit_ids)}, "
                             f"aggregation_error={int(bool(aggregation_error))}."
                             + semantic_reason
                         ),
@@ -439,6 +452,7 @@ class Reviewer:
         semantic_below_axes: list[str],
         final_empty: bool,
         aggregation_error: bool,
+        thin_retrieval_unit_ids: list[int] | tuple[int, ...] = (),
     ) -> list[int]:
         if final_empty:
             return list(range(len(plan.analysis.units)))
@@ -461,6 +475,7 @@ class Reviewer:
             for idx, unit in enumerate(plan.analysis.units):
                 if domain_id in unit.domain_ids:
                     nodes.add(idx)
+        nodes.update(thin_retrieval_unit_ids)
         if (semantic_below_axes or aggregation_error) and not nodes:
             return list(range(len(plan.analysis.units)))
         return sorted(nodes)

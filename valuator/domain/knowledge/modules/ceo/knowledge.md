@@ -34,6 +34,5 @@ M&A, CAPEX, 주주환원, retained earnings 재투자의 가치 창출 또는 �
 - 각 researched item은 최소 1개 문단의 근거 설명을 포함한다.
 - 숫자 점수는 사용하지 않는다.
 - 각 aspect는 반드시 `### [ASPECT:{aspect_id}] {label}` 헤더 아래에 작성한다.
-- high priority aspect는 누락 없이 커버한다.
 - 마지막에 leadership quality rating은 Excellent, Good, Fair, Poor 중 하나로만 제시한다.
 - 강점, 약점, 핵심 리스크, 장기 투자 판단 근거를 함께 정리한다.

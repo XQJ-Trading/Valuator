@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import Any
 
 from ..contracts.plan import ExecutionArtifact, ReportMaterial, Task, TaskReport
-from .graph_ops import descendant_artifact_task_ids, descendant_leaf_artifacts
+from .graph_ops import descendant_artifact_task_ids
 
 
 def extract_leaf_artifacts(
@@ -37,10 +36,8 @@ def accumulate_execution_artifact(
 
 def collect_materials(
     task: Task,
-    task_map: dict[str, Task],
     leaf_artifacts: dict[str, list[ReportMaterial]],
     reports: dict[str, TaskReport],
-    descendant_cache: dict[str, list[ReportMaterial]],
 ) -> list[ReportMaterial]:
     if task.task_type != "merge":
         return list(leaf_artifacts.get(task.id, []))
@@ -54,14 +51,15 @@ def collect_materials(
         source = f"report:{dep_id}"
         if source in seen_sources:
             continue
-        materials.append(ReportMaterial(source=source, content=child_report.markdown, facts={}))
+        materials.append(
+            ReportMaterial(
+                source=source,
+                content=child_report.markdown,
+                facts={},
+                aspect_facts=list(child_report.aspect_facts),
+            )
+        )
         seen_sources.add(source)
-
-    for item in descendant_leaf_artifacts(task.id, task_map, leaf_artifacts, descendant_cache):
-        if item.source in seen_sources:
-            continue
-        materials.append(replace(item))
-        seen_sources.add(item.source)
     return materials
 
 

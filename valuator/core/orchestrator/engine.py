@@ -13,7 +13,7 @@ from ...domain import (
 )
 from ...utils.config import config
 from ..aggregator.service import Aggregation
-from ..contracts.plan import Plan, ReviewResult
+from ..contracts.plan import AggregationResult, Plan, ReviewResult
 from ..llm_usage import LLMUsageWriter
 from ..reviewer.service import Review
 from ..executor.service import Executor
@@ -112,7 +112,7 @@ class Engine:
         latest_review: ReviewResult | None = None
 
         for round_idx in range(1, max_rounds + 1):
-            review_payload, final_path, review_path = await self._run_round(
+            review_payload, aggregation, final_path, review_path = await self._run_round(
                 query=query,
                 plan=plan,
                 round_idx=round_idx,
@@ -128,7 +128,7 @@ class Engine:
                 break
             if round_idx >= max_rounds:
                 break
-            next_plan = await self.planner.replan(plan, review_payload)
+            next_plan = await self.planner.replan(plan, review_payload, aggregation)
             if next_plan == plan:
                 break
             plan = next_plan
@@ -254,7 +254,7 @@ class Engine:
         on_leaf_start: LeafStartCallback | None = None,
         on_leaf_complete: LeafCompleteCallback | None = None,
         on_task_aggregated: TaskAggregatedCallback | None = None,
-    ) -> tuple[ReviewResult, Path, Path]:
+    ) -> tuple[ReviewResult, AggregationResult, Path, Path]:
         self.workspace.set_round(round_idx)
         self.workspace.write_plan(plan)
         state = RoundState.from_plan(plan)
@@ -291,7 +291,7 @@ class Engine:
         final_path = self.workspace.write_final(aggregation.final_markdown)
         review = await self.reviewer.review(plan, execution, aggregation)
         review_path = self.workspace.write_review(review)
-        return review, final_path, review_path
+        return review, aggregation, final_path, review_path
 
     async def _run_ready_executables(
         self,

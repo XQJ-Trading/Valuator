@@ -230,7 +230,7 @@ class StructuredExtractor:
 
 def _rubric_text(rubric: list[RubricAspect]) -> str:
     return "\n".join(
-        f"- {aspect.id} ({aspect.priority}): {aspect.label} - {aspect.description}"
+        f"- {aspect.id}: {aspect.label} - {aspect.description}"
         for aspect in rubric
     )
 
@@ -261,8 +261,5 @@ def _matches_keywords(text: str, keywords: set[str]) -> bool:
     return any(keyword in lowered for keyword in keywords)
 
 
-def _trim_evidence(text: str, limit: int = 1000) -> str:
-    compact = re.sub(r"\s+", " ", text).strip()
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 3].rstrip() + "..."
+def _trim_evidence(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()

@@ -52,6 +52,7 @@ class ExecutionArtifact:
     path: str
     content: str = ""
     raw_result: dict[str, Any] | None = None
+    tool_metadata: dict[str, Any] = field(default_factory=dict)
     domain_id: str = ""
     domain_summary: str = ""
     domain_key_values: dict[str, str] = field(default_factory=dict)
@@ -84,6 +85,7 @@ class ReportMaterial:
 class TaskReport:
     task_id: str
     markdown: str
+    aspect_facts: tuple[AspectFacts, ...] = ()
 
 
 @dataclass(slots=True)
@@ -126,7 +128,11 @@ def evaluate_contract(
     *,
     covered_item_ids: list[str] | None = None,
 ) -> list[str]:
-    covered = set(parse_contract_coverage(markdown) if covered_item_ids is None else covered_item_ids)
+    covered = set(
+        parse_contract_coverage(markdown)
+        if covered_item_ids is None
+        else covered_item_ids
+    )
     if covered_item_ids is None:
         text = markdown or ""
         for item in requirements:
@@ -149,7 +155,7 @@ def parse_contract_coverage(markdown: str) -> list[str]:
         line = raw_line.strip()
         if not line.startswith(marker):
             continue
-        payload = line[len(marker):].strip()
+        payload = line[len(marker) :].strip()
         if payload.startswith(":"):
             payload = payload[1:].strip()
         return _split_ids(payload)

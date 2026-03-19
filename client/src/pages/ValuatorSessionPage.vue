@@ -12,7 +12,7 @@
           <span class="valuator-live-status" :class="liveStatusClass">{{ liveStatusText }}</span>
           <span class="valuator-live-meta">{{ roundText }}</span>
           <span class="valuator-live-meta">Execution {{ executionCount }} / {{ totalLeafTaskCount }}</span>
-          <span class="valuator-live-meta">Aggregation {{ aggregationCount }} / {{ totalLeafTaskCount }}</span>
+          <span class="valuator-live-meta">Aggregation {{ aggregationCount }} / {{ totalTaskCount }}</span>
           <span class="valuator-live-meta">{{ queryCoverageText }}</span>
           <span class="valuator-live-meta">{{ unitCoverageText }}</span>
           <span class="valuator-live-meta">{{ domainCoverageText }}</span>
@@ -95,26 +95,58 @@
           <div v-if="!selectedGroup" class="valuator-state">Select a sub-query.</div>
 
           <div v-else class="valuator-task-list">
-            <article v-for="task in selectedGroup.tasks" :key="task.id" class="valuator-task-card">
-              <div class="valuator-task-card-header">
-                <router-link
-                  class="valuator-task-link"
-                  :to="`/sessions/${sessionId}/tasks/${task.id}`"
+            <div
+              v-for="node in selectedGroup.taskTree"
+              :key="node.task.id"
+              class="valuator-task-tree-node"
+            >
+              <article class="valuator-task-card">
+                <div class="valuator-task-card-header">
+                  <router-link
+                    class="valuator-task-link"
+                    :to="`/sessions/${sessionId}/tasks/${node.task.id}`"
+                  >
+                    {{ node.task.id }}
+                  </router-link>
+                  <span
+                    class="valuator-task-status"
+                    :class="`valuator-task-status-${node.task.computed_status}`"
+                  >
+                    {{ node.task.computed_status }}
+                  </span>
+                </div>
+                <p class="valuator-task-desc">{{ node.task.description }}</p>
+                <p v-if="showExecution && node.task.tool" class="valuator-task-tool">
+                  tool: {{ node.task.tool.name }}
+                </p>
+              </article>
+              <div v-if="node.children.length > 0" class="valuator-task-children">
+                <article
+                  v-for="child in node.children"
+                  :key="child.task.id"
+                  class="valuator-task-card"
                 >
-                  {{ task.id }}
-                </router-link>
-                <span
-                  class="valuator-task-status"
-                  :class="`valuator-task-status-${task.computed_status}`"
-                >
-                  {{ task.computed_status }}
-                </span>
+                  <div class="valuator-task-card-header">
+                    <router-link
+                      class="valuator-task-link"
+                      :to="`/sessions/${sessionId}/tasks/${child.task.id}`"
+                    >
+                      {{ child.task.id }}
+                    </router-link>
+                    <span
+                      class="valuator-task-status"
+                      :class="`valuator-task-status-${child.task.computed_status}`"
+                    >
+                      {{ child.task.computed_status }}
+                    </span>
+                  </div>
+                  <p class="valuator-task-desc">{{ child.task.description }}</p>
+                  <p v-if="showExecution && child.task.tool" class="valuator-task-tool">
+                    tool: {{ child.task.tool.name }}
+                  </p>
+                </article>
               </div>
-              <p class="valuator-task-desc">{{ task.description }}</p>
-              <p v-if="showExecution && task.tool" class="valuator-task-tool">
-                tool: {{ task.tool.name }}
-              </p>
-            </article>
+            </div>
           </div>
 
           <div class="valuator-subquery-markdown-panel">
@@ -209,6 +241,7 @@ const finalRoute = computed(() => `/sessions/${sessionId.value}/final`)
 const totalLeafTaskCount = computed(
   () => snapshot.value?.plan.tasks.filter((task) => task.task_type === 'leaf').length || 0
 )
+const totalTaskCount = computed(() => snapshot.value?.plan.tasks.length || 0)
 const executionCount = computed(() => snapshot.value?.execution.artifacts.length || 0)
 const aggregationCount = computed(() => snapshot.value?.aggregation.reports.length || 0)
 const progressPercent = computed(() => {
@@ -1020,6 +1053,20 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: white;
   padding: 0.7rem;
+}
+
+.valuator-task-tree-node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.valuator-task-children {
+  padding-left: 1.5rem;
+  border-left: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
 }
 
 .valuator-task-card-header {

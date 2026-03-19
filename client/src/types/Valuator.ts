@@ -177,8 +177,14 @@ export interface ValuatorTaskView extends ValuatorPlanTask {
   computed_status: ValuatorComputedTaskStatus
 }
 
+export interface ValuatorTaskTreeNode {
+  task: ValuatorTaskView
+  children: ValuatorTaskTreeNode[]
+}
+
 export interface ValuatorSubQueryGroup {
   unit_id: number
   label: string
   tasks: ValuatorTaskView[]
+  taskTree: ValuatorTaskTreeNode[]
 }

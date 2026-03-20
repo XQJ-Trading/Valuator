@@ -4,12 +4,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Mapping
 
+from ..domain.company import Company, Listing, Subject, representative_listing
 from ..domain.query import QueryIntent
 
+
 class SubjectIdentityLevel(str, Enum):
-    NAME = "name"
-    CANONICAL = "canonical"
-    VENDOR_SYMBOL = "vendor_symbol"
+    COMPANY = "company"
+    LISTING = "listing"
 
 
 @dataclass(frozen=True)
@@ -18,18 +19,70 @@ class SubjectRequirement:
     market: str = ""
 
     def accepts(self, intent: QueryIntent) -> bool:
-        company = intent.company
-        if company is None:
-            return self.identity_level is None
-        if self.market and company.legacy_market != self.market:
-            return False
-        if self.identity_level is None:
-            return True
-        if self.identity_level is SubjectIdentityLevel.NAME:
-            return bool(company.issuer_name)
-        if self.identity_level is SubjectIdentityLevel.CANONICAL:
-            return True
-        return bool(company.yahoo_symbol)
+        return (
+            project_subject_for_tool(
+                subjects=intent.subjects,
+                requirement=self,
+            )
+            is not None
+        )
+
+
+@dataclass(frozen=True)
+class SubjectProjection:
+    company: Company | None = None
+    listing: Listing | None = None
+
+    @property
+    def company_name(self) -> str:
+        if self.company is None:
+            return ""
+        return self.company.company_name
+
+    @property
+    def security_code(self) -> str:
+        if self.listing is None:
+            return ""
+        return self.listing.security_code
+
+    @property
+    def ticker(self) -> str:
+        if self.listing is None:
+            return ""
+        return self.listing.yahoo_symbol
+
+    @property
+    def market(self) -> str:
+        if self.listing is None:
+            return ""
+        return self.listing.legacy_market
+
+
+def project_subject_for_tool(
+    *,
+    subjects: tuple[Subject, ...],
+    requirement: SubjectRequirement,
+) -> SubjectProjection | None:
+    if not subjects:
+        if requirement.identity_level is None:
+            return SubjectProjection()
+        return None
+
+    if len(subjects) != 1:
+        if requirement.identity_level is None:
+            return SubjectProjection()
+        return None
+
+    subject = subjects[0]
+    projection = SubjectProjection(
+        company=subject.company,
+        listing=representative_listing(subject),
+    )
+    if requirement.market and projection.market != requirement.market:
+        return None
+    if requirement.identity_level is SubjectIdentityLevel.LISTING and projection.listing is None:
+        return None
+    return projection
 
 
 @dataclass(frozen=True)
@@ -39,19 +92,12 @@ class ToolExecutionContext:
     query: str
     unit_query: str
 
-    def values(self) -> dict[str, Any]:
-        company = self.intent.company
-        ticker = ""
-        security_code = ""
-        company_name = ""
-        if company is not None:
-            ticker = company.yahoo_symbol
-            security_code = company.security_code
-            company_name = company.issuer_name
+    def values(self, projection: SubjectProjection) -> dict[str, Any]:
         query_text = self.unit_query.strip() or self.query.strip()
+        company_name = projection.company_name
         return {
-            "ticker": ticker,
-            "security_code": security_code,
+            "ticker": projection.ticker,
+            "security_code": projection.security_code,
             "company_name": company_name,
             "corp": company_name,
             "year": self.reference_year,
@@ -82,7 +128,13 @@ class ToolSpec:
         return self.subject_requirement.accepts(intent)
 
     def build_args(self, context: ToolExecutionContext) -> dict[str, Any]:
-        values = context.values()
+        projection = project_subject_for_tool(
+            subjects=context.intent.subjects,
+            requirement=self.subject_requirement,
+        )
+        if projection is None:
+            raise ValueError(f"subject requirement not satisfied for {self.name}")
+        values = context.values(projection)
         args: dict[str, Any] = {}
         for key in (*self.required, *self.optional):
             sources = self.arg_sources.get(key, (key,))
@@ -115,7 +167,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         required=("ticker", "year", "query"),
         capability="10-K filings and disclosures",
         subject_requirement=SubjectRequirement(
-            identity_level=SubjectIdentityLevel.CANONICAL,
+            identity_level=SubjectIdentityLevel.LISTING,
             market="USA",
         ),
     ),
@@ -128,7 +180,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "(market_cap, price, PE, PBR)"
         ),
         subject_requirement=SubjectRequirement(
-            identity_level=SubjectIdentityLevel.VENDOR_SYMBOL
+            identity_level=SubjectIdentityLevel.LISTING
         ),
     ),
     "code_execute_tool": ToolSpec(
@@ -151,7 +203,6 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "domain_id",
         ),
         capability="aspect-guided domain analysis via persona/rubric/format",
-        subject_requirement=SubjectRequirement(identity_level=SubjectIdentityLevel.NAME),
     ),
 }
 

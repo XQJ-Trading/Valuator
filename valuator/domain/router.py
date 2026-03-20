@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from .company import merge_subjects
 from .query import QueryAnalysis, QueryIntent, QueryRequirement, fill_routing_defaults
 from .query_analysis import QueryAnalyzer
 from .types import DomainIndex, DomainModule
@@ -21,27 +22,19 @@ async def analyze_query(
         index=domain_index,
         modules=modules,
     )
-    intent_tags = _merged_intent_tags(intent.query, analysis)
     domain_ids = analysis.domain_ids or list(domain_index.modules)
 
     analyzed_intent = analysis.query_intent
     updated_intent = QueryIntent(
         query=intent.query,
-        company=intent.company or analyzed_intent.company,
-        entities=list(
-            dict.fromkeys(
-                [
-                    *analysis.entities.values(),
-                    *_intent_labels(analyzed_intent),
-                    *_intent_labels(intent),
-                    *intent.entities,
-                ]
-            )
-        ),
+        subjects=merge_subjects(intent.subjects, analyzed_intent.subjects),
+        entities=tuple(dict.fromkeys([*analyzed_intent.entities, *intent.entities])),
     )
+    intent_tags = _merged_intent_tags(analysis, updated_intent)
     routed_analysis = replace(
         analysis,
         domain_ids=domain_ids,
+        query_intent=updated_intent,
         intent_tags=intent_tags,
         primary_task_id=None,
     )
@@ -68,73 +61,12 @@ class DomainRouter:
         return await analyze_query(intent, index, modules, self._analyzer)
 
 
-def _merged_intent_tags(query: str, analysis: QueryAnalysis) -> list[str]:
+def _merged_intent_tags(
+    analysis: QueryAnalysis,
+    intent: QueryIntent,
+) -> list[str]:
     tags = [tag.strip().lower() for tag in analysis.intent_tags if tag.strip()]
-    if tags:
-        return list(dict.fromkeys(tags))
-    return _infer_intent_tags(query=query, analysis=analysis)
-
-
-def _infer_intent_tags(*, query: str, analysis: QueryAnalysis) -> list[str]:
-    text = query.strip().lower()
-    tags: list[str] = []
-    concrete_entities = list(
-        dict.fromkeys(
-            [
-                *analysis.entities.values(),
-                *_intent_labels(analysis.query_intent),
-            ]
-        )
-    )
-
-    if _contains_any(
-        text,
-        (
-            "recommend",
-            "recommended",
-            "pick",
-            "picks",
-            "idea",
-            "ideas",
-            "top",
-            "best",
-            "추천",
-            "종목 추천",
-            "픽",
-            "유망주",
-            "매수 추천",
-        ),
-    ):
-        tags.append("recommendation")
-    if _contains_any(
-        text,
-        (
-            "screen",
-            "screening",
-            "shortlist",
-            "candidate",
-            "candidates",
-            "선별",
-            "스크리닝",
-            "후보",
-            "찾아줘",
-        ),
-    ):
-        tags.append("screening")
-    if _contains_any(text, ("compare", "comparison", "versus", "vs.", "비교", "대비", "vs")):
-        tags.append("comparison")
-    if _contains_any(
-        text,
-        ("portfolio", "allocation", "weighting", "basket", "포트폴리오", "비중", "배분", "바스켓"),
-    ):
-        tags.append("portfolio")
-
-    if concrete_entities:
-        tags.append("single_subject" if len(concrete_entities) == 1 else "multi_subject")
-    elif "recommendation" in tags or "screening" in tags:
-        tags.append("multi_subject")
-
-    return list(dict.fromkeys(tags))
+    return list(dict.fromkeys([*tags, *_subject_intent_tags(intent)]))
 
 
 def _append_recommendation_requirement(analysis: QueryAnalysis) -> QueryAnalysis:
@@ -162,11 +94,10 @@ def _append_recommendation_requirement(analysis: QueryAnalysis) -> QueryAnalysis
     return replace(analysis, requirements=[*analysis.requirements, requirement])
 
 
-def _intent_labels(intent: QueryIntent) -> list[str]:
-    if intent.company is not None:
-        return [intent.company.issuer_name]
+def _subject_intent_tags(intent: QueryIntent) -> list[str]:
+    subject_count = len(intent.subjects)
+    if subject_count == 1:
+        return ["single_subject"]
+    if subject_count > 1:
+        return ["multi_subject"]
     return []
-
-
-def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword in text for keyword in keywords)

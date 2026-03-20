@@ -14,9 +14,12 @@ from ...domain import (
     QueryUnit,
 )
 from ...tools.specs import (
+    SubjectIdentityLevel,
+    SubjectRequirement,
     ToolExecutionContext,
     filter_tool_names,
     get_tool_spec,
+    project_subject_for_tool,
     registered_tool_names,
 )
 from ...utils.config import config
@@ -239,7 +242,6 @@ class Planner:
             )
         )
 
-        unit_merge_ids: dict[int, str] = {}
         root_deps: list[str] = []
         merge_groups: dict[str, list[tuple[int, Task, Task]]] = {}
         group_order: list[str] = []
@@ -272,55 +274,7 @@ class Planner:
                 ),
             )
             tasks.append(merge_task)
-            for unit_idx, _, _ in grouped:
-                unit_merge_ids[unit_idx] = merge_task.id
             root_deps.append(merge_task.id)
-
-        ctx = ToolExecutionContext(
-            intent=self._intent,
-            reference_year=reference_date.year,
-            query=query,
-            unit_query=query,
-        )
-        next_module_num = 1
-        for module_id in self._active_module_ids():
-            relevant_unit_ids = [
-                idx
-                for idx, unit in enumerate(analysis.units)
-                if module_id in unit.domain_ids
-            ]
-            if not relevant_unit_ids:
-                continue
-            module = self._domain_context.modules[module_id]
-            tool_name = "domain_tool"
-            tool_spec = get_tool_spec(tool_name)
-            if not tool_spec.accepts(self._intent):
-                continue
-            args = tool_spec.build_args(ctx)
-            dep_ids = [
-                unit_merge_ids[idx]
-                for idx in relevant_unit_ids
-                if idx in unit_merge_ids
-            ]
-            if not dep_ids:
-                continue
-            task_id = self._module_id(next_module_num)
-            next_module_num += 1
-            tasks.append(
-                Task(
-                    id=task_id,
-                    task_type="module",
-                    query_unit_ids=list(relevant_unit_ids),
-                    deps=dep_ids,
-                    tool=ToolCall(name=tool_name, args=args),
-                    domain_id=module_id,
-                    output=f"/execution/outputs/{task_id}/result.md",
-                    description=module.name,
-                    node_goal=module.description or module.name,
-                    depth=1,
-                )
-            )
-            root_deps.append(task_id)
 
         tasks.append(
             Task(
@@ -523,25 +477,21 @@ class Planner:
 
     @property
     def _ticker(self) -> str:
-        company = self._intent.company
-        if company is None:
+        projection = project_subject_for_tool(
+            subjects=self._intent.subjects,
+            requirement=SubjectRequirement(
+                identity_level=SubjectIdentityLevel.LISTING
+            ),
+        )
+        if projection is None:
             return ""
-        return company.yahoo_symbol
+        return projection.ticker
 
     @property
     def _intent(self) -> QueryIntent:
         if not self._domain_context or self._domain_context.query_intent is None:
             return QueryIntent(query="")
         return self._domain_context.query_intent
-
-    def _active_module_ids(self) -> list[str]:
-        if self._domain_context is None:
-            return []
-        return [
-            module_id
-            for module_id in self._domain_context.module_ids
-            if module_id in self._domain_context.modules
-        ]
 
     def _refresh_parent_ids_by_unit(self, tasks: list[Task]) -> dict[int, str]:
         parent_by_child: dict[str, list[Task]] = {}
@@ -600,9 +550,6 @@ class Planner:
     def _merge_id(self, number: int) -> str:
         return f"T-MERGE-{number}"
 
-    def _module_id(self, number: int) -> str:
-        return f"T-MOD-{number}"
-
     def _reference_date(self) -> date:
         if self._now_utc is not None:
             return self._now_utc.date()
@@ -617,6 +564,8 @@ class Planner:
             "Combine all child analyses into a single coherent investment report.",
             "Use absolute time anchors (for example, 2025Q3, 2026-01-08) instead of relative phrases.",
             "Preserve quantitative facts, explain risk transmission to P&L/FCF, and conclude with trigger-based portfolio actions.",
+            "Treat child merge outputs as the primary factual record and do not replace their structure with generic narrative.",
+            "If child merge outputs contain tables, coordinate systems, thresholds, or comparison blocks, preserve them explicitly rather than collapsing them into generic narrative.",
         ]
         intent_tags = {tag.strip().lower() for tag in analysis.intent_tags if tag.strip()}
         if "recommendation" in intent_tags or "screening" in intent_tags:
@@ -735,7 +684,7 @@ class Planner:
         return ""
 
     def _has_concrete_subject(self) -> bool:
-        return self._intent.company is not None
+        return bool(self._intent.subjects)
 
     def _domain_context_block(self) -> str:
         ctx = self._domain_context

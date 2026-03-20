@@ -79,7 +79,7 @@ from valuator.domain import (
     QueryIntent,
     QueryRequirement,
     QueryUnit,
-    find_company,
+    resolve_subjects,
 )
 from valuator.tools.base import ToolResult
 from valuator.utils.config import config as runtime_config
@@ -92,14 +92,12 @@ def _intent(
     security_code: str = "",
     company_name: str = "",
 ) -> QueryIntent:
-    company = find_company(
+    subjects = resolve_subjects(
         ticker=ticker,
         security_code=security_code,
-        company_name=company_name,
+        company_names=(company_name,) if company_name else (),
     )
-    if company is None:
-        return QueryIntent(query=query)
-    return QueryIntent(query=query, company=company)
+    return QueryIntent(query=query, subjects=subjects)
 
 
 def _analysis() -> QueryAnalysis:
@@ -286,14 +284,25 @@ class _StaticAggregator:
 
     async def build_task_report(self, **kwargs: object) -> TaskReport:
         task_id = str(kwargs["task_id"])
-        return TaskReport(task_id=task_id, markdown=f"# Report for {task_id}")
+        return TaskReport(
+            task_id=task_id,
+            markdown=f"# Report for {task_id}",
+            ledger={"task_id": task_id, "source_reports": ["T-LEAF-1"]},
+        )
 
     def finalize_aggregation(self, **_kwargs: object) -> AggregationResult:
         return AggregationResult(
             final_markdown="# Final\n\n[CONTRACT_COVERAGE] R-001",
+            root_task_id="T-ROOT",
             aggregated_query_unit_ids=[0],
             final_included_query_unit_ids=[0],
             covered_requirement_ids=["R-001"],
+            root_ledger={"task_id": "T-ROOT", "source_reports": ["T-LEAF-1"]},
+            final_trace={
+                "root_task_id": "T-ROOT",
+                "source_reports": ["T-LEAF-1"],
+                "covered_requirement_ids": ["R-001"],
+            },
         )
 
 
@@ -377,13 +386,10 @@ class PlannerTests(unittest.TestCase):
 
         self.assertEqual(plan.analysis.units, _analysis().units)
         self.assertEqual(len(leaf_tasks), 2)
-        self.assertEqual(len(module_tasks), 2)
+        self.assertEqual(len(module_tasks), 0)
         self.assertEqual(len(merge_tasks), 3)
-        self.assertEqual(sorted(task.domain_id for task in module_tasks), ["ceo", "dcf"])
-        self.assertEqual(sorted(task.tool.name for task in module_tasks), ["domain_tool", "domain_tool"])
-        self.assertNotIn("domain_guide", module_tasks[0].tool.args)
-        self.assertNotIn("pipeline_config", module_tasks[0].tool.args)
-        self.assertEqual(len(root_task.deps), 4)
+        self.assertEqual(len(root_task.deps), 2)
+        self.assertEqual(sorted(root_task.deps), ["T-MERGE-1", "T-MERGE-2"])
 
     def test_replan_stops_after_two_leaf_attempts_for_same_unit(self) -> None:
         plan = Plan(
@@ -752,16 +758,122 @@ class AggregationTests(unittest.TestCase):
         root_prompt = client.prompts[-1]
         self.assertIn("[SCOPED_DOMAINS]\ndcf", non_root_prompt)
         self.assertNotIn("module=ceo name=CEO·리더십 분석", non_root_prompt)
-        self.assertIn("--- source: leaf1.md ---", non_root_prompt)
+        self.assertIn("--- source: report:T-LEAF-1 ---", non_root_prompt)
+        self.assertIn("## source: leaf1.md", non_root_prompt)
         self.assertIn("[SOURCES]\n- https://example.com/dcf", non_root_prompt)
         self.assertIn("[ASPECT_FACTS]", root_prompt)
         self.assertIn("discount_rate", root_prompt)
         self.assertIn("TAIL-MARKER", root_prompt)
         self.assertIn("--- source: report:T-MERGE-1 ---", root_prompt)
-        self.assertIn("## source: leaf1.md", root_prompt)
-        self.assertIn("### supporting_content", root_prompt)
-        self.assertIn("[SOURCES]\n- https://example.com/dcf", root_prompt)
+        self.assertIn("child merge report를 1차 사실 원장으로 사용", root_prompt)
+        self.assertIn("### [DOMAIN:dcf] scoped section", root_prompt)
         self.assertNotIn("--- source: leaf1.md ---", root_prompt)
+
+    def test_root_prompt_filters_leaf_domain_evidence_and_compacts_module_summaries(self) -> None:
+        loader = DomainLoader()
+        _, modules = loader.load()
+        analysis = replace(_analysis(), intent_tags=["single_subject"])
+        huge_summary = ("module summary " * 200) + "TAIL-END"
+        plan = Plan(
+            query="Analyze Amazon",
+            analysis=analysis,
+            root_task_id="T-ROOT",
+            tasks=[
+                Task(
+                    id="T-LEAF-1",
+                    task_type="leaf",
+                    query_unit_ids=[0],
+                    tool=ToolCall(name="sec_tool", args={"ticker": "AMZN"}),
+                    domain_id="dcf",
+                    output="/execution/outputs/T-LEAF-1/result.md",
+                    description="Leaf valuation",
+                ),
+                Task(
+                    id="T-MERGE-1",
+                    task_type="merge",
+                    query_unit_ids=[0],
+                    deps=["T-LEAF-1"],
+                    description="Merged valuation",
+                ),
+                Task(
+                    id="T-MOD-1",
+                    task_type="module",
+                    query_unit_ids=[0],
+                    deps=["T-MERGE-1"],
+                    tool=ToolCall(name="domain_tool", args={"query": "valuation"}),
+                    domain_id="dcf",
+                    output="/execution/outputs/T-MOD-1/result.md",
+                    description="DCF module",
+                ),
+                Task(
+                    id="T-ROOT",
+                    task_type="merge",
+                    query_unit_ids=[0],
+                    deps=["T-MERGE-1", "T-MOD-1"],
+                    description="Root synthesis",
+                ),
+            ],
+        )
+        execution = ExecutionResult(
+            completed_leaf_task_ids=["T-LEAF-1"],
+            artifacts=[
+                ExecutionArtifact(
+                    task_id="T-LEAF-1",
+                    path="leaf1.md",
+                    content="leaf1",
+                    raw_result={
+                        "findings": "### [ASPECT:discount_rate] 할인율과 자본비용\n- wacc: 10%",
+                    },
+                    domain_id="dcf",
+                    domain_summary="Leaf valuation evidence",
+                    domain_payload={"raw": "LEAF-PAYLOAD"},
+                ),
+                ExecutionArtifact(
+                    task_id="T-MOD-1",
+                    path="mod1.md",
+                    content="mod1",
+                    raw_result={"findings": huge_summary},
+                    domain_id="dcf",
+                    domain_summary=huge_summary,
+                    domain_payload={"raw": "MODULE-PAYLOAD"},
+                ),
+            ],
+        )
+        client = _CaptureSynthesisClient()
+        aggregation = Aggregation(client=client)
+        aggregation.bind_domain_context(
+            DomainModuleContext(
+                module_ids=["dcf"],
+                modules={"dcf": modules["dcf"]},
+                query_intent=_intent(
+                    query="Analyze Amazon",
+                    ticker="AMZN",
+                    company_name="Amazon",
+                ),
+                query_analysis=analysis,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(session_id="S-TEST", base_dir=Path(tmpdir))
+            workspace.prepare()
+            workspace.set_round(1)
+            asyncio.run(
+                aggregation.aggregate(
+                    "Analyze Amazon",
+                    plan,
+                    execution,
+                    workspace,
+                )
+            )
+
+        root_prompt = client.prompts[-1]
+        self.assertIn("[DOMAIN_EVIDENCE_OVERVIEW]", root_prompt)
+        self.assertIn("module=dcf name=DCF 밸류에이션", root_prompt)
+        self.assertIn("evidence#1.task_id: T-MOD-1", root_prompt)
+        self.assertNotIn("LEAF-PAYLOAD", root_prompt)
+        self.assertNotIn("MODULE-PAYLOAD", root_prompt)
+        self.assertNotIn("TAIL-END", root_prompt)
 
 
 class DomainEvidenceTests(unittest.TestCase):
@@ -911,9 +1023,21 @@ class DomainEvidenceTests(unittest.TestCase):
                 / "result.md.meta.json"
             )
             meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            json_path = (
+                workspace.session_dir
+                / "execution"
+                / "round-01"
+                / "outputs"
+                / "T-LEAF-1"
+                / "result.json"
+            )
+            json_payload = json.loads(json_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result.artifacts[0].tool_metadata["selected_count"], 0)
         self.assertEqual(meta_payload["retrieval"]["selected_count"], 0)
+        self.assertEqual(json_payload["task_id"], "T-LEAF-1")
+        self.assertEqual(json_payload["tool_name"], "fake_thin_tool")
+        self.assertEqual(json_payload["tool_metadata"]["selected_count"], 0)
 
 
 class ReviewerTests(unittest.TestCase):
@@ -1047,9 +1171,15 @@ class EngineFinalMarkdownTests(unittest.TestCase):
 
             result = asyncio.run(engine.run_with_plan(plan.query, plan))
             final_text = Path(result["final_path"]).read_text(encoding="utf-8")
+            trace_text = (
+                workspace.session_dir / "output" / "final.trace.json"
+            ).read_text(encoding="utf-8")
+            trace_payload = json.loads(trace_text)
 
         self.assertEqual(final_text, "# Final\n\n[CONTRACT_COVERAGE] R-001\n")
         self.assertNotIn("## Query 분석 요약", final_text)
+        self.assertEqual(trace_payload["root_task_id"], "T-ROOT")
+        self.assertEqual(trace_payload["source_reports"], ["T-LEAF-1"])
 
     def test_engine_stops_when_replan_returns_same_plan(self) -> None:
         analysis = QueryAnalysis(

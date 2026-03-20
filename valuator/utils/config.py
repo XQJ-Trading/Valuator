@@ -7,6 +7,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
+
 def _split_csv(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
@@ -32,6 +35,7 @@ def _as_int(value: str | None, default: int) -> int:
 class Config:
     agent_model: str
     google_api_key: str | None
+    opendart_api_key: str | None
     perplexity_api_key: str | None
     supported_models: tuple[str, ...]
     domain_arch_enabled: bool
@@ -40,9 +44,24 @@ class Config:
     code_execution_allowed_imports: tuple[str, ...]
 
 
+def load_project_env() -> None:
+    load_dotenv(ROOT_DIR / ".env")
+
+
+def get_env(name: str, *, required: bool = False) -> str:
+    load_project_env()
+    value = os.getenv(name, "").strip()
+    if value or not required:
+        return value
+    raise RuntimeError(f"{name} not set")
+
+
+def get_opendart_api_key(*, required: bool = False) -> str:
+    return get_env("OPENDART_API_KEY", required=required)
+
+
 def load_config() -> Config:
-    root = Path(__file__).resolve().parents[2]
-    load_dotenv(root / ".env")
+    load_project_env()
     model = os.getenv("AGENT_MODEL", "gemini-3-flash-preview")
     supported = _split_csv(os.getenv("SUPPORTED_MODELS")) or (
         model,
@@ -51,6 +70,7 @@ def load_config() -> Config:
     return Config(
         agent_model=model,
         google_api_key=os.getenv("GOOGLE_API_KEY"),
+        opendart_api_key=os.getenv("OPENDART_API_KEY"),
         perplexity_api_key=os.getenv("PPLX_API_KEY"),
         supported_models=tuple(dict.fromkeys(supported)),
         domain_arch_enabled=_as_bool(
@@ -59,9 +79,7 @@ def load_config() -> Config:
         event_layer_enabled=_as_bool(
             os.getenv("VALUATOR_EVENT_LAYER_ENABLED"), default=False
         ),
-        code_execution_timeout=_as_int(
-            os.getenv("CODE_EXECUTION_TIMEOUT"), default=10
-        ),
+        code_execution_timeout=_as_int(os.getenv("CODE_EXECUTION_TIMEOUT"), default=10),
         code_execution_allowed_imports=_split_csv(
             os.getenv("CODE_EXECUTION_ALLOWED_IMPORTS")
         ),

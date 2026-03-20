@@ -21,7 +21,7 @@ from valuator.domain import (
     QueryIntent,
     QueryRequirement,
     QueryUnit,
-    find_company,
+    resolve_subjects,
 )
 
 
@@ -32,14 +32,12 @@ def _intent(
     security_code: str = "",
     company_name: str = "",
 ) -> QueryIntent:
-    company = find_company(
+    subjects = resolve_subjects(
         ticker=ticker,
         security_code=security_code,
-        company_name=company_name,
+        company_names=(company_name,) if company_name else (),
     )
-    if company is None:
-        return QueryIntent(query=query)
-    return QueryIntent(query=query, company=company)
+    return QueryIntent(query=query, subjects=subjects)
 
 
 def _query_analysis() -> QueryAnalysis:

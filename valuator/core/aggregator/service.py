@@ -99,6 +99,7 @@ class Aggregation:
             )
             reports[task_id] = report
             workspace.write_aggregation_report(task_id, report.markdown)
+            workspace.write_aggregation_ledger(task_id, report.ledger)
             if on_task_aggregated is not None:
                 await on_task_aggregated(task_map[task_id], index, total_tasks)
 
@@ -122,6 +123,7 @@ class Aggregation:
         reports: dict[str, TaskReport],
     ) -> TaskReport:
         task = task_map[task_id]
+        is_root = task.id == (plan.root_task_id or "")
         if task.task_type != "merge":
             await self._map_report_materials_for_task(
                 plan=plan,
@@ -134,19 +136,39 @@ class Aggregation:
             artifact_materials,
             reports,
         )
+        if is_root:
+            filtered_materials: list[ReportMaterial] = []
+            for material in materials:
+                if not material.source.startswith("report:"):
+                    filtered_materials.append(material)
+                    continue
+                dep_id = material.source.split(":", 1)[1]
+                dep_task = task_map.get(dep_id)
+                if dep_task is not None and dep_task.task_type == "module":
+                    continue
+                filtered_materials.append(material)
+            materials = filtered_materials
         domain_artifacts = collect_domain_artifacts(
             task,
             task_map,
             artifact_index,
         )
+        if is_root:
+            domain_artifacts = [
+                artifact
+                for artifact in domain_artifacts
+                if task_map.get(artifact.task_id) is not None
+                and task_map[artifact.task_id].task_type == "module"
+            ]
         if task.task_type != "merge":
-            return self._leaf_passthrough(task=task, materials=materials)
+            return self._leaf_passthrough(plan=plan, task=task, materials=materials)
 
         contract_section = self._contract_section(plan, task_id)
         scoped_domain_ids = self._task_domain_ids(plan=plan, task=task)
         report = await self._synthesize(
+            plan=plan,
             task=task,
-            is_root=task.id == (plan.root_task_id or ""),
+            is_root=is_root,
             query=query,
             materials=materials,
             domain_artifacts=domain_artifacts,
@@ -211,6 +233,15 @@ class Aggregation:
             artifact_materials=artifact_materials,
         )
         aggregation_error = self._detect_aggregation_error(final_md)
+        root_ledger = dict(root_report.ledger)
+        final_trace = self._build_final_trace(
+            root_task_id=root_task_id or "",
+            root_ledger=root_ledger,
+            covered_requirement_ids=covered_contract_item_ids,
+            missing_requirement_ids=missing_contract_items,
+            domain_coverage=domain_coverage,
+            aspect_coverage=aspect_coverage,
+        )
         return AggregationResult(
             final_markdown=final_md,
             root_task_id=root_task_id or "",
@@ -225,11 +256,14 @@ class Aggregation:
             domain_coverage=domain_coverage,
             aspect_coverage=aspect_coverage,
             aggregation_error=aggregation_error,
+            root_ledger=root_ledger,
+            final_trace=final_trace,
         )
 
     def _leaf_passthrough(
         self,
         *,
+        plan: Plan,
         task: Task,
         materials: list[ReportMaterial],
     ) -> TaskReport:
@@ -264,6 +298,7 @@ class Aggregation:
             task_id=task.id,
             markdown="\n".join(lines).strip(),
             aspect_facts=self._collect_aspect_facts(materials),
+            ledger=self._build_task_ledger(plan=plan, task=task, materials=materials),
         )
 
     async def _map_report_materials_for_task(
@@ -297,6 +332,8 @@ class Aggregation:
 
     async def _synthesize(
         self,
+        *,
+        plan: Plan,
         task: Task,
         is_root: bool,
         query: str,
@@ -329,6 +366,7 @@ class Aggregation:
             task_id=task.id,
             markdown=markdown,
             aspect_facts=self._collect_aspect_facts(materials),
+            ledger=self._build_task_ledger(plan=plan, task=task, materials=materials),
         )
 
     def _build_prompt(
@@ -399,6 +437,9 @@ class Aggregation:
                 "- 도메인 상세 헤더는 `### [DOMAIN:<module_id>] <module_name>` 형식을 사용. `<module_id>`는 반드시 `[SCOPED_DOMAINS]`에 나온 id만 사용.\n"
                 "- aspect facts가 있는 경우 각 도메인 아래에서 `#### [ASPECT:<aspect_id>] <aspect_label>` 형식으로 정리한다.\n"
                 "- 도메인 모듈에 해당하지 않는 내용은 `### [SECTION:제목]` 형태로 작성한다.\n"
+                "- `[SUPPORTING_MATERIALS]`의 child merge report를 1차 사실 원장으로 사용하고, `DOMAIN_EVIDENCE`는 해석 보강용으로만 사용한다.\n"
+                "- child merge report에 표, 비교 좌표, 임계치 표, value-chain 단계가 있으면 가능한 한 구조를 유지해 final에 재현한다.\n"
+                "- 도메인 에세이로 재서술하면서 child merge report의 고유 블록(세그먼트 표, 비교표, 행동 규칙, 결론)을 삭제하지 않는다.\n"
                 "- `[ASPECT_FACTS]`와 `DOMAIN_EVIDENCE_OVERVIEW`를 우선 사용해 key:value를 본문에 명시한다.\n"
                 "- `[ASPECT_FACTS]`의 facts key-value는 본문에서 누락하지 않는다.\n"
                 "- Quant 관점으로 재해석하되, 원본 정보와 key:value를 생략하지 않는다.\n"
@@ -556,6 +597,65 @@ class Aggregation:
         for material in materials:
             facts.extend(material.aspect_facts)
         return tuple(facts)
+
+    def _build_task_ledger(
+        self,
+        *,
+        plan: Plan,
+        task: Task,
+        materials: list[ReportMaterial],
+    ) -> dict[str, Any]:
+        facts: dict[str, str] = {}
+        aspect_facts: list[dict[str, Any]] = []
+        uncovered_aspects: list[str] = []
+        source_reports: list[str] = []
+        for material in materials:
+            facts.update(material.facts)
+            if material.source.startswith("report:"):
+                source_reports.append(material.source.split(":", 1)[1])
+            for item in material.aspect_facts:
+                aspect_facts.append(
+                    {
+                        "aspect_id": item.aspect_id,
+                        "facts": dict(item.facts),
+                        "evidence": item.evidence,
+                    }
+                )
+            uncovered_aspects.extend(material.uncovered_aspects)
+        return {
+            "task_id": task.id,
+            "task_type": task.task_type,
+            "query_unit_ids": list(task.query_unit_ids),
+            "domain_ids": self._task_domain_ids(plan=plan, task=task),
+            "sources": [material.source for material in materials],
+            "source_reports": list(dict.fromkeys(source_reports)),
+            "facts": facts,
+            "aspect_facts": aspect_facts,
+            "uncovered_aspects": list(dict.fromkeys(uncovered_aspects)),
+        }
+
+    def _build_final_trace(
+        self,
+        *,
+        root_task_id: str,
+        root_ledger: dict[str, Any],
+        covered_requirement_ids: list[str],
+        missing_requirement_ids: list[str],
+        domain_coverage: DomainCoverage,
+        aspect_coverage: dict[str, str],
+    ) -> dict[str, Any]:
+        return {
+            "root_task_id": root_task_id,
+            "source_reports": list(root_ledger.get("source_reports") or []),
+            "source_materials": list(root_ledger.get("sources") or []),
+            "covered_requirement_ids": list(covered_requirement_ids),
+            "missing_requirement_ids": list(missing_requirement_ids),
+            "domain_coverage": {
+                "final_ids": list(domain_coverage.final_ids),
+                "evidence_ids": list(domain_coverage.evidence_ids),
+            },
+            "aspect_coverage": dict(aspect_coverage),
+        }
 
     def _aspect_facts_section(
         self,
@@ -754,7 +854,7 @@ class Aggregation:
             summaries: list[str] = []
             for artifact in module_artifacts:
                 merged_key_values.update(artifact.domain_key_values)
-                summary = artifact.domain_summary.strip()
+                summary = self._compact_prompt_text(artifact.domain_summary)
                 if summary and summary not in summaries:
                     summaries.append(summary)
 
@@ -768,22 +868,23 @@ class Aggregation:
             detail_lines.append(f"### module={module_id} name={module_name}")
             for idx, artifact in enumerate(module_artifacts, start=1):
                 detail_lines.append(
-                    f"- evidence#{idx}.summary: {artifact.domain_summary or 'N/A'}"
+                    f"- evidence#{idx}.task_id: {artifact.task_id}"
+                )
+                detail_lines.append(
+                    f"  - summary: {self._compact_prompt_text(artifact.domain_summary) or 'N/A'}"
                 )
                 if artifact.domain_key_values:
                     detail_lines.append("  - key_values:")
                     for key, value in artifact.domain_key_values.items():
                         detail_lines.append(f"    - {key}: {value}")
-                if artifact.domain_payload:
-                    detail_lines.append("  - payload_json:")
-                    detail_lines.append("```json")
-                    payload_str = json.dumps(
-                        artifact.domain_payload, ensure_ascii=False, indent=2, default=str
-                    )
-                    detail_lines.append(payload_str)
-                    detail_lines.append("```")
 
         return "\n".join(overview_lines), "\n".join(detail_lines)
+
+    def _compact_prompt_text(self, text: str, *, max_chars: int = 600) -> str:
+        compact = " ".join((text or "").split()).strip()
+        if len(compact) <= max_chars:
+            return compact
+        return compact[: max_chars - 3].rstrip() + "..."
 
     def _task_domain_ids(self, *, plan: Plan, task: Task) -> list[str]:
         scoped: list[str] = []

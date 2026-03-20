@@ -243,6 +243,14 @@ class Executor:
 
         leaf_output_path = workspace.leaf_output_path(task.id)
         workspace.write_leaf_output(task.id, content)
+        structured_data = self._structured_artifact_data(
+            task=task,
+            tool_name=tool_name,
+            raw_result=raw_result,
+            tool_metadata=tool_metadata,
+            domain_fields=domain_fields,
+        )
+        workspace.write_leaf_output_json(task.id, structured_data)
         output_metadata = {
             "tool": tool_name,
             "args_hash": args_hash,
@@ -260,6 +268,7 @@ class Executor:
             domain_summary=str(domain_fields.get("domain_summary") or ""),
             domain_key_values=dict(domain_fields.get("domain_key_values") or {}),
             domain_payload=dict(domain_fields.get("domain_payload") or {}),
+            structured_data=structured_data,
         )
 
     def _tool_args_for_task(
@@ -464,6 +473,27 @@ class Executor:
     def _hash_args(self, args: dict[str, Any]) -> str:
         encoded = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
         return sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _structured_artifact_data(
+        self,
+        *,
+        task: Task,
+        tool_name: str,
+        raw_result: Any,
+        tool_metadata: dict[str, Any],
+        domain_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "task_id": task.id,
+            "task_type": task.task_type,
+            "query_unit_ids": list(task.query_unit_ids),
+            "tool_name": tool_name,
+            "domain_id": str(domain_fields.get("domain_id") or ""),
+            "domain_summary": str(domain_fields.get("domain_summary") or ""),
+            "domain_key_values": dict(domain_fields.get("domain_key_values") or {}),
+            "tool_metadata": dict(tool_metadata),
+            "raw_result": raw_result,
+        }
 
     def _render_tool_markdown(
         self,

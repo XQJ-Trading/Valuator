@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Iterable
 
 from ...domain import (
     DomainLoader,
     DomainModuleContext,
     DomainRouter,
+    QueryAnalyzer,
     QueryIntent,
     expand,
 )
-from ...utils.config import config
+from ...domain.company import ListingSeed
+from ...utils.config import config, get_opendart_api_key
 from ..aggregator.service import Aggregation
 from ..contracts.plan import AggregationResult, Plan, ReviewResult
 from ..llm_usage import LLMUsageWriter
@@ -20,9 +22,6 @@ from ..executor.service import Executor
 from ..planner.service import Planner
 from ..workspace.service import Workspace
 from .state import RoundState
-
-if TYPE_CHECKING:
-    from ...models.gemini_direct import GeminiClient
 
 
 LeafStartCallback = Callable[[Any], Awaitable[None]]
@@ -84,7 +83,12 @@ class Engine:
         domain_router: DomainRouter | None = None
         if config.domain_arch_enabled:
             domain_loader = DomainLoader()
-            domain_router = DomainRouter()
+            domain_router = DomainRouter(
+                analyzer=QueryAnalyzer(
+                    client=client,
+                    on_miss=_build_company_lookup(),
+                )
+            )
         return cls(
             workspace=workspace,
             planner=planner,
@@ -112,14 +116,16 @@ class Engine:
         latest_review: ReviewResult | None = None
 
         for round_idx in range(1, max_rounds + 1):
-            review_payload, aggregation, final_path, review_path = await self._run_round(
-                query=query,
-                plan=plan,
-                round_idx=round_idx,
-                usage_writer=usage_writer,
-                on_leaf_start=on_leaf_start,
-                on_leaf_complete=on_leaf_complete,
-                on_task_aggregated=on_task_aggregated,
+            review_payload, aggregation, final_path, review_path = (
+                await self._run_round(
+                    query=query,
+                    plan=plan,
+                    round_idx=round_idx,
+                    usage_writer=usage_writer,
+                    on_leaf_start=on_leaf_start,
+                    on_leaf_complete=on_leaf_complete,
+                    on_task_aggregated=on_task_aggregated,
+                )
             )
             status = review_payload.status
             latest_review = review_payload
@@ -158,9 +164,9 @@ class Engine:
         self.workspace.prepare()
         usage_writer = LLMUsageWriter(
             self.workspace.session_dir / "output" / "llm_usage.jsonl",
-            session_started_at=datetime.now(timezone.utc).isoformat().replace(
-                "+00:00", "Z"
-            ),
+            session_started_at=datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
         )
         self.planner.bind_usage_writer(usage_writer)
         self.aggregator.bind_usage_writer(usage_writer)
@@ -220,9 +226,9 @@ class Engine:
         self.workspace.prepare()
         usage_writer = LLMUsageWriter(
             self.workspace.session_dir / "output" / "llm_usage.jsonl",
-            session_started_at=datetime.now(timezone.utc).isoformat().replace(
-                "+00:00", "Z"
-            ),
+            session_started_at=datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
         )
         self.planner.bind_usage_writer(usage_writer)
         self.aggregator.bind_usage_writer(usage_writer)
@@ -289,6 +295,7 @@ class Engine:
             reports=state.reports,
         )
         final_path = self.workspace.write_final(aggregation.final_markdown)
+        self.workspace.write_final_trace(aggregation.final_trace)
         review = await self.reviewer.review(plan, execution, aggregation)
         review_path = self.workspace.write_review(review)
         return review, aggregation, final_path, review_path
@@ -370,9 +377,22 @@ class Engine:
         )
         state.record_task_report(report)
         self.workspace.write_aggregation_report(task_id, report.markdown)
+        self.workspace.write_aggregation_ledger(task_id, report.ledger)
         if on_task_aggregated is not None:
             await on_task_aggregated(
                 state.task_map[task_id],
                 state.completed_task_count,
                 state.total_tasks,
             )
+
+
+def _build_company_lookup() -> Callable[[str], Iterable[ListingSeed]] | None:
+    from ...infra.opendart_client import lookup_company
+
+    def on_miss(surface_form: str) -> Iterable[ListingSeed]:
+        return lookup_company(
+            get_opendart_api_key(required=True),
+            surface_form,
+        )
+
+    return on_miss

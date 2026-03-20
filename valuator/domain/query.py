@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from valuator.utils.dataclass_compat import dataclass, field
 
-from .company import Company
+from .company import Subject
 
 if TYPE_CHECKING:
     from .types import DomainModule
@@ -39,16 +39,18 @@ def is_concrete_subject_kind(kind: str) -> bool:
 @dataclass(slots=True)
 class QueryIntent:
     query: str
-    company: Company | None = None
-    entities: list[str] = field(default_factory=list)
+    subjects: tuple[Subject, ...] = field(default_factory=tuple)
+    entities: tuple[str, ...] = field(default_factory=tuple)
 
     def concrete_values(self) -> list[str]:
         values: list[str] = []
         candidates: list[str] = list(self.entities)
-        if self.company is not None:
-            candidates.append(self.company.issuer_name)
-            candidates.append(self.company.security_code)
-            candidates.extend(self.company.vendor_symbols.values())
+        for subject in self.subjects:
+            candidates.append(subject.company.company_name)
+            if subject.listing is None:
+                continue
+            candidates.append(subject.listing.security_code)
+            candidates.extend(subject.listing.vendor_symbols.values())
         for candidate in candidates:
             text = candidate.strip()
             if text and text not in values:

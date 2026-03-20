@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.config import config
-from .company import find_company
+from .company import ListingSeed, resolve_subjects
 from .query import (
     QueryAnalysis,
     QueryIntent,
@@ -24,6 +24,18 @@ _SYSTEM_PROMPT = (
     "Return concise JSON only. No markdown. "
     "Do not include any keys except the requested schema."
 )
+_QUERY_ANALYSIS_RULES = (
+    "- Return query_intent, domain_ids, entities, units, requirements, intent_tags, rationale.",
+    "- query_intent must contain company_names only. Put concrete company/security names, aliases, tickers, or codes there. For Korean-listed companies, use the Korean name as commonly known (for example, '삼성전자', '현대모비스'). Do not translate Korean company names to English. For overseas issuers, use the official English company name or ticker. If no concrete subject is named, use an empty array.",
+    "- entities are for non-security items such as business units, products, CEOs, themes, or macro variables. Use entity kind `company`/`ticker`/`security` only for concrete issuers or securities explicitly present or clearly recoverable.",
+    "- units must be semantic retrieval units, not formatting instructions.",
+    "- Every unit must include id, objective, retrieval_query, domain_ids, entity_ids, time_scope.",
+    "- Every requirement must include acceptance, unit_ids, domain_ids, entity_ids, provenance. Requirements are for analytical content only, not formatting preferences or table styles.",
+    "- requirement unit_ids may refer to units by zero-based position, one-based position, or unit id string.",
+    "- Preserve the user's response intent and constraints, such as recommendation, screening, comparison, requested market, count, style lens, and actionability, instead of rewriting the query into a generic valuation essay.",
+    "- If the query does not name a concrete company/security, do not invent placeholder company entities such as 'investment candidates'.",
+    "- If the query is valuation/investment-related, prefer selecting all relevant modules rather than omitting needed domains.",
+)
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:
@@ -34,11 +46,342 @@ def _dedupe_ints(values: list[int]) -> list[int]:
     return list(dict.fromkeys(values))
 
 
+def _validated_domain_ids(
+    raw_domain_ids: list[str],
+    *,
+    valid_domain_ids: set[str],
+) -> list[str]:
+    domain_ids = _dedupe_strings(raw_domain_ids)
+    if not domain_ids:
+        raise ValueError("query analysis returned no valid domain_ids")
+    unknown_domains = sorted(set(domain_ids) - valid_domain_ids)
+    if unknown_domains:
+        raise ValueError(
+            "query analysis returned unknown domain_ids: " + ", ".join(unknown_domains)
+        )
+    return domain_ids
+
+
+def _intent_entities(raw_entities: list[QueryEntityPayload]) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            item.label
+            for item in raw_entities
+            if not is_concrete_subject_kind(item.kind)
+        )
+    )
+
+
+def _build_query_intent(
+    raw_intent: QueryIntentPayload,
+    *,
+    query: str,
+    raw_entities: list[QueryEntityPayload],
+    on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
+) -> QueryIntent:
+    company_names = _dedupe_strings(raw_intent.company_names)
+    return QueryIntent(
+        query=query,
+        subjects=resolve_subjects(
+            company_names=tuple(company_names),
+            on_miss=on_miss,
+        ),
+        entities=_intent_entities(raw_entities),
+    )
+
+
+def _build_entities(raw_entities: list[QueryEntityPayload]) -> dict[str, str]:
+    entities: dict[str, str] = {}
+    for item in raw_entities:
+        if item.id in entities:
+            raise ValueError(f"duplicate query entity id: {item.id}")
+        entities[item.id] = item.label
+    return entities
+
+
+def _build_units(
+    raw_units: list[QueryUnitPayload],
+    *,
+    entity_id_set: set[str],
+    domain_id_set: set[str],
+) -> tuple[list[QueryUnit], dict[str, int]]:
+    units: list[QueryUnit] = []
+    unit_id_to_index: dict[str, int] = {}
+    for item in raw_units:
+        if item.id in unit_id_to_index:
+            raise ValueError(f"duplicate query unit id: {item.id}")
+
+        unit_domains = _dedupe_strings(item.domain_ids)
+        if not unit_domains:
+            raise ValueError(f"query unit missing domain_ids: {item.id}")
+        if set(unit_domains) - domain_id_set:
+            raise ValueError(f"query unit references unknown domain_ids: {item.id}")
+
+        unit_id_to_index[item.id] = len(units)
+        units.append(
+            QueryUnit(
+                id=item.id,
+                objective=item.objective,
+                retrieval_query=item.retrieval_query,
+                domain_ids=unit_domains,
+                entity_ids=_dedupe_strings(
+                    [
+                        entity_id
+                        for entity_id in item.entity_ids
+                        if entity_id in entity_id_set
+                    ]
+                ),
+                time_scope=item.time_scope,
+                parent_unit_id=item.parent_unit_id,
+            )
+        )
+    return units, unit_id_to_index
+
+
+def _resolve_requirement_unit_ids(
+    raw_unit_ids: list[Union[int, str]],
+    *,
+    unit_id_to_index: dict[str, int],
+    unit_count: int,
+) -> list[int]:
+    resolved_unit_ids: list[int] = []
+    for raw_ref in raw_unit_ids:
+        if isinstance(raw_ref, int):
+            resolved_unit_ids.append(raw_ref)
+            continue
+        if raw_ref in unit_id_to_index:
+            resolved_unit_ids.append(unit_id_to_index[raw_ref])
+            continue
+        if raw_ref.isdigit():
+            resolved_unit_ids.append(int(raw_ref))
+            continue
+        raise ValueError("query requirement references unknown unit_ids")
+
+    uses_one_based = (
+        all(1 <= unit_id <= unit_count for unit_id in resolved_unit_ids)
+        and 0 not in resolved_unit_ids
+    )
+    if uses_one_based:
+        resolved_unit_ids = [unit_id - 1 for unit_id in resolved_unit_ids]
+    if any(unit_id < 0 or unit_id >= unit_count for unit_id in resolved_unit_ids):
+        raise ValueError("query requirement references unknown unit_ids")
+    return _dedupe_ints(resolved_unit_ids)
+
+
+def _build_requirements(
+    raw_requirements: list[QueryRequirementPayload],
+    *,
+    entity_id_set: set[str],
+    domain_id_set: set[str],
+    unit_id_to_index: dict[str, int],
+    unit_count: int,
+) -> list[QueryRequirement]:
+    requirements: list[QueryRequirement] = []
+    seen_requirement_ids: set[str] = set()
+    for index, item in enumerate(raw_requirements, start=1):
+        requirement_id = item.id or f"R-{index:03d}"
+        if requirement_id in seen_requirement_ids:
+            raise ValueError(f"duplicate query requirement id: {requirement_id}")
+        seen_requirement_ids.add(requirement_id)
+
+        requirement_domains = _dedupe_strings(item.domain_ids)
+        if not requirement_domains:
+            raise ValueError("query requirement missing domain_ids")
+        if set(requirement_domains) - domain_id_set:
+            raise ValueError("query requirement references unknown domain_ids")
+
+        requirements.append(
+            QueryRequirement(
+                id=requirement_id,
+                acceptance=item.acceptance,
+                unit_ids=_resolve_requirement_unit_ids(
+                    item.unit_ids,
+                    unit_id_to_index=unit_id_to_index,
+                    unit_count=unit_count,
+                ),
+                domain_ids=requirement_domains,
+                entity_ids=_dedupe_strings(
+                    [
+                        entity_id
+                        for entity_id in item.entity_ids
+                        if entity_id in entity_id_set
+                    ]
+                ),
+                provenance=item.provenance,
+            )
+        )
+    return requirements
+
+
+def _module_summaries(
+    index: DomainIndex,
+    modules: dict[str, DomainModule],
+) -> dict[str, str]:
+    summaries = dict(index.module_summaries)
+    for module_id in index.modules:
+        if module_id in summaries or module_id not in modules:
+            continue
+        summaries[module_id] = modules[module_id].description or module_id
+    return summaries
+
+
+def _analysis_prompt(
+    *,
+    index: DomainIndex,
+    modules: dict[str, DomainModule],
+    query: str,
+) -> str:
+    scope = (
+        index.valuation_scope.strip()
+        or "Apply all modules for valuation-related queries."
+    )
+    exclusion = index.exclusion_signals.strip() or "None."
+    selective = index.selective_signals.strip() or "None."
+    summaries = _module_summaries(index, modules)
+    module_lines = "\n".join(
+        f"  - {module_id}: {summaries.get(module_id, module_id)}"
+        for module_id in index.modules
+    )
+    rules = "\n".join(_QUERY_ANALYSIS_RULES)
+    return (
+        "Analyze the user query into a canonical valuation query specification.\n\n"
+        "[VALUATION_SCOPE]\n"
+        f"{scope}\n\n"
+        "[EXCLUSION_SIGNALS]\n"
+        f"{exclusion}\n\n"
+        "[SELECTIVE_SIGNALS]\n"
+        f"{selective}\n\n"
+        "[AVAILABLE_MODULES]\n"
+        f"{module_lines}\n\n"
+        "Rules:\n"
+        f"{rules}\n\n"
+        f"[QUERY]\n{query}\n"
+    )
+
+
+def _response_schema(module_ids: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "query_intent",
+            "domain_ids",
+            "entities",
+            "units",
+            "requirements",
+            "intent_tags",
+            "rationale",
+        ],
+        "properties": {
+            "query_intent": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["company_names"],
+                "properties": {
+                    "company_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+            },
+            "domain_ids": {
+                "type": "array",
+                "items": {"type": "string", "enum": module_ids},
+            },
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["id", "label", "kind"],
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1},
+                        "label": {"type": "string", "minLength": 1},
+                        "kind": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+            "units": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "id",
+                        "objective",
+                        "retrieval_query",
+                        "domain_ids",
+                        "entity_ids",
+                        "time_scope",
+                    ],
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1},
+                        "objective": {"type": "string", "minLength": 1},
+                        "retrieval_query": {"type": "string", "minLength": 1},
+                        "domain_ids": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": module_ids},
+                            "minItems": 1,
+                        },
+                        "entity_ids": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "time_scope": {"type": "string"},
+                        "parent_unit_id": {"type": "string"},
+                    },
+                },
+            },
+            "requirements": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "acceptance",
+                        "unit_ids",
+                        "domain_ids",
+                        "entity_ids",
+                        "provenance",
+                    ],
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1},
+                        "acceptance": {"type": "string", "minLength": 1},
+                        "unit_ids": {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    {"type": "integer", "minimum": 0},
+                                    {"type": "string", "minLength": 1},
+                                ]
+                            },
+                            "minItems": 1,
+                        },
+                        "domain_ids": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": module_ids},
+                            "minItems": 1,
+                        },
+                        "entity_ids": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "provenance": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+            "intent_tags": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+            },
+            "rationale": {"type": "string", "minLength": 1},
+        },
+    }
+
+
 class QueryIntentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    ticker: str = ""
-    security_code: str = ""
     company_names: list[str] = Field(default_factory=list)
 
 
@@ -80,7 +423,9 @@ class QueryAnalysisPayload(BaseModel):
     domain_ids: list[str] = Field(default_factory=list, min_length=1)
     entities: list[QueryEntityPayload] = Field(default_factory=list)
     units: list[QueryUnitPayload] = Field(default_factory=list, min_length=1)
-    requirements: list[QueryRequirementPayload] = Field(default_factory=list, min_length=1)
+    requirements: list[QueryRequirementPayload] = Field(
+        default_factory=list, min_length=1
+    )
     intent_tags: list[str] = Field(default_factory=list)
     rationale: str = Field(min_length=1)
 
@@ -90,135 +435,40 @@ def _build_query_analysis(
     *,
     query: str,
     valid_domain_ids: set[str],
+    on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
 ) -> QueryAnalysis:
     raw = QueryAnalysisPayload.model_validate(payload)
-    domain_ids = _dedupe_strings(raw.domain_ids)
-    if not domain_ids:
-        raise ValueError("query analysis returned no valid domain_ids")
+    domain_ids = _validated_domain_ids(
+        raw.domain_ids, valid_domain_ids=valid_domain_ids
+    )
     domain_id_set = set(domain_ids)
-    unknown_domains = sorted(domain_id_set - valid_domain_ids)
-    if unknown_domains:
-        raise ValueError(
-            "query analysis returned unknown domain_ids: "
-            + ", ".join(unknown_domains)
-        )
-
-    company_names = _dedupe_strings(raw.query_intent.company_names)
-    has_strong_company_identifier = bool(
-        raw.query_intent.ticker or raw.query_intent.security_code
-    )
-    company_name_arg = (
-        ""
-        if has_strong_company_identifier
-        else (company_names[0] if company_names else "")
-    )
-    company = find_company(
-        ticker=raw.query_intent.ticker,
-        security_code=raw.query_intent.security_code,
-        company_name=company_name_arg,
-    )
-    query_intent = QueryIntent(
+    query_intent = _build_query_intent(
+        raw.query_intent,
         query=query,
-        company=company,
+        raw_entities=raw.entities,
+        on_miss=on_miss,
     )
-
-    entities: dict[str, str] = {}
-    for item in raw.entities:
-        if not is_concrete_subject_kind(item.kind):
-            continue
-        if item.id in entities:
-            raise ValueError(f"duplicate query entity id: {item.id}")
-        entities[item.id] = item.label
-
+    entities = _build_entities(raw.entities)
     entity_id_set = set(entities)
-    units: list[QueryUnit] = []
-    unit_id_to_index: dict[str, int] = {}
-    for item in raw.units:
-        unit_domains = _dedupe_strings(item.domain_ids)
-        entity_ids = _dedupe_strings(
-            [entity_id for entity_id in item.entity_ids if entity_id in entity_id_set]
-        )
-        if item.id in unit_id_to_index:
-            raise ValueError(f"duplicate query unit id: {item.id}")
-        unknown_unit_domains = sorted(set(unit_domains) - domain_id_set)
-        if unknown_unit_domains:
-            raise ValueError(
-                f"query unit references unknown domain_ids: {item.id}"
-            )
-        if not unit_domains:
-            raise ValueError(f"query unit missing domain_ids: {item.id}")
-        unit_id_to_index[item.id] = len(units)
-        units.append(
-            QueryUnit(
-                id=item.id,
-                objective=item.objective,
-                retrieval_query=item.retrieval_query,
-                domain_ids=unit_domains,
-                entity_ids=entity_ids,
-                time_scope=item.time_scope,
-                parent_unit_id=item.parent_unit_id,
-            )
-        )
-
-    unit_count = len(units)
-    requirements: list[QueryRequirement] = []
-    seen_requirement_ids: set[str] = set()
-    for index, item in enumerate(raw.requirements, start=1):
-        requirement_id = item.id or f"R-{index:03d}"
-        requirement_domains = _dedupe_strings(item.domain_ids)
-        requirement_entities = _dedupe_strings(
-            [entity_id for entity_id in item.entity_ids if entity_id in entity_id_set]
-        )
-        if requirement_id in seen_requirement_ids:
-            raise ValueError(f"duplicate query requirement id: {requirement_id}")
-        seen_requirement_ids.add(requirement_id)
-        if not requirement_domains:
-            raise ValueError("query requirement missing domain_ids")
-        if set(requirement_domains) - domain_id_set:
-            raise ValueError("query requirement references unknown domain_ids")
-
-        resolved_unit_ids: list[int] = []
-        for raw_ref in item.unit_ids:
-            if isinstance(raw_ref, int):
-                resolved_unit_ids.append(raw_ref)
-                continue
-            if raw_ref in unit_id_to_index:
-                resolved_unit_ids.append(unit_id_to_index[raw_ref])
-                continue
-            if raw_ref.isdigit():
-                resolved_unit_ids.append(int(raw_ref))
-                continue
-            raise ValueError("query requirement references unknown unit_ids")
-
-        uses_one_based = (
-            all(1 <= unit_id <= unit_count for unit_id in resolved_unit_ids)
-            and 0 not in resolved_unit_ids
-        )
-        if uses_one_based:
-            resolved_unit_ids = [unit_id - 1 for unit_id in resolved_unit_ids]
-        if any(unit_id < 0 or unit_id >= unit_count for unit_id in resolved_unit_ids):
-            raise ValueError("query requirement references unknown unit_ids")
-
-        requirements.append(
-            QueryRequirement(
-                id=requirement_id,
-                acceptance=item.acceptance,
-                unit_ids=_dedupe_ints(resolved_unit_ids),
-                domain_ids=requirement_domains,
-                entity_ids=requirement_entities,
-                provenance=item.provenance,
-            )
-        )
-
-    intent_tags = _dedupe_strings(raw.intent_tags)
-
+    units, unit_id_to_index = _build_units(
+        raw.units,
+        entity_id_set=entity_id_set,
+        domain_id_set=domain_id_set,
+    )
+    requirements = _build_requirements(
+        raw.requirements,
+        entity_id_set=entity_id_set,
+        domain_id_set=domain_id_set,
+        unit_id_to_index=unit_id_to_index,
+        unit_count=len(units),
+    )
     return QueryAnalysis(
         domain_ids=domain_ids,
         query_intent=query_intent,
         entities=entities,
         units=units,
         requirements=requirements,
-        intent_tags=intent_tags,
+        intent_tags=_dedupe_strings(raw.intent_tags),
         rationale=raw.rationale,
     )
 
@@ -226,12 +476,17 @@ def _build_query_analysis(
 class QueryAnalyzer:
     """Analyzes the raw user query into the canonical query spec."""
 
-    def __init__(self, client: GeminiClient | None = None) -> None:
+    def __init__(
+        self,
+        client: GeminiClient | None = None,
+        on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
+    ) -> None:
         if client is None:
             from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
 
             client = RuntimeGeminiClient(config.agent_model)
         self.client = client
+        self._on_miss = on_miss
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.client.bind_usage_writer(usage_writer)
@@ -247,174 +502,15 @@ class QueryAnalyzer:
         if not valid_ids:
             raise ValueError("domain index must include at least one module")
 
-        summaries = dict(index.module_summaries)
-        for module_id in index.modules:
-            if module_id not in summaries and module_id in modules:
-                summaries[module_id] = modules[module_id].description or module_id
-
-        scope = index.valuation_scope.strip() or "Apply all modules for valuation-related queries."
-        exclusion = index.exclusion_signals.strip() or "None."
-        selective = index.selective_signals.strip() or "None."
-        module_lines = "\n".join(
-            f"  - {module_id}: {summaries.get(module_id, module_id)}"
-            for module_id in index.modules
-        )
-        prompt = (
-            "Analyze the user query into a canonical valuation query specification.\n\n"
-            "[VALUATION_SCOPE]\n"
-            f"{scope}\n\n"
-            "[EXCLUSION_SIGNALS]\n"
-            f"{exclusion}\n\n"
-            "[SELECTIVE_SIGNALS]\n"
-            f"{selective}\n\n"
-            "[AVAILABLE_MODULES]\n"
-            f"{module_lines}\n\n"
-            "Rules:\n"
-            "- Return query_intent, domain_ids, entities, units, requirements, intent_tags, rationale.\n"
-            "- query_intent must include ticker, security_code, company_names.\n"
-            "- Use empty strings or an empty array in query_intent when the query does not identify a concrete subject.\n"
-            "- units must be semantic retrieval units, not formatting instructions.\n"
-            "- Every unit must include id, objective, retrieval_query, domain_ids, entity_ids, time_scope.\n"
-            "- Every requirement must include acceptance, unit_ids, domain_ids, entity_ids, provenance.\n"
-            "- requirement unit_ids may refer to units by zero-based position, one-based position, or unit id string.\n"
-            "- Include only user-requested analytical content in requirements.\n"
-            "- Do not turn formatting preferences or preferred table styles into requirements.\n"
-            "- Preserve the user's response intent (for example: recommendation, screening, comparison, single-company analysis) instead of rewriting it into a generic valuation essay.\n"
-            "- Preserve user constraints such as requested market, count, style lens, and actionability if they are present in the query.\n"
-            "- If the query does not name a concrete company/security, do not invent placeholder company entities such as 'investment candidates'. In that case entities may be empty.\n"
-            "- Use entity kind `company`/`ticker`/`security` only for concrete issuers or securities explicitly present in the query or clearly recoverable from it.\n"
-            "- If the query is valuation/investment-related, prefer selecting all relevant modules rather than omitting needed domains.\n\n"
-            f"[QUERY]\n{query}\n"
-        )
-
-        schema: dict[str, Any] = {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "query_intent",
-                "domain_ids",
-                "entities",
-                "units",
-                "requirements",
-                "intent_tags",
-                "rationale",
-            ],
-            "properties": {
-                "query_intent": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "ticker",
-                        "security_code",
-                        "company_names",
-                    ],
-                    "properties": {
-                        "ticker": {"type": "string"},
-                        "security_code": {"type": "string"},
-                        "company_names": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                    },
-                },
-                "domain_ids": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": list(index.modules)},
-                },
-                "entities": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["id", "label", "kind"],
-                        "properties": {
-                            "id": {"type": "string", "minLength": 1},
-                            "label": {"type": "string", "minLength": 1},
-                            "kind": {"type": "string", "minLength": 1},
-                        },
-                    },
-                },
-                "units": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [
-                            "id",
-                            "objective",
-                            "retrieval_query",
-                            "domain_ids",
-                            "entity_ids",
-                            "time_scope",
-                        ],
-                        "properties": {
-                            "id": {"type": "string", "minLength": 1},
-                            "objective": {"type": "string", "minLength": 1},
-                            "retrieval_query": {"type": "string", "minLength": 1},
-                            "domain_ids": {
-                                "type": "array",
-                                "items": {"type": "string", "enum": list(index.modules)},
-                                "minItems": 1,
-                            },
-                            "entity_ids": {
-                                "type": "array",
-                                "items": {"type": "string", "minLength": 1},
-                            },
-                            "time_scope": {"type": "string"},
-                            "parent_unit_id": {"type": "string"},
-                        },
-                    },
-                },
-                "requirements": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [
-                            "acceptance",
-                            "unit_ids",
-                            "domain_ids",
-                            "entity_ids",
-                            "provenance",
-                        ],
-                        "properties": {
-                            "id": {"type": "string", "minLength": 1},
-                            "acceptance": {"type": "string", "minLength": 1},
-                            "unit_ids": {
-                                "type": "array",
-                                "items": {
-                                    "anyOf": [
-                                        {"type": "integer", "minimum": 0},
-                                        {"type": "string", "minLength": 1},
-                                    ]
-                                },
-                                "minItems": 1,
-                            },
-                            "domain_ids": {
-                                "type": "array",
-                                "items": {"type": "string", "enum": list(index.modules)},
-                                "minItems": 1,
-                            },
-                            "entity_ids": {
-                                "type": "array",
-                                "items": {"type": "string", "minLength": 1},
-                            },
-                            "provenance": {"type": "string", "minLength": 1},
-                        },
-                    },
-                },
-                "intent_tags": {
-                    "type": "array",
-                    "items": {"type": "string", "minLength": 1},
-                },
-                "rationale": {"type": "string", "minLength": 1},
-            },
-        }
-
         payload = await self.client.generate_json(
-            prompt=prompt,
+            prompt=_analysis_prompt(index=index, modules=modules, query=query),
             system_prompt=_SYSTEM_PROMPT,
-            response_json_schema=schema,
+            response_json_schema=_response_schema(list(index.modules)),
             trace_method="query_analysis.analyze",
         )
-        return _build_query_analysis(payload, query=query, valid_domain_ids=valid_ids)
+        return _build_query_analysis(
+            payload,
+            query=query,
+            valid_domain_ids=valid_ids,
+            on_miss=self._on_miss,
+        )

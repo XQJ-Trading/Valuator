@@ -56,19 +56,34 @@ class Workspace:
     def write_final(self, markdown: str) -> Path:
         return self._write_text("output/final.md", markdown.strip() + "\n")
 
+    def write_final_trace(self, payload: dict) -> Path:
+        return self._write_json("output/final.trace.json", payload)
+
     def leaf_output_path(self, task_id: str) -> str:
         return f"/execution/outputs/{task_id}/result.md"
 
+    def leaf_output_json_path(self, task_id: str) -> str:
+        return f"/execution/outputs/{task_id}/result.json"
+
     def aggregation_report_path(self, task_id: str) -> str:
         return f"/aggregation/{task_id}/report.md"
+
+    def aggregation_ledger_path(self, task_id: str) -> str:
+        return f"/aggregation/{task_id}/ledger.json"
 
     def write_leaf_output(self, task_id: str, content: str) -> Path:
         rel_output_path = self.leaf_output_path(task_id)
         return self.write_output(rel_output_path, content)
 
+    def write_leaf_output_json(self, task_id: str, payload: dict) -> Path:
+        return self._write_json(self.leaf_output_json_path(task_id), payload)
+
     def write_aggregation_report(self, task_id: str, markdown: str) -> Path:
         rel_output_path = self.aggregation_report_path(task_id)
         return self.write_output(rel_output_path, markdown)
+
+    def write_aggregation_ledger(self, task_id: str, payload: dict) -> Path:
+        return self._write_json(self.aggregation_ledger_path(task_id), payload)
 
     def write_output_metadata(self, rel_output_path: str, payload: dict) -> Path:
         return self._write_json(self._metadata_rel_path(rel_output_path), payload)
@@ -121,7 +136,7 @@ class Workspace:
         return path
 
     def _write_json(self, rel_path: str, payload: dict) -> Path:
-        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
         return self._write_text(rel_path, text)
 
     def _resolve(self, rel_path: str) -> Path:

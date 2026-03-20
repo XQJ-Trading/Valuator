@@ -57,6 +57,7 @@ class ExecutionArtifact:
     domain_summary: str = ""
     domain_key_values: dict[str, str] = field(default_factory=dict)
     domain_payload: dict[str, Any] = field(default_factory=dict)
+    structured_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -86,6 +87,7 @@ class TaskReport:
     task_id: str
     markdown: str
     aspect_facts: tuple[AspectFacts, ...] = ()
+    ledger: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -111,6 +113,8 @@ class AggregationResult:
     domain_coverage: DomainCoverage = field(default_factory=DomainCoverage)
     aspect_coverage: dict[str, str] = field(default_factory=dict)
     aggregation_error: str = ""
+    root_ledger: dict[str, Any] = field(default_factory=dict)
+    final_trace: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

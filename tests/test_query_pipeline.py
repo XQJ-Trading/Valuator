@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
+from unittest.mock import patch
 
 from valuator.core.planner.service import Planner
 from valuator.domain import (
@@ -17,10 +20,12 @@ from valuator.domain import (
     QueryUnit,
     analyze_query,
     build_query_breakdown,
+    company as company_module,
     expand,
-    find_company,
     fill_routing_defaults,
+    resolve_subjects,
 )
+from valuator.domain.company import Listing, ListingSeed, representative_listing
 from valuator.tools.specs import registered_tool_names
 
 
@@ -101,50 +106,66 @@ def _intent(
     security_code: str = "",
     company_name: str = "",
 ) -> QueryIntent:
-    company = find_company(
+    subjects = resolve_subjects(
         ticker=ticker,
         security_code=security_code,
-        company_name=company_name,
+        company_names=(company_name,) if company_name else (),
     )
-    if company is None:
-        return QueryIntent(query=query)
-    return QueryIntent(query=query, company=company)
+    return QueryIntent(query=query, subjects=subjects)
+
+
+def _single_subject(intent: QueryIntent):
+    if len(intent.subjects) != 1:
+        return None
+    return intent.subjects[0]
 
 
 def _ticker(intent: QueryIntent) -> str:
-    company = intent.company
-    if company is None:
+    subject = _single_subject(intent)
+    if subject is None:
         return ""
-    return company.yahoo_symbol
+    listing = representative_listing(subject)
+    if listing is None:
+        return ""
+    return listing.yahoo_symbol
 
 
 def _market(intent: QueryIntent) -> str:
-    company = intent.company
-    if company is None:
+    subject = _single_subject(intent)
+    if subject is None:
         return ""
-    return company.legacy_market
+    listing = representative_listing(subject)
+    if listing is None:
+        return ""
+    return listing.legacy_market
 
 
 def _security_code(intent: QueryIntent) -> str:
-    company = intent.company
-    return company.security_code if company is not None else ""
+    subject = _single_subject(intent)
+    if subject is None:
+        return ""
+    listing = representative_listing(subject)
+    if listing is None:
+        return ""
+    return listing.security_code
 
 
 def _company_name(intent: QueryIntent) -> str:
-    company = intent.company
-    return company.issuer_name if company is not None else ""
+    subject = _single_subject(intent)
+    if subject is None:
+        return ""
+    return subject.company.company_name
 
 
 def _company_names(intent: QueryIntent) -> list[str]:
-    company_name = _company_name(intent)
-    return [company_name] if company_name else []
+    return [subject.company.company_name for subject in intent.subjects]
 
 
 class QueryIntentTests(unittest.TestCase):
     def test_query_intent_minimal(self) -> None:
         intent = QueryIntent(query="Amazon DCF valuation")
         self.assertEqual(intent.query, "Amazon DCF valuation")
-        self.assertEqual(intent.entities, [])
+        self.assertEqual(intent.entities, ())
         self.assertEqual(_ticker(intent), "")
         self.assertEqual(_market(intent), "")
         self.assertEqual(_security_code(intent), "")
@@ -313,7 +334,7 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         self.assertEqual(_ticker(updated_intent), "AMZN")
         self.assertEqual(_market(updated_intent), "USA")
         self.assertEqual(_company_names(updated_intent), ["Amazon"])
-        self.assertEqual(updated_intent.entities, ["Amazon"])
+        self.assertEqual(updated_intent.entities, ())
         self.assertEqual(analysis.domain_ids, ["dcf"])
 
     def test_router_preserves_recommendation_without_placeholder_company(self) -> None:
@@ -402,7 +423,7 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
         self.assertEqual(_ticker(updated_intent), "AMZN")
         self.assertEqual(_market(updated_intent), "USA")
         self.assertEqual(_company_names(updated_intent), ["Amazon"])
-        self.assertEqual(updated_intent.entities, ["Amazon"])
+        self.assertEqual(updated_intent.entities, ())
 
     def test_planner_excludes_sec_tool_without_us_ticker(self) -> None:
         loader = DomainLoader()
@@ -415,26 +436,50 @@ class RouterAndPlannerIdentifierTests(unittest.TestCase):
             retrieval_query="현대무벡스 핵심 리스크 전이 경로 추출",
         )
         planner = Planner(client=_NoopClient())
-        planner.bind_domain_context(
-            DomainModuleContext(
-                module_ids=["risk_transmission"],
-                modules={"risk_transmission": modules["risk_transmission"]},
-                query_intent=_intent(
-                    query="현대무벡스",
-                    security_code="319400",
-                    company_name="현대무벡스",
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "krx_securities.json"
+            path.write_text(
+                (
+                    "[\n"
+                    "  {\n"
+                    '    "issuer_name": "현대무벡스",\n'
+                    '    "security_code": "319400",\n'
+                    '    "exchange": "KOSDAQ",\n'
+                    '    "listing_id": "KRX:319400",\n'
+                    '    "vendor_symbols": {"yahoo": "319400.KQ"},\n'
+                    '    "aliases": ["현대무벡스", "Hyundai Movex"],\n'
+                    '    "corp_code": "01351164"\n'
+                    "  }\n"
+                    "]\n"
                 ),
-                query_analysis=analysis,
+                encoding="utf-8",
             )
-        )
+            with patch.object(company_module, "KRX_SECURITIES_PATH", path):
+                company_module._entity_index.cache_clear()
+                try:
+                    planner.bind_domain_context(
+                        DomainModuleContext(
+                            module_ids=["risk_transmission"],
+                            modules={"risk_transmission": modules["risk_transmission"]},
+                            query_intent=_intent(
+                                query="현대무벡스",
+                                security_code="319400",
+                                company_name="현대무벡스",
+                            ),
+                            query_analysis=analysis,
+                        )
+                    )
 
-        self.assertEqual(planner._ticker, "319400.KQ")
-        self.assertNotIn("sec_tool", planner._allowed_tools_for_context())
-        tool = planner._choose_tool_deterministic(
-            analysis.units[0],
-            "현대무벡스",
-            date(2026, 3, 6),
-        )
+                    self.assertEqual(planner._ticker, "319400.KQ")
+                    self.assertNotIn("sec_tool", planner._allowed_tools_for_context())
+                    tool = planner._choose_tool_deterministic(
+                        analysis.units[0],
+                        "현대무벡스",
+                        date(2026, 3, 6),
+                    )
+                finally:
+                    company_module._entity_index.cache_clear()
+
         self.assertEqual(tool.name, "web_search_tool")
         self.assertEqual(tool.args["query"], "현대무벡스 핵심 리스크 전이 경로 추출")
 
@@ -496,8 +541,6 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
             client=_QueryAnalyzerClient(
                 {
                     "query_intent": {
-                        "ticker": "AMZN",
-                        "security_code": "",
                         "company_names": ["Amazon"],
                     },
                     "domain_ids": ["dcf"],
@@ -535,10 +578,118 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
             )
         )
 
-        self.assertIsNotNone(analysis.query_intent.company)
+        self.assertEqual(len(analysis.query_intent.subjects), 1)
         self.assertEqual(_ticker(analysis.query_intent), "AMZN")
         self.assertEqual(_market(analysis.query_intent), "USA")
         self.assertEqual(_company_names(analysis.query_intent), ["Amazon"])
+
+    def test_query_analyzer_resolves_ticker_surface_form_from_company_names(self) -> None:
+        analyzer = QueryAnalyzer(
+            client=_QueryAnalyzerClient(
+                {
+                    "query_intent": {
+                        "company_names": ["NVDA"],
+                    },
+                    "domain_ids": ["dcf"],
+                    "entities": [],
+                    "units": [
+                        {
+                            "id": "Q-001",
+                            "objective": "Analyze valuation upside",
+                            "retrieval_query": "NVDA valuation upside",
+                            "domain_ids": ["dcf"],
+                            "entity_ids": [],
+                            "time_scope": "2024-01-01 to 2026-03-06",
+                        }
+                    ],
+                    "requirements": [
+                        {
+                            "acceptance": "Cover valuation evidence.",
+                            "unit_ids": [0],
+                            "domain_ids": ["dcf"],
+                            "entity_ids": [],
+                            "provenance": "Derived from user query.",
+                        }
+                    ],
+                    "intent_tags": [],
+                    "rationale": "Need one domain.",
+                }
+            )
+        )
+
+        analysis = asyncio.run(
+            analyzer.analyze(
+                query="NVDA valuation",
+                index=self.index,
+                modules=self.modules,
+            )
+        )
+
+        self.assertEqual(_ticker(analysis.query_intent), "NVDA")
+        self.assertEqual(_market(analysis.query_intent), "USA")
+        self.assertEqual(_company_names(analysis.query_intent), ["Nvidia"])
+
+    def test_query_analyzer_uses_on_miss_for_unknown_company(self) -> None:
+        analyzer = QueryAnalyzer(
+            client=_QueryAnalyzerClient(
+                {
+                    "query_intent": {
+                        "company_names": ["드림텍"],
+                    },
+                    "domain_ids": ["dcf"],
+                    "entities": [],
+                    "units": [
+                        {
+                            "id": "Q-001",
+                            "objective": "Analyze valuation upside",
+                            "retrieval_query": "드림텍 valuation upside",
+                            "domain_ids": ["dcf"],
+                            "entity_ids": [],
+                            "time_scope": "2024-01-01 to 2026-03-06",
+                        }
+                    ],
+                    "requirements": [
+                        {
+                            "acceptance": "Cover valuation evidence.",
+                            "unit_ids": [0],
+                            "domain_ids": ["dcf"],
+                            "entity_ids": [],
+                            "provenance": "Derived from user query.",
+                        }
+                    ],
+                    "intent_tags": [],
+                    "rationale": "Need one domain.",
+                }
+            ),
+            on_miss=lambda surface_form: [
+                ListingSeed(
+                    company_id="KRX:192650",
+                    company_name="드림텍",
+                    company_aliases=("드림텍", "Dreamtech"),
+                    listing=Listing(
+                        listing_id="KRX:192650",
+                        company_id="KRX:192650",
+                        security_code="192650",
+                        exchange="KOSPI",
+                        vendor_symbols={"yahoo": "192650.KS"},
+                    ),
+                )
+            ]
+            if surface_form == "드림텍"
+            else [],
+        )
+
+        analysis = asyncio.run(
+            analyzer.analyze(
+                query="드림텍 valuation",
+                index=self.index,
+                modules=self.modules,
+            )
+        )
+
+        self.assertEqual(_company_names(analysis.query_intent), ["드림텍"])
+        self.assertEqual(_security_code(analysis.query_intent), "192650")
+        self.assertEqual(_market(analysis.query_intent), "KRX")
 
     def test_query_analyzer_maps_unit_id_strings_to_zero_based_indices(self) -> None:
         analyzer = QueryAnalyzer(
@@ -682,7 +833,7 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
 
         self.assertEqual(analysis.requirements[0].unit_ids, [0])
 
-    def test_query_analyzer_drops_non_concrete_entities(self) -> None:
+    def test_query_analyzer_keeps_non_concrete_entities_in_query_spec(self) -> None:
         analyzer = QueryAnalyzer(
             client=_QueryAnalyzerClient(
                 {
@@ -727,9 +878,16 @@ class QueryAnalyzerBoundaryTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(analysis.entities, {})
-        self.assertEqual(analysis.units[0].entity_ids, [])
-        self.assertEqual(analysis.requirements[0].entity_ids, [])
+        self.assertEqual(
+            analysis.entities,
+            {"stock-universe": "Investment Candidates"},
+        )
+        self.assertEqual(
+            analysis.query_intent.entities,
+            ("Investment Candidates",),
+        )
+        self.assertEqual(analysis.units[0].entity_ids, ["stock-universe"])
+        self.assertEqual(analysis.requirements[0].entity_ids, ["stock-universe"])
 
     def test_query_analyzer_rejects_unknown_unit_refs(self) -> None:
         analyzer = QueryAnalyzer(

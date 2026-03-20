@@ -425,16 +425,9 @@ class Reviewer:
         }
 
     def _used_modules_in_plan(self, plan: Plan) -> set[str]:
-        leaf_tasks = [
-            task
-            for task in plan.tasks
-            if task.task_type in {"leaf", "module"} and task.tool is not None
-        ]
         used: set[str] = set()
-        for task in leaf_tasks:
-            explicit_domain_id = task.domain_id.strip()
-            if explicit_domain_id:
-                used.add(explicit_domain_id)
+        for unit in plan.analysis.units:
+            used.update(unit.domain_ids)
         return used
 
     def _fallback_action_nodes(

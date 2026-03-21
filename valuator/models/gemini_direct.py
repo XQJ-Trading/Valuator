@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import queue
 import threading
 import uuid
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from google import genai
@@ -14,6 +18,29 @@ _STREAM_DONE = object()
 
 if TYPE_CHECKING:
     from ..core.llm_usage import LLMUsageWriter
+
+
+@lru_cache(maxsize=1)
+def ensure_supported_google_genai_runtime() -> str:
+    try:
+        installed_version = version("google-genai")
+    except PackageNotFoundError as exc:
+        raise RuntimeError(
+            "google-genai is not installed. Install dependencies from requirements.txt."
+        ) from exc
+
+    try:
+        types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_json_schema={"type": "object"},
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Unsupported google-genai runtime "
+            f"({installed_version}). The project requires response_json_schema "
+            "support and must run with the project environment."
+        ) from exc
+    return installed_version
 
 
 class GeminiSession:
@@ -86,6 +113,7 @@ class GeminiClient:
         self.model = model or config.agent_model
         self.client = client or genai.Client(api_key=key)
         self.usage_writer = usage_writer
+        ensure_supported_google_genai_runtime()
 
     def bind_usage_writer(self, usage_writer: "LLMUsageWriter | None") -> None:
         self.usage_writer = usage_writer
@@ -99,7 +127,6 @@ class GeminiClient:
         *,
         session_id: str | None = None,
         response_mime_type: str | None = None,
-        response_schema: dict[str, Any] | None = None,
         response_json_schema: dict[str, Any] | None = None,
     ) -> GeminiSession:
         system_prompt = ""
@@ -108,7 +135,6 @@ class GeminiClient:
         chat_config = self._build_config(
             system_prompt=system_prompt,
             response_mime_type=response_mime_type,
-            response_schema=response_schema,
             response_json_schema=response_json_schema,
         )
         sid = session_id or f"gemini-{uuid.uuid4().hex[:12]}"
@@ -124,14 +150,12 @@ class GeminiClient:
         prompt: str,
         system_prompt: str = "",
         response_mime_type: str | None = None,
-        response_schema: dict[str, Any] | None = None,
         response_json_schema: dict[str, Any] | None = None,
         trace_method: str = "gemini.generate",
     ) -> str:
         config_obj = self._build_config(
             system_prompt=system_prompt,
             response_mime_type=response_mime_type,
-            response_schema=response_schema,
             response_json_schema=response_json_schema,
         )
         from ..core.llm_usage import start_measurement
@@ -205,13 +229,11 @@ class GeminiClient:
         prompt: str,
         system_prompt: str = "",
         response_mime_type: str | None = None,
-        response_schema: dict[str, Any] | None = None,
         response_json_schema: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         config_obj = self._build_config(
             system_prompt=system_prompt,
             response_mime_type=response_mime_type,
-            response_schema=response_schema,
             response_json_schema=response_json_schema,
         )
         async for chunk in self._stream_in_thread(
@@ -270,24 +292,15 @@ class GeminiClient:
         *,
         system_prompt: str,
         response_mime_type: str | None,
-        response_schema: dict[str, Any] | None,
         response_json_schema: dict[str, Any] | None,
     ) -> types.GenerateContentConfig | None:
-        if response_schema and response_json_schema:
-            raise ValueError(
-                "Only one of response_schema or response_json_schema is allowed"
-            )
-
-        raw_config = {
-            "system_instruction": system_prompt or None,
-            "response_mime_type": response_mime_type,
-            "response_schema": response_schema,
-            "response_json_schema": response_json_schema,
-        }
-        config_data = {
-            key: value for key, value in raw_config.items() if value is not None
-        }
-
+        config_data: dict[str, Any] = {}
+        if system_prompt:
+            config_data["system_instruction"] = system_prompt
+        if response_mime_type:
+            config_data["response_mime_type"] = response_mime_type
+        if response_json_schema is not None:
+            config_data["response_json_schema"] = response_json_schema
         if not config_data:
             return None
         return types.GenerateContentConfig(**config_data)

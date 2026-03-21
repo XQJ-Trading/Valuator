@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Base tool implementation for AI Agent"""
 
 import asyncio
@@ -71,7 +73,7 @@ class BaseTool(ABC):
         """
         pass
 
-    def validate_parameters(self, **kwargs) -> bool:
+    def validate_parameters(self, **_kwargs) -> bool:
         """
         Validate tool parameters
 

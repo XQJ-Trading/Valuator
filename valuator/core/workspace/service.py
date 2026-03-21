@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
-from ..contracts.plan import Plan
+from ..contracts.plan import Plan, ReviewResult
 
 
 class Workspace:
@@ -38,7 +39,7 @@ class Workspace:
         return self._write_text("input/user_input.md", query.strip())
 
     def write_plan(self, plan: Plan) -> Path:
-        payload = plan.model_dump()
+        payload = asdict(plan)
         active = self._write_json("plan/active/decomposition.json", payload)
         if self.current_round is not None:
             self._write_json(
@@ -46,72 +47,46 @@ class Workspace:
             )
         return active
 
-    def read_plan(self) -> Plan:
-        path = self._resolve("plan/active/decomposition.json")
-        if not path.exists():
-            raise ValueError("plan file not found")
-        return Plan.model_validate_json(path.read_text(encoding="utf-8"))
-
-    def output_exists(self, rel_output_path: str) -> bool:
-        return self._resolve(rel_output_path).exists()
-
     def write_output(self, rel_output_path: str, content: str) -> Path:
         return self._write_text(rel_output_path, content)
 
-    def read_output(self, rel_output_path: str) -> str:
-        path = self._resolve(rel_output_path)
-        if not path.exists():
-            raise ValueError(f"missing output file: {rel_output_path}")
-        return path.read_text(encoding="utf-8")
-
-    def write_review(self, review: dict) -> Path:
-        return self._write_json("review/latest.json", review)
+    def write_review(self, review: ReviewResult) -> Path:
+        return self._write_json("review/latest.json", asdict(review))
 
     def write_final(self, markdown: str) -> Path:
         return self._write_text("output/final.md", markdown.strip() + "\n")
 
+    def write_final_trace(self, payload: dict) -> Path:
+        return self._write_json("output/final.trace.json", payload)
+
     def leaf_output_path(self, task_id: str) -> str:
         return f"/execution/outputs/{task_id}/result.md"
 
+    def leaf_output_json_path(self, task_id: str) -> str:
+        return f"/execution/outputs/{task_id}/result.json"
+
     def aggregation_report_path(self, task_id: str) -> str:
         return f"/aggregation/{task_id}/report.md"
+
+    def aggregation_ledger_path(self, task_id: str) -> str:
+        return f"/aggregation/{task_id}/ledger.json"
 
     def write_leaf_output(self, task_id: str, content: str) -> Path:
         rel_output_path = self.leaf_output_path(task_id)
         return self.write_output(rel_output_path, content)
 
-    def read_leaf_output(self, task_id: str) -> str:
-        rel_output_path = self.leaf_output_path(task_id)
-        return self.read_output(rel_output_path)
+    def write_leaf_output_json(self, task_id: str, payload: dict) -> Path:
+        return self._write_json(self.leaf_output_json_path(task_id), payload)
 
     def write_aggregation_report(self, task_id: str, markdown: str) -> Path:
         rel_output_path = self.aggregation_report_path(task_id)
         return self.write_output(rel_output_path, markdown)
 
+    def write_aggregation_ledger(self, task_id: str, payload: dict) -> Path:
+        return self._write_json(self.aggregation_ledger_path(task_id), payload)
+
     def write_output_metadata(self, rel_output_path: str, payload: dict) -> Path:
         return self._write_json(self._metadata_rel_path(rel_output_path), payload)
-
-    def read_output_metadata(self, rel_output_path: str) -> dict | None:
-        path = self._resolve(self._metadata_rel_path(rel_output_path))
-        if not path.exists():
-            return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return None
-        return data
-
-    def list_task_output_paths(self, task_id: str) -> list[str]:
-        root = self._resolve(f"/execution/outputs/{task_id}")
-        if not root.exists():
-            return []
-        files: list[str] = []
-        for path in sorted(root.rglob("*")):
-            if not path.is_file():
-                continue
-            if path.name.endswith(".meta.json"):
-                continue
-            files.append(self._logical_output_path(path))
-        return files
 
     def find_cached_output(self, tool: str, args_hash: str) -> str | None:
         """Find cached output from previous rounds via pre-built metadata index."""
@@ -161,7 +136,7 @@ class Workspace:
         return path
 
     def _write_json(self, rel_path: str, payload: dict) -> Path:
-        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
         return self._write_text(rel_path, text)
 
     def _resolve(self, rel_path: str) -> Path:
@@ -189,16 +164,6 @@ class Workspace:
             return f"aggregation/round-{self.current_round:02d}/{suffix}"
 
         return clean_rel_path
-
-    def _logical_output_path(self, path: Path) -> str:
-        rel = path.resolve().relative_to(self.session_dir.resolve()).as_posix()
-        parts = rel.split("/", 3)
-        if len(parts) == 4 and parts[0] == "execution" and parts[2] == "outputs":
-            if parts[1].startswith("round-"):
-                return f"/execution/outputs/{parts[3]}"
-        if rel.startswith("execution/outputs/"):
-            return f"/{rel}"
-        raise ValueError(f"invalid output path for session workspace: {path}")
 
     def _metadata_rel_path(self, rel_output_path: str) -> str:
         return f"{rel_output_path}.meta.json"

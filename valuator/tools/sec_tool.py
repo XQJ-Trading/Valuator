@@ -5,15 +5,24 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 import requests
 
-from ..models.gemini_direct import GeminiClient
 from ..utils.config import config
 from ..utils.logger import logger
 from .base import BaseTool, ToolResult
+
+if TYPE_CHECKING:
+    from ..models.gemini_direct import GeminiClient
+
+try:
+    import pandas as pd
+except Exception as exc:  # pragma: no cover - environment-dependent import failure
+    pd = None
+    _PANDAS_IMPORT_ERROR = exc
+else:
+    _PANDAS_IMPORT_ERROR = None
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -55,16 +64,28 @@ class SecToolError(Exception):
         self.recoverable = recoverable
 
 
+def _require_pandas() -> Any:
+    if pd is not None:
+        return pd
+    detail = str(_PANDAS_IMPORT_ERROR) if _PANDAS_IMPORT_ERROR else "unknown error"
+    raise SecToolError(
+        f"pandas dependency is unavailable: {detail}",
+        error_code="dependency_missing",
+        recoverable=True,
+    )
+
+
 def load_ticker_table() -> pd.DataFrame:
+    pandas = _require_pandas()
     if TICKER_PATH.exists():
-        return pd.read_json(TICKER_PATH)
+        return pandas.read_json(TICKER_PATH)
     response = requests.get(
         "https://www.sec.gov/files/company_tickers.json",
         headers=SEC_HEADERS,
         timeout=20,
     )
     response.raise_for_status()
-    df = pd.DataFrame(response.json()).T
+    df = pandas.DataFrame(response.json()).T
     df.to_json(TICKER_PATH, orient="records", force_ascii=False)
     return df
 
@@ -117,10 +138,18 @@ def get_10k_html_link(ticker: str, year: int) -> tuple[str, int]:
         )
 
     target_year = str(year)
-    picks = [candidate for candidate in tenk_candidates if candidate[0].startswith(target_year)]
+    picks = [
+        candidate
+        for candidate in tenk_candidates
+        if candidate[0].startswith(target_year)
+    ]
     if not picks:
         year = int(tenk_candidates[0][0][:4])
-        picks = [candidate for candidate in tenk_candidates if candidate[0].startswith(str(year))]
+        picks = [
+            candidate
+            for candidate in tenk_candidates
+            if candidate[0].startswith(str(year))
+        ]
 
     for report_date, accession_number in picks:
         report_date = report_date.replace("-", "")
@@ -145,7 +174,9 @@ def fetch_reader_lines(ticker: str, filing_url: str) -> list[str]:
     url_key = hashlib.sha256(filing_url.encode("utf-8")).hexdigest()[:12]
     cache_path = DATA_DIR / f"{safe_ticker}-{url_key}-10-k-lines.txt"
     if cache_path.exists():
-        cached = [line for line in cache_path.read_text(encoding="utf-8").splitlines() if line]
+        cached = [
+            line for line in cache_path.read_text(encoding="utf-8").splitlines() if line
+        ]
         if cached:
             return cached
 
@@ -170,7 +201,9 @@ class SECTool(BaseTool):
             "sec_tool",
             "Retrieve relevant 10-K details from SEC EDGAR for a ticker/year/query.",
         )
-        self.client = GeminiClient(config.agent_model, usage_writer=usage_writer)
+        from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
+
+        self.client = RuntimeGeminiClient(config.agent_model, usage_writer=usage_writer)
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.client.bind_usage_writer(usage_writer)
@@ -215,8 +248,8 @@ class SECTool(BaseTool):
             year_int = int(year)
             filing_url, used_year = get_10k_html_link(ticker, year_int)
             lines = fetch_reader_lines(ticker, filing_url)
-            findings = await self._extract_chunks(query, lines)
-            summary = "\n\n".join(findings).strip()
+            extracted_chunks = await self._extract_chunks(query, lines)
+            findings_text = "\n\n".join(extracted_chunks).strip()
             return ToolResult(
                 success=True,
                 result={
@@ -224,13 +257,13 @@ class SECTool(BaseTool):
                     "year": used_year,
                     "query": query,
                     "filing_url": filing_url,
-                    "summary": summary,
-                    "extracts": findings,
+                    "findings": findings_text,
+                    "extracts": extracted_chunks,
                 },
                 metadata={
                     "source": "sec_edgar",
                     "line_count": len(lines),
-                    "selected_count": len(findings),
+                    "selected_count": len(extracted_chunks),
                 },
             )
         except SecToolError as exc:

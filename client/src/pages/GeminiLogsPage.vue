@@ -38,7 +38,6 @@
         <select v-model="sortBy" class="filter-select" @change="handleSearch">
           <option value="newest">최신순</option>
           <option value="oldest">오래된순</option>
-          <option value="size">크기순</option>
         </select>
       </div>
     </div>
@@ -105,7 +104,7 @@ const searchQuery = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 const selectedModel = ref('')
-const sortBy = ref<'newest' | 'oldest' | 'size'>('newest')
+const sortBy = ref<'newest' | 'oldest'>('newest')
 const total = ref(0)
 
 // Available models (extracted from files)
@@ -337,4 +336,3 @@ onMounted(() => {
   }
 }
 </style>
-

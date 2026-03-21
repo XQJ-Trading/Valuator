@@ -45,7 +45,7 @@ class ContextTool(ReActBaseTool):
         path: Optional[str] = None,
         profile: Optional[str] = None,
         default: Optional[str] = None,
-        **kwargs,
+        **_kwargs,
     ) -> ToolResult:
         target_path = self._resolve_path(path=path, profile=profile, default=default)
         path_str = str(target_path)

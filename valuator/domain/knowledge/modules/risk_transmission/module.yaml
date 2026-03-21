@@ -1,0 +1,4 @@
+id: risk_transmission
+name: 리스크 전이
+description: 리스크가 손익/현금흐름 line-item으로 전이되는 경로를 분석한다.
+depends_on: []

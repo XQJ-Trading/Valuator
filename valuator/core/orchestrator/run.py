@@ -51,6 +51,7 @@ DEFAULT_QUERIES = [
     ),
     "Analyze NVIDIA (NVDA) revenue drivers, margin outlook, and key valuation risks.",
     "Analyze Tesla (TSLA) demand, margin trend, and capital allocation risk.",
+    "현대무벡스 기업 분석해줘.",
 ]
 
 
@@ -64,7 +65,9 @@ async def _run(args: argparse.Namespace) -> int:
     if not query:
         idx = args.query_index
         if idx < 0 or idx >= len(DEFAULT_QUERIES):
-            raise ValueError(f"query_index must be between 0 and {len(DEFAULT_QUERIES)-1}")
+            raise ValueError(
+                f"query_index must be between 0 and {len(DEFAULT_QUERIES)-1}"
+            )
         query = DEFAULT_QUERIES[idx]
 
     session_id = args.session_id or _default_session_id()
@@ -82,12 +85,14 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run session-based plan/execute pipeline")
+    parser = argparse.ArgumentParser(
+        description="Run session-based plan/execute pipeline"
+    )
     parser.add_argument("--query", type=str, default="", help="User query")
     parser.add_argument(
         "--query-index",
         type=int,
-        default=0,
+        default=1,
         help="Default query index when --query is empty",
     )
     parser.add_argument("--session-id", type=str, default="", help="Session ID")

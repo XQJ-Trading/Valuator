@@ -1,4 +1,10 @@
-from typing import Any, Dict
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel
 
 from ..domain.knowledge.financial import (
     DERIVED_DIFFERENCES,
@@ -7,6 +13,76 @@ from ..domain.knowledge.financial import (
     VALUATION_INFO_KEYS,
 )
 from .base import BaseTool, ToolResult
+
+FIELD_MAP = {field.canonical: field for field in STATEMENT_FIELDS}
+BALANCE_SHEET_FIELDS = (
+    "total_assets",
+    "total_liabilities",
+    "total_equity",
+    "current_assets",
+    "current_liabilities",
+)
+INCOME_FIELDS = (
+    "operating_income",
+    "interest_expense",
+    "total_revenue",
+    "gross_profit",
+    "net_income",
+    "ebitda",
+)
+CASHFLOW_FIELDS = (
+    "operating_cash_flow",
+    "capex",
+)
+
+
+class YFinanceRequest(BaseModel):
+    ticker: str
+    year: str = "latest"
+    min_year: int | None = None
+
+    @classmethod
+    def from_kwargs(cls, kwargs: dict[str, Any]) -> "YFinanceRequest":
+        ticker = str(kwargs.get("ticker") or kwargs.get("corp") or "").strip()
+        if not ticker:
+            raise ValueError("'ticker' is required")
+
+        year = str(kwargs.get("year") or kwargs.get("years") or "latest").strip()
+        raw_min_year = kwargs.get("min_year")
+        min_year = None if raw_min_year in (None, "") else int(raw_min_year)
+
+        return cls.model_validate(
+            {
+                "ticker": ticker,
+                "year": year or "latest",
+                "min_year": min_year,
+            }
+        )
+
+    def requested_year_label(self) -> str:
+        return self.year or "latest"
+
+    def fallback_query(self) -> str:
+        return (
+            f"{self.ticker} balance sheet total assets total liabilities total equity "
+            f"market cap current price trailing pe price to book {self.requested_year_label()}"
+        )
+
+
+@dataclass(frozen=True)
+class LoadedStatements:
+    ticker: str
+    balance_sheet: Any
+    income_statement: Any
+    cashflow: Any
+    info: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class YearSelection:
+    requested_year: str
+    chosen_year: str
+    tried_years: tuple[str, ...]
 
 
 class YFinanceBalanceSheetTool(BaseTool):
@@ -19,19 +95,10 @@ class YFinanceBalanceSheetTool(BaseTool):
         )
 
     async def execute(self, **kwargs) -> ToolResult:
-        raw = kwargs.get("ticker") or kwargs.get("corp")
-        if not raw or not str(raw).strip():
-            return ToolResult(success=False, result=None, error="'ticker' is required")
-
-        year = str(kwargs.get("year") or kwargs.get("years") or "").strip()
-        symbol = str(raw).strip()
-        query_year = year or "latest"
-        fallback_query = (
-            f"{symbol} balance sheet total assets total liabilities total equity "
-            f"market cap current price trailing pe price to book {query_year}"
-        )
-
-        import datetime as dt
+        try:
+            request = YFinanceRequest.from_kwargs(kwargs)
+        except ValueError as exc:
+            return ToolResult(success=False, result=None, error=str(exc))
 
         try:
             import yfinance as yf
@@ -44,37 +111,21 @@ class YFinanceBalanceSheetTool(BaseTool):
                     "error_code": "dependency_missing",
                     "fallback": {
                         "tool_name": "web_search_tool",
-                        "tool_args": {"query": fallback_query},
+                        "tool_args": {"query": request.fallback_query()},
                     },
                 },
             )
 
-        min_year = kwargs.get("min_year")
-        if min_year is not None:
-            min_year = int(min_year)
-
-        ticker_candidates = [symbol]
-
-        def fetch(attr):
-            for cand in ticker_candidates:
-                bs = getattr(yf.Ticker(cand), attr)
-                if bs is not None and not bs.empty:
-                    return bs, cand
-            return None, None
-
-        bs, used_ticker = fetch("balance_sheet")
-        if bs is None:
-            bs, used_ticker = fetch("quarterly_balance_sheet")
-        if bs is None:
+        statements = _load_statements(yf, request.ticker)
+        if statements is None:
             return ToolResult(
                 success=False,
                 result=None,
                 error="No balance sheet available for ticker",
-                metadata={"tried": ticker_candidates},
+                metadata={"tried": [request.ticker]},
             )
 
-        bs.columns = [str(c) for c in bs.columns]
-        available_years = list(bs.columns)
+        available_years = list(statements.balance_sheet.columns)
         if not available_years:
             return ToolResult(
                 success=False,
@@ -83,158 +134,60 @@ class YFinanceBalanceSheetTool(BaseTool):
                 metadata={"available_years": available_years},
             )
 
-        numeric_cols = [(c, int(c[:4])) for c in available_years if c[:4].isdigit()]
-        year_label = year or "latest"
-        if not year or year.lower() == "latest":
-            current_year = dt.datetime.now().year
-            year_candidates = [
-                c
-                for c, y in numeric_cols
-                if y <= current_year and (min_year is None or y >= min_year)
-            ]
-            if not year_candidates and min_year is not None:
-                year_candidates = [c for c, y in numeric_cols if y <= current_year]
-            if not year_candidates:
-                return ToolResult(
-                    success=False,
-                    result=None,
-                    error="No usable year found in balance sheet columns",
-                    metadata={"available_years": available_years},
-                )
-            chosen_year = max(year_candidates, key=lambda c: int(c[:4]))
-            tried_years = [year_label, chosen_year]
-        else:
-            if year in available_years:
-                chosen_year = year
-                tried_years = [year]
-            elif year[:4].isdigit() and numeric_cols:
-                target = int(year[:4])
-                prev = [c for c, y in numeric_cols if y <= target]
-                chosen_year = (
-                    max(prev, key=lambda c: int(c[:4]))
-                    if prev
-                    else min(numeric_cols, key=lambda x: abs(x[1] - target))[0]
-                )
-                tried_years = [year, chosen_year]
-            else:
-                chosen_year = available_years[0]
-                tried_years = [year, chosen_year]
+        try:
+            year_selection = _resolve_year(
+                requested_year=request.requested_year_label(),
+                min_year=request.min_year,
+                available_years=available_years,
+            )
+        except ValueError as exc:
+            return ToolResult(
+                success=False,
+                result=None,
+                error=str(exc),
+                metadata={"available_years": available_years},
+            )
 
-        def pick(df, rows):
-            if df is None or df.empty or chosen_year not in df.columns:
-                return None, None
-            for row in rows:
-                if row in df.index:
-                    val = df.loc[row, chosen_year]
-                    if hasattr(val, "iloc"):
-                        val = val.iloc[0]
-                    return float(val), row
-            return None, None
-
-        field_map = {field.canonical: field for field in STATEMENT_FIELDS}
-        total_assets, assets_row_used = pick(bs, field_map["total_assets"].aliases)
-        total_liabilities, liab_row_used = pick(
-            bs, field_map["total_liabilities"].aliases
+        result, row_usage = _extract_result(
+            statements=statements,
+            year=year_selection.chosen_year,
+            requested_year=year_selection.requested_year,
         )
-        total_equity, equity_row_used = pick(bs, field_map["total_equity"].aliases)
-        if total_assets is None and total_liabilities is None and total_equity is None:
+        if (
+            result["total_assets"] is None
+            and result["total_liabilities"] is None
+            and result["total_equity"] is None
+        ):
             return ToolResult(
                 success=False,
                 result=None,
                 error="No balance sheet data found for given year/ticker",
                 metadata={
-                    "ticker": used_ticker,
-                    "requested_year": year_label,
-                    "used_year": chosen_year,
+                    "ticker": statements.ticker,
+                    "requested_year": year_selection.requested_year,
+                    "used_year": year_selection.chosen_year,
                     "available_years": available_years,
                 },
             )
 
-        t = yf.Ticker(used_ticker)
-        info = t.info or {}
-        cf = t.cashflow
-        if cf is None or cf.empty:
-            cf = t.quarterly_cashflow
-        fin = t.financials
-        if fin is None or fin.empty:
-            fin = t.quarterly_financials
-        current_assets, _ = pick(bs, field_map["current_assets"].aliases)
-        current_liabilities, _ = pick(bs, field_map["current_liabilities"].aliases)
-        operating_income, _ = pick(fin, field_map["operating_income"].aliases)
-        interest_expense, _ = pick(fin, field_map["interest_expense"].aliases)
-        total_revenue, _ = pick(fin, field_map["total_revenue"].aliases)
-        gross_profit, _ = pick(fin, field_map["gross_profit"].aliases)
-        net_income, _ = pick(fin, field_map["net_income"].aliases)
-        ebitda, _ = pick(fin, field_map["ebitda"].aliases)
-        operating_cash_flow, _ = pick(cf, field_map["operating_cash_flow"].aliases)
-        capex, _ = pick(cf, field_map["capex"].aliases)
-        result = {
-            "ticker": used_ticker,
-            "requested_year": year_label,
-            "year": chosen_year,
-            "total_assets": total_assets,
-            "total_liabilities": total_liabilities,
-            "total_equity": total_equity,
-            "current_assets": current_assets,
-            "current_liabilities": current_liabilities,
-            "operating_income": operating_income,
-            "interest_expense": interest_expense,
-            "total_revenue": total_revenue,
-            "gross_profit": gross_profit,
-            "net_income": net_income,
-            "ebitda": ebitda,
-            "operating_cash_flow": operating_cash_flow,
-            "capex": capex,
-        }
-        for result_key, info_key in VALUATION_INFO_KEYS:
-            result[result_key] = info.get(info_key)
+        _apply_valuation_info(result, statements.info)
+        _apply_derived_metrics(result)
+        result["findings"] = _build_findings(result)
 
-        for metric in DERIVED_RATIOS:
-            numerator = result.get(metric.numerator)
-            denominator = result.get(metric.denominator)
-            if numerator is None or denominator in (None, 0):
-                continue
-            denominator_value = abs(denominator) if metric.abs_denominator else denominator
-            if not denominator_value:
-                continue
-            result[metric.name] = numerator / denominator_value
-
-        for metric in DERIVED_DIFFERENCES:
-            minuend = result.get(metric.minuend)
-            subtrahend = result.get(metric.subtrahend)
-            if minuend is None or subtrahend is None:
-                continue
-            result[metric.name] = minuend - subtrahend
-        summary_parts = [
-            f"ticker={result['ticker']}",
-            f"year={result['year']}",
-            f"market_cap={result.get('market_cap')}",
-            f"current_price={result.get('current_price')}",
-            f"trailing_pe={result.get('trailing_pe')}",
-            f"price_to_book={result.get('price_to_book')}",
-            f"total_revenue={result.get('total_revenue')}",
-            f"net_income={result.get('net_income')}",
-            f"debt_to_equity={result.get('debt_to_equity')}",
-            f"current_ratio={result.get('current_ratio')}",
-            f"gross_margin={result.get('gross_margin')}",
-            f"interest_coverage={result.get('interest_coverage')}",
-            f"free_cash_flow={result.get('free_cash_flow')}",
-        ]
-        result["findings"] = ", ".join(summary_parts)
         return ToolResult(
             success=True,
             result=result,
             metadata={
                 "source": "yfinance",
-                "assets_row": assets_row_used,
-                "liabilities_row": liab_row_used,
-                "equity_row": equity_row_used,
+                "assets_row": row_usage["total_assets"],
+                "liabilities_row": row_usage["total_liabilities"],
+                "equity_row": row_usage["total_equity"],
                 "available_years": available_years,
-                "year_selection": tried_years,
+                "year_selection": list(year_selection.tried_years),
             },
         )
 
-    def get_schema(self) -> Dict[str, Any]:
+    def get_schema(self) -> dict[str, Any]:
         return {
             "type": "function",
             "function": {
@@ -262,3 +215,195 @@ class YFinanceBalanceSheetTool(BaseTool):
                 },
             },
         }
+
+
+def _load_statements(yf_module: Any, ticker: str) -> LoadedStatements | None:
+    ticker_client = yf_module.Ticker(ticker)
+    balance_sheet = _first_available_statement(
+        ticker_client,
+        ("balance_sheet", "quarterly_balance_sheet"),
+    )
+    if balance_sheet is None:
+        return None
+    return LoadedStatements(
+        ticker=ticker,
+        balance_sheet=balance_sheet,
+        income_statement=_first_available_statement(
+            ticker_client,
+            ("financials", "quarterly_financials"),
+        ),
+        cashflow=_first_available_statement(
+            ticker_client,
+            ("cashflow", "quarterly_cashflow"),
+        ),
+        info=dict(ticker_client.info or {}),
+    )
+
+
+def _first_available_statement(ticker_client: Any, attrs: tuple[str, ...]) -> Any | None:
+    for attr in attrs:
+        statement = _normalize_statement(getattr(ticker_client, attr))
+        if statement is not None:
+            return statement
+    return None
+
+
+def _normalize_statement(statement: Any) -> Any | None:
+    if statement is None or statement.empty:
+        return None
+    statement.columns = [str(column) for column in statement.columns]
+    return statement
+
+
+def _resolve_year(
+    *,
+    requested_year: str,
+    min_year: int | None,
+    available_years: list[str],
+) -> YearSelection:
+    numeric_cols = [(column, int(column[:4])) for column in available_years if column[:4].isdigit()]
+    if requested_year.lower() == "latest":
+        current_year = datetime.now().year
+        year_candidates = [
+            column
+            for column, year in numeric_cols
+            if year <= current_year and (min_year is None or year >= min_year)
+        ]
+        if not year_candidates and min_year is not None:
+            year_candidates = [
+                column
+                for column, year in numeric_cols
+                if year <= current_year
+            ]
+        if not year_candidates:
+            raise ValueError("No usable year found in balance sheet columns")
+        chosen_year = max(year_candidates, key=lambda column: int(column[:4]))
+        return YearSelection(
+            requested_year=requested_year,
+            chosen_year=chosen_year,
+            tried_years=(requested_year, chosen_year),
+        )
+
+    if requested_year in available_years:
+        return YearSelection(
+            requested_year=requested_year,
+            chosen_year=requested_year,
+            tried_years=(requested_year,),
+        )
+
+    if requested_year[:4].isdigit() and numeric_cols:
+        target_year = int(requested_year[:4])
+        previous_years = [column for column, year in numeric_cols if year <= target_year]
+        chosen_year = (
+            max(previous_years, key=lambda column: int(column[:4]))
+            if previous_years
+            else min(numeric_cols, key=lambda item: abs(item[1] - target_year))[0]
+        )
+        return YearSelection(
+            requested_year=requested_year,
+            chosen_year=chosen_year,
+            tried_years=(requested_year, chosen_year),
+        )
+
+    return YearSelection(
+        requested_year=requested_year,
+        chosen_year=available_years[0],
+        tried_years=(requested_year, available_years[0]),
+    )
+
+
+def _extract_result(
+    *,
+    statements: LoadedStatements,
+    year: str,
+    requested_year: str,
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    result = {
+        "ticker": statements.ticker,
+        "requested_year": requested_year,
+        "year": year,
+    }
+    row_usage: dict[str, str | None] = {
+        "total_assets": None,
+        "total_liabilities": None,
+        "total_equity": None,
+    }
+
+    for canonical in BALANCE_SHEET_FIELDS:
+        value, row_name = _pick_field(statements.balance_sheet, canonical, year)
+        result[canonical] = value
+        if canonical in row_usage:
+            row_usage[canonical] = row_name
+
+    for canonical in INCOME_FIELDS:
+        value, _ = _pick_field(statements.income_statement, canonical, year)
+        result[canonical] = value
+
+    for canonical in CASHFLOW_FIELDS:
+        value, _ = _pick_field(statements.cashflow, canonical, year)
+        result[canonical] = value
+
+    return result, row_usage
+
+
+def _pick_field(
+    statement: Any | None,
+    canonical: str,
+    year: str,
+) -> tuple[float | None, str | None]:
+    if statement is None or year not in statement.columns:
+        return None, None
+
+    field = FIELD_MAP[canonical]
+    for row_name in field.aliases:
+        if row_name not in statement.index:
+            continue
+        value = statement.loc[row_name, year]
+        if hasattr(value, "iloc"):
+            value = value.iloc[0]
+        return float(value), row_name
+    return None, None
+
+
+def _apply_valuation_info(result: dict[str, Any], info: dict[str, Any]) -> None:
+    for result_key, info_key in VALUATION_INFO_KEYS:
+        result[result_key] = info.get(info_key)
+
+
+def _apply_derived_metrics(result: dict[str, Any]) -> None:
+    for metric in DERIVED_RATIOS:
+        numerator = result.get(metric.numerator)
+        denominator = result.get(metric.denominator)
+        if numerator is None or denominator in (None, 0):
+            continue
+        denominator_value = abs(denominator) if metric.abs_denominator else denominator
+        if not denominator_value:
+            continue
+        result[metric.name] = numerator / denominator_value
+
+    for metric in DERIVED_DIFFERENCES:
+        minuend = result.get(metric.minuend)
+        subtrahend = result.get(metric.subtrahend)
+        if minuend is None or subtrahend is None:
+            continue
+        result[metric.name] = minuend - subtrahend
+
+
+def _build_findings(result: dict[str, Any]) -> str:
+    return ", ".join(
+        [
+            f"ticker={result['ticker']}",
+            f"year={result['year']}",
+            f"market_cap={result.get('market_cap')}",
+            f"current_price={result.get('current_price')}",
+            f"trailing_pe={result.get('trailing_pe')}",
+            f"price_to_book={result.get('price_to_book')}",
+            f"total_revenue={result.get('total_revenue')}",
+            f"net_income={result.get('net_income')}",
+            f"debt_to_equity={result.get('debt_to_equity')}",
+            f"current_ratio={result.get('current_ratio')}",
+            f"gross_margin={result.get('gross_margin')}",
+            f"interest_coverage={result.get('interest_coverage')}",
+            f"free_cash_flow={result.get('free_cash_flow')}",
+        ]
+    )

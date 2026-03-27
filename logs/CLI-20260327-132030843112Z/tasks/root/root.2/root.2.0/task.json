@@ -2,9 +2,9 @@
   "task_id": "root.2.0",
   "parent_id": "root.2",
   "description": "과거 중동 전쟁(걸프전, 이라크 전쟁 등) 및 긴장 고조 시기 글로벌 방산, 에너지, 금융 섹터 주가 반응 데이터 수집",
-  "state": "waiting",
+  "state": "done",
   "created_at": "2026-03-27T13:21:03.722693Z",
-  "updated_at": "2026-03-27T13:26:11.793899Z",
+  "updated_at": "2026-03-27T13:47:02.056229Z",
   "task_type": "merge",
   "query_unit_ids": [],
   "deps": [
@@ -24,7 +24,7 @@
   "artifacts": {
     "execution_result_path": null,
     "execution_meta_path": null,
-    "aggregation_report_path": null,
+    "aggregation_report_path": "aggregation/report.md",
     "final_output_path": null
   }
 }

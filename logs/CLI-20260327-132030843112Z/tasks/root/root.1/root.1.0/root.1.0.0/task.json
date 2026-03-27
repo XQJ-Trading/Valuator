@@ -2,9 +2,9 @@
   "task_id": "root.1.0.0",
   "parent_id": "root.1.0",
   "description": "호르무즈 해협 봉쇄 관련 4개 이상의 구체적 시나리오(예: 단기 국지 도발, 부분 봉쇄, 전면 봉쇄, 지역 전쟁 확산)와 각 시나리오별 발생 확률(%)에 대한 전문가 및 싱크탱크 예측치 조사",
-  "state": "running",
+  "state": "done",
   "created_at": "2026-03-27T13:21:34.923398Z",
-  "updated_at": "2026-03-27T13:26:11.789659Z",
+  "updated_at": "2026-03-27T13:47:02.054753Z",
   "task_type": "leaf",
   "query_unit_ids": [],
   "deps": [],
@@ -22,7 +22,7 @@
   "artifacts": {
     "execution_result_path": "execution/result.md",
     "execution_meta_path": "execution/result.md.meta.json",
-    "aggregation_report_path": null,
+    "aggregation_report_path": "aggregation/report.md",
     "final_output_path": null
   }
 }

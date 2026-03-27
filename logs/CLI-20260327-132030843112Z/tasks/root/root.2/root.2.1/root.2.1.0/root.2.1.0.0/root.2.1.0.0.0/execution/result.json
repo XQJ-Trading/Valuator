@@ -1,0 +1,23 @@
+{
+  "task_id": "root.2.1.0.0.0",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "tool_name": "code_execute_tool",
+  "domain_id": "risk_transmission",
+  "domain_summary": "",
+  "domain_key_values": {},
+  "tool_metadata": {
+    "timeout": 30,
+    "safe_mode": true,
+    "isolation": "subprocess",
+    "allowed_imports": [],
+    "execution_time": 0.04720741699566133,
+    "execution_count": 1,
+    "success_rate": 0.0
+  },
+  "raw_result": {
+    "output": "",
+    "code": "import yfinance as yf\nimport pandas as pd\n\ntickers = ['^GSPC', 'GC=F', 'CL=F', '^TNX', 'DX-Y.NYB']\nperiods = [\n    ('2023-10-06', '2023-11-08'),\n    ('2024-04-12', '2024-05-14')\n]\n\nresults = {}\nfor start, end in periods:\n    data = yf.download(tickers, start=start, end=end)['Close']\n    results[f\"{start}_to_{end}\"] = data.to_dict()\n\nprint(results)",
+    "execution_type": "failed"
+  }
+}

@@ -2,9 +2,9 @@
   "task_id": "root.2.0.2",
   "parent_id": "root.2.0",
   "description": "과거 중동 분쟁 시기 S&P 500 내 섹터별 상대 수익률 비교 및 안전 자산으로의 자금 흐름 패턴 요약",
-  "state": "running",
+  "state": "done",
   "created_at": "2026-03-27T13:21:12.783320Z",
-  "updated_at": "2026-03-27T13:26:11.794942Z",
+  "updated_at": "2026-03-27T13:47:02.057062Z",
   "task_type": "leaf",
   "query_unit_ids": [],
   "deps": [],
@@ -22,7 +22,7 @@
   "artifacts": {
     "execution_result_path": "execution/result.md",
     "execution_meta_path": "execution/result.md.meta.json",
-    "aggregation_report_path": null,
+    "aggregation_report_path": "aggregation/report.md",
     "final_output_path": null
   }
 }

@@ -1,0 +1,28 @@
+# root.2.1.0
+
+## sources
+
+- report:root.2.1.0.0
+- report:root.2.1.0.1
+
+## child results
+
+### root.2.1.0.0
+
+{
+  "oct_nov_2023_analysis": "During the October 6 to November 7, 2023 period, the S&P 500 experienced an initial drawdown of -2.12% followed by a sharp recovery of +8.72% by November's end. Gold (GLD) saw massive safe-haven inflows totaling $8.2 billion.",
+  "apr_may_2024_analysis": "Between April 12 and May 13, 2024, direct Iran-Israel exchanges led to a -4.23% drop in the S&P 500. Gold peaked at $2,400, WTI Oil hit $87/bbl, and the US 10Y Yield reached 4.7%.",
+  "volatility_summary": "Daily precise volatility series were replaced by peak-to-trough drawdowns and monthly performance proxies due to data retrieval limitations. High volatility was concentrated in the first 14 days of each escalation, followed by stabilization as direct energy supply disruptions remained localized.",
+  "risk_metrics_gap": "Precise annualized volatility figures are unavailable; however, the proxy data shows a 4-6% variance in equity markets and significant upside skew in commodities during the peak tension weeks."
+}
+
+### root.2.1.0.1
+
+Analysis of financial assets during the 2023 and 2024 Middle East escalations reveals a consistent pattern of initial volatility followed by rapid stabilization unless supply chains are directly severed. After the October 2023 event, the S&P 500 dropped 2.12% within the month but rallied 8.72% in November as the conflict remained localized. Gold rose approximately 7-8% as a safe haven, while WTI oil peaked near $90 before retreating. In the April 2024 Iran-Israel escalation, the S&P 500 declined 4.23% for the month, Gold surged to record highs near $2400, and 10-year Treasury yields climbed toward 4.7% due to inflation and risk premiums. The US Dollar (DXY) remained strong in both periods.
+
+{
+  "oct_nov_2023_analysis": "Between Oct 6 and Nov 7, 2023, the S&P 500 initially dropped 2.12% but rebounded 8.72% by late November as the conflict remained localized. Gold (GLD) saw safe-haven inflows of $8.2 billion, while WTI Crude Oil peaked near $90/bbl before retreating. US 10Y Treasury yields remained volatile, influenced by both safe-haven bids and inflation concerns.",
+  "apr_may_2024_analysis": "During the April 12 to May 13, 2024 Iran-Israel escalation, the S&P 500 declined 4.23%. Gold hit a record high near $2,400, and WTI Oil reached $87/bbl. US 10Y Treasury yields climbed toward 4.7% as risk premiums expanded and inflation expectations shifted.",
+  "market_performance_table": "| Asset Class | Oct-Nov 2023 Return/Peak | Apr-May 2024 Return/Peak | Volatility Trend |\n| :--- | :--- | :--- | :--- |\n| S&P 500 | -2.12% (Initial) / +8.72% (Recovery) | -4.23% (Drawdown) | High 14-day concentration |\n| Gold (GLD) | +7-8% ($8.2B Inflow) | Peak $2,400 (Record High) | Sustained safe-haven bid |\n| WTI Oil | Peak ~$90/bbl | Peak $87/bbl | Spike followed by cooling |\n| US 10Y Yield | Fluctuating | Peak 4.7% | Risk premium expansion |\n| US Dollar (DXY) | Strong Stability | Strong Momentum | Risk-off dominance |",
+  "volatility_pattern": "Both periods exhibited a 'front-loaded' volatility profile where markets reacted sharply within the first 10-14 days of escalation. Stabilization occurred rapidly once it became clear that energy supply chains (Strait of Hormuz) were not directly severed."
+}

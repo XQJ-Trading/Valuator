@@ -2,9 +2,9 @@
   "task_id": "root.1.1.2",
   "parent_id": "root.1.1",
   "description": "공급망 병목 현상이 주요 제조업(자동차, 전자 등)의 재고 비용 및 생산 차질에 미치는 영향 및 비용 전가 가능성 조사",
-  "state": "running",
+  "state": "done",
   "created_at": "2026-03-27T13:21:24.846006Z",
-  "updated_at": "2026-03-27T13:26:11.791635Z",
+  "updated_at": "2026-03-27T13:47:02.055860Z",
   "task_type": "leaf",
   "query_unit_ids": [],
   "deps": [],
@@ -22,7 +22,7 @@
   "artifacts": {
     "execution_result_path": "execution/result.md",
     "execution_meta_path": "execution/result.md.meta.json",
-    "aggregation_report_path": null,
+    "aggregation_report_path": "aggregation/report.md",
     "final_output_path": null
   }
 }

@@ -2,9 +2,9 @@
   "task_id": "root.2.1",
   "parent_id": "root.2",
   "description": "최근 이스라엘-하마스, 이란-이스라엘 충돌 시점의 자산군별 변동성 및 자금 흐름 패턴 분석",
-  "state": "waiting",
+  "state": "done",
   "created_at": "2026-03-27T13:21:03.723077Z",
-  "updated_at": "2026-03-27T13:26:11.795180Z",
+  "updated_at": "2026-03-27T13:47:02.057247Z",
   "task_type": "merge",
   "query_unit_ids": [],
   "deps": [
@@ -22,7 +22,7 @@
   "artifacts": {
     "execution_result_path": null,
     "execution_meta_path": null,
-    "aggregation_report_path": null,
+    "aggregation_report_path": "aggregation/report.md",
     "final_output_path": null
   }
 }

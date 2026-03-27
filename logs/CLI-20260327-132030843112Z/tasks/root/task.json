@@ -2,9 +2,9 @@
   "task_id": "root",
   "parent_id": null,
   "description": "Valuation: [THINKING_LEVEL]\nhigh\n\n[QUERY]\n현 시점 이란 - 미국 전쟁 관련 충분한 정보를 수집하고, 미래 시나리오를 4개 이상 구체화한 뒤 각각의 진행 확률을 계산후 의견을 개진해줘.",
-  "state": "waiting",
+  "state": "done",
   "created_at": "2026-03-27T13:20:30.845896Z",
-  "updated_at": "2026-03-27T13:26:11.787481Z",
+  "updated_at": "2026-03-27T13:47:02.052295Z",
   "task_type": "merge",
   "query_unit_ids": [
     0,
@@ -31,7 +31,7 @@
   "artifacts": {
     "execution_result_path": null,
     "execution_meta_path": null,
-    "aggregation_report_path": null,
-    "final_output_path": null
+    "aggregation_report_path": "aggregation/report.md",
+    "final_output_path": "../../output/final.md"
   }
 }

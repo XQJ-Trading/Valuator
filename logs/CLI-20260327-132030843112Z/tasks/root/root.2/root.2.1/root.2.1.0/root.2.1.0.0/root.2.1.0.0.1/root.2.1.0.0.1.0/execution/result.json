@@ -1,0 +1,23 @@
+{
+  "task_id": "root.2.1.0.0.1.0",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "tool_name": "code_execute_tool",
+  "domain_id": "risk_transmission",
+  "domain_summary": "",
+  "domain_key_values": {},
+  "tool_metadata": {
+    "timeout": 30,
+    "safe_mode": true,
+    "isolation": "subprocess",
+    "allowed_imports": [],
+    "execution_time": 0.05346437499974854,
+    "execution_count": 3,
+    "success_rate": 0.0
+  },
+  "raw_result": {
+    "output": "",
+    "code": "import yfinance as yf\nimport pandas as pd\nimport numpy as np\n\ntickers = ['^GSPC', 'GC=F', 'CL=F', '^TNX', 'DX-Y.NYB']\nperiods = [\n    ('2023-10-06', '2023-11-07'),\n    ('2024-04-12', '2024-05-13')\n]\n\nresults = {}\n\nfor start_date, end_date in periods:\n    period_results = {}\n    for ticker in tickers:\n        data = yf.download(ticker, start=start_date, end=end_date)\n        if not data.empty:\n            returns = data['Adj Close'].pct_change().dropna()\n            total_return = (data['Adj Close'].iloc[-1] / data['Adj Close'].iloc[0]) - 1\n            volatility = returns.std() * np.sqrt(252)\n            period_results[ticker] = {\n                'return': float(total_return),\n                'volatility': float(volatility)\n            }\n    results[f\"{start_date}_{end_date}\"] = period_results\n\nprint(results)",
+    "execution_type": "failed"
+  }
+}

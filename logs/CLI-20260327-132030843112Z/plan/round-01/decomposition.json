@@ -178,19 +178,68 @@
     },
     {
       "id": "root.0.0",
+      "task_type": "merge",
+      "query_unit_ids": [],
+      "deps": [
+        "root.0.0.0",
+        "root.0.0.1",
+        "root.0.0.2"
+      ],
+      "tool": null,
+      "domain_id": "risk_transmission",
+      "output": "",
+      "description": "이란-미국 간의 최신 군사적 충돌 및 긴장 고조 사건 조사 (2024년 말~2026년 현재)",
+      "merge_instruction": ""
+    },
+    {
+      "id": "root.0.0.0",
       "task_type": "leaf",
       "query_unit_ids": [],
       "deps": [],
       "tool": {
         "name": "web_search_tool",
         "args": {
-          "query": "Iran vs USA military conflict recent events 2024 2025 2026 current status escalation",
+          "query": "Iran Israel US military conflict timeline October 2024 to February 2026 escalation",
           "search_mode": "web"
         }
       },
       "domain_id": "risk_transmission",
       "output": "execution/result.md",
-      "description": "이란-미국 간의 최신 군사적 충돌 및 긴장 고조 사건 조사 (2024년 말~2026년 현재)",
+      "description": "2024년 말부터 2026년 2월 '이란 전쟁' 발발 직전까지의 월별 주요 군사적 충돌 및 긴장 고조 타임라인 조사",
+      "merge_instruction": ""
+    },
+    {
+      "id": "root.0.0.1",
+      "task_type": "leaf",
+      "query_unit_ids": [],
+      "deps": [],
+      "tool": {
+        "name": "web_search_tool",
+        "args": {
+          "query": "US Iran conflict major combat zones strike targets nuclear facilities oil refineries casualty damage reports February March 2026",
+          "search_mode": "web"
+        }
+      },
+      "domain_id": "risk_transmission",
+      "output": "execution/result.md",
+      "description": "2026년 2월 2일 이후 현재(2026년 3월)까지의 주요 전투 지역, 타격 목표(핵시설, 정유시설 등) 및 양측 공식 피해 집계 상세 분석",
+      "merge_instruction": ""
+    },
+    {
+      "id": "root.0.0.2",
+      "task_type": "leaf",
+      "query_unit_ids": [],
+      "deps": [],
+      "tool": {
+        "name": "web_search_tool",
+        "args": {
+          "query": "2024-2026 Hormuz Strait closure status Houthi Hezbollah Red Sea involvement intensity Iran-US conflict",
+          "search_mode": "web"
+        }
+      },
+      "domain_id": "risk_transmission",
+      "output": "execution/result.md",
+      "description": "최근 충돌 과정에서의 호르무즈 해협 봉쇄 여부 및 홍해 내 대리 세력(후티, 헤즈볼라)의 개입 수위 조사",
       "merge_instruction": ""
     },
     {
@@ -478,30 +527,60 @@
     },
     {
       "id": "root.2.1.0.0.0",
+      "task_type": "merge",
+      "query_unit_ids": [],
+      "deps": [
+        "root.2.1.0.0.0.0"
+      ],
+      "tool": null,
+      "domain_id": "risk_transmission",
+      "output": "",
+      "description": "Fetch daily closing prices for ^GSPC (S&P 500), GC=F (Gold), CL=F (WTI Oil), ^TNX (US 10Y Yield), and DX-Y.NYB (DXY) from Oct 6, 2023, to Nov 7, 2023, and April 12, 2024, to May 13, 2024.",
+      "merge_instruction": ""
+    },
+    {
+      "id": "root.2.1.0.0.0.0",
       "task_type": "leaf",
       "query_unit_ids": [],
       "deps": [],
       "tool": {
         "name": "web_search_tool",
-        "args": {}
+        "args": {
+          "query": "historical daily closing prices for S&P 500 (^GSPC), Gold (GC=F), WTI Oil (CL=F), US 10Y Yield (^TNX), and DXY from 2023-10-06 to 2023-11-07 and 2024-04-12 to 2024-05-13"
+        }
       },
       "domain_id": "risk_transmission",
       "output": "execution/result.md",
-      "description": "Fetch daily closing prices for ^GSPC (S&P 500), GC=F (Gold), CL=F (WTI Oil), ^TNX (US 10Y Yield), and DX-Y.NYB (DXY) from Oct 6, 2023, to Nov 7, 2023, and April 12, 2024, to May 13, 2024.",
+      "description": "Search for historical daily closing prices of S&P 500 (^GSPC), Gold (GC=F), WTI Oil (CL=F), US 10Y Yield (^TNX), and US Dollar Index (DXY) for the periods Oct 6, 2023, to Nov 7, 2023, and April 12, 2024, to May 13, 2024.",
       "merge_instruction": ""
     },
     {
       "id": "root.2.1.0.0.1",
+      "task_type": "merge",
+      "query_unit_ids": [],
+      "deps": [
+        "root.2.1.0.0.1.0"
+      ],
+      "tool": null,
+      "domain_id": "risk_transmission",
+      "output": "",
+      "description": "Calculate percentage returns and annualized volatility for S&P 500, Gold, WTI Oil, US 10Y Yield, and DXY for the two specified periods (Oct-Nov 2023 and Apr-May 2024).",
+      "merge_instruction": ""
+    },
+    {
+      "id": "root.2.1.0.0.1.0",
       "task_type": "leaf",
       "query_unit_ids": [],
       "deps": [],
       "tool": {
         "name": "code_execute_tool",
-        "args": {}
+        "args": {
+          "code": "import yfinance as yf\nimport pandas as pd\nimport numpy as np\n\ntickers = ['^GSPC', 'GC=F', 'CL=F', '^TNX', 'DX-Y.NYB']\nperiods = [\n    ('2023-10-06', '2023-11-07'),\n    ('2024-04-12', '2024-05-13')\n]\n\nresults = {}\n\nfor start_date, end_date in periods:\n    period_results = {}\n    for ticker in tickers:\n        data = yf.download(ticker, start=start_date, end=end_date)\n        if not data.empty:\n            returns = data['Adj Close'].pct_change().dropna()\n            total_return = (data['Adj Close'].iloc[-1] / data['Adj Close'].iloc[0]) - 1\n            volatility = returns.std() * np.sqrt(252)\n            period_results[ticker] = {\n                'return': float(total_return),\n                'volatility': float(volatility)\n            }\n    results[f\"{start_date}_{end_date}\"] = period_results\n\nprint(results)"
+        }
       },
       "domain_id": "risk_transmission",
       "output": "execution/result.md",
-      "description": "Calculate percentage returns and annualized volatility for S&P 500, Gold, WTI Oil, US 10Y Yield, and DXY for the two specified periods (Oct-Nov 2023 and Apr-May 2024).",
+      "description": "Calculate the percentage returns and annualized volatility for S&P 500 (^GSPC), Gold (GC=F), WTI Oil (CL=F), US 10Y Yield (^TNX), and DXY (DX-Y.NYB) for two periods: Oct 6, 2023 - Nov 7, 2023 and Apr 12, 2024 - May 13, 2024 using code_execute_tool.",
       "merge_instruction": ""
     },
     {

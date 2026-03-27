@@ -2,23 +2,24 @@
   "task_id": "root.2.1.0.0.1",
   "parent_id": "root.2.1.0.0",
   "description": "Calculate percentage returns and annualized volatility for S&P 500, Gold, WTI Oil, US 10Y Yield, and DXY for the two specified periods (Oct-Nov 2023 and Apr-May 2024).",
-  "state": "created",
+  "state": "failed",
   "created_at": "2026-03-27T13:26:11.796728Z",
-  "updated_at": "2026-03-27T13:26:11.796777Z",
-  "task_type": "leaf",
+  "updated_at": "2026-03-27T13:47:02.058479Z",
+  "task_type": "merge",
   "query_unit_ids": [],
-  "deps": [],
-  "tool": {
-    "name": "code_execute_tool",
-    "args": {}
-  },
+  "deps": [
+    "root.2.1.0.0.1.0"
+  ],
+  "tool": null,
   "domain_id": "risk_transmission",
-  "output": "execution/result.md",
+  "output": "",
   "merge_instruction": "",
-  "children": [],
+  "children": [
+    "root.2.1.0.0.1.0"
+  ],
   "artifacts": {
-    "execution_result_path": null,
-    "execution_meta_path": null,
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
     "aggregation_report_path": null,
     "final_output_path": null
   }

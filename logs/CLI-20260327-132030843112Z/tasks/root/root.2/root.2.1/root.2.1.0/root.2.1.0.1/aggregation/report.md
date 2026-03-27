@@ -1,0 +1,5 @@
+# root.2.1.0.1
+
+## source: execution/result.md
+
+Analysis of financial assets during the 2023 and 2024 Middle East escalations reveals a consistent pattern of initial volatility followed by rapid stabilization unless supply chains are directly severed. After the October 2023 event, the S&P 500 dropped 2.12% within the month but rallied 8.72% in November as the conflict remained localized. Gold rose approximately 7-8% as a safe haven, while WTI oil peaked near $90 before retreating. In the April 2024 Iran-Israel escalation, the S&P 500 declined 4.23% for the month, Gold surged to record highs near $2400, and 10-year Treasury yields climbed toward 4.7% due to inflation and risk premiums. The US Dollar (DXY) remained strong in both periods.

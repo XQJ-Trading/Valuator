@@ -1,0 +1,21 @@
+{
+  "tool": "web_search_tool",
+  "args_hash": "df0a21e9ad1fa18a11aa6aa4ab044fe20d3d2d647e8dd40f1b9758478d073b58",
+  "args": {
+    "query": "US military bases attacks Iraq Syria Red Sea Houthis Hezbollah Kata'ib Hezbollah status after Operation Epic Fury February 2026"
+  },
+  "success": true,
+  "error": null,
+  "retrieval": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "web",
+    "usage": {
+      "input_tokens": 53,
+      "output_tokens": 220,
+      "total_tokens": 273
+    }
+  },
+  "started_at": "2026-03-27T13:36:37.310145Z",
+  "duration_ms": 3941.934
+}

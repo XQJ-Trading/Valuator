@@ -1,0 +1,21 @@
+{
+  "tool": "web_search_tool",
+  "args_hash": "7493f72ff66f02e1c6c2d181c8e2467dac47ac93f4e01c5c502bf462e7216cd8",
+  "args": {
+    "query": "historical daily closing prices for S&P 500 (^GSPC), Gold (GC=F), WTI Oil (CL=F), US 10Y Yield (^TNX), and DXY from 2023-10-06 to 2023-11-07 and 2024-04-12 to 2024-05-13"
+  },
+  "success": true,
+  "error": null,
+  "retrieval": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "web",
+    "usage": {
+      "input_tokens": 99,
+      "output_tokens": 355,
+      "total_tokens": 454
+    }
+  },
+  "started_at": "2026-03-27T13:31:32.395950Z",
+  "duration_ms": 8885.302
+}

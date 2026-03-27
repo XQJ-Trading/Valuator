@@ -1,0 +1,22 @@
+{
+  "tool": "web_search_tool",
+  "args_hash": "419a4853c9db05b84bbaa4d01a8a6945b5d7247627e9f5d6ebec0726233bbf6e",
+  "args": {
+    "query": "Iran Israel US military conflict timeline October 2024 to February 2026 escalation",
+    "search_mode": "web"
+  },
+  "success": true,
+  "error": null,
+  "retrieval": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "web",
+    "usage": {
+      "input_tokens": 45,
+      "output_tokens": 649,
+      "total_tokens": 694
+    }
+  },
+  "started_at": "2026-03-27T13:36:08.890420Z",
+  "duration_ms": 7941.487
+}

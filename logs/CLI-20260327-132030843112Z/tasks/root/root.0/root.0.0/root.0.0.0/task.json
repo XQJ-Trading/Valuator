@@ -1,0 +1,28 @@
+{
+  "task_id": "root.0.0.0",
+  "parent_id": "root.0.0",
+  "description": "2024년 말부터 2026년 2월 '이란 전쟁' 발발 직전까지의 월별 주요 군사적 충돌 및 긴장 고조 타임라인 조사",
+  "state": "done",
+  "created_at": "2026-03-27T13:36:06.399744Z",
+  "updated_at": "2026-03-27T13:47:02.052825Z",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "deps": [],
+  "tool": {
+    "name": "web_search_tool",
+    "args": {
+      "query": "Iran Israel US military conflict timeline October 2024 to February 2026 escalation",
+      "search_mode": "web"
+    }
+  },
+  "domain_id": "risk_transmission",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": "aggregation/report.md",
+    "final_output_path": null
+  }
+}

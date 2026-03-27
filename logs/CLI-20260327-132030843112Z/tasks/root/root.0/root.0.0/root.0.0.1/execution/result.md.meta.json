@@ -1,0 +1,22 @@
+{
+  "tool": "web_search_tool",
+  "args_hash": "e6d0c0190c0a40f9b9494b61d36ec262aa7ec5ba8721f560d8ed4812f05b4165",
+  "args": {
+    "query": "US Iran conflict major combat zones strike targets nuclear facilities oil refineries casualty damage reports February March 2026",
+    "search_mode": "web"
+  },
+  "success": true,
+  "error": null,
+  "retrieval": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "web",
+    "usage": {
+      "input_tokens": 50,
+      "output_tokens": 599,
+      "total_tokens": 649
+    }
+  },
+  "started_at": "2026-03-27T13:36:10.648183Z",
+  "duration_ms": 6945.769
+}

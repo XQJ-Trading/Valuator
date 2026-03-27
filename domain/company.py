@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from valuator.utils.dataclass_compat import dataclass, field
 
-
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 KRX_SECURITIES_PATH = DATA_DIR / "krx_securities.json"
 SEC_TICKERS_PATH = DATA_DIR / "sec_company_tickers.json"
 
@@ -109,11 +108,20 @@ def resolve_subjects(
         ticker=normalized_ticker,
         security_code=normalized_security_code,
     )
-    company_subjects = tuple(
-        _subject_from_surface_form(index, company_name, on_miss=on_miss)
-        for company_name in normalized_company_names
-    )
-    return merge_subjects(identifier_subjects, company_subjects)
+    company_subjects: list[Subject] = []
+    failures: list[str] = []
+    for company_name in normalized_company_names:
+        try:
+            company_subjects.append(
+                _subject_from_surface_form(index, company_name, on_miss=on_miss)
+            )
+        except ValueError:
+            failures.append(company_name)
+
+    if not identifier_subjects and not company_subjects and failures:
+        raise ValueError(f"unknown company: {failures[0]}")
+
+    return merge_subjects(identifier_subjects, tuple(company_subjects))
 
 
 def merge_subjects(*groups: Iterable[Subject]) -> tuple[Subject, ...]:

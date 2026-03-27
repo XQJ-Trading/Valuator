@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from dataclasses import dataclass, field
 
-from valuator.utils.dataclass_compat import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .query import QueryAnalysis, QueryIntent
 

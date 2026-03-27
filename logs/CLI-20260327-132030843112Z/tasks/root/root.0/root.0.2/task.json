@@ -1,0 +1,28 @@
+{
+  "task_id": "root.0.2",
+  "parent_id": "root.0",
+  "description": "이란 정부와 미국 행정부의 공식 입장 및 상호 위협 수준 비교",
+  "state": "done",
+  "created_at": "2026-03-27T13:21:03.728717Z",
+  "updated_at": "2026-03-27T13:26:11.788767Z",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "deps": [],
+  "tool": {
+    "name": "web_search_tool",
+    "args": {
+      "query": "Official statements and threat assessment US vs Iran 2025-2026",
+      "search_mode": "web"
+    }
+  },
+  "domain_id": "risk_transmission",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": "aggregation/report.md",
+    "final_output_path": null
+  }
+}

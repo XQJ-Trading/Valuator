@@ -1,0 +1,3 @@
+{"global_seq": 55, "task_id": "root.0.1", "task_seq": 2, "timestamp": "2026-03-27T13:21:14.951881Z", "phase": "decision", "action": null, "summary": "[Errno 2] No such file or directory: '/Users/taehyeonjeon/Valuator/logs/CLI-20260327-132030843112Z/diagnostics/llm_usage.jsonl'"}
+{"global_seq": 56, "task_id": "root.0.1", "task_seq": 2, "timestamp": "2026-03-27T13:25:58.072749Z", "phase": "task_result", "action": "fail", "summary": "step failed: [Errno 2] No such file or directory: '/Users/taehyeonjeon/Valuator/logs/CLI-20260327-132030843112Z/diagnostics/llm_usage.jsonl'"}
+{"global_seq": 57, "task_id": "root.2.1.0.0", "task_seq": 2, "timestamp": "2026-03-27T13:25:58.074922Z", "phase": "decision", "action": "decompose", "summary": "action=decompose"}

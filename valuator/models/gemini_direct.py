@@ -106,6 +106,8 @@ class GeminiClient:
         api_key: str | None = None,
         client: genai.Client | None = None,
         usage_writer: "LLMUsageWriter | None" = None,
+        retry_count: int | None = None,
+        retry_base_delay: float | None = None,
     ):
         key = api_key or config.google_api_key
         if not key:
@@ -113,6 +115,8 @@ class GeminiClient:
         self.model = model or config.agent_model
         self.client = client or genai.Client(api_key=key)
         self.usage_writer = usage_writer
+        self._retry_count = retry_count if retry_count is not None else config.agent_llm_retry_count
+        self._retry_base_delay = retry_base_delay if retry_base_delay is not None else config.agent_llm_retry_base_delay
         ensure_supported_google_genai_runtime()
 
     def bind_usage_writer(self, usage_writer: "LLMUsageWriter | None") -> None:
@@ -158,48 +162,88 @@ class GeminiClient:
             response_mime_type=response_mime_type,
             response_json_schema=response_json_schema,
         )
-        from ..core.llm_usage import start_measurement
+        from ..core.llm_usage import Measurement
 
         writer = self.usage_writer
-        measurement = start_measurement()
-        try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.model,
-                contents=prompt,
-                config=config_obj,
-            )
-            latency_seconds = measurement.latency_seconds()
 
-            usage_metadata = getattr(response, "usage_metadata", None)
-            if hasattr(usage_metadata, "model_dump"):
-                usage_metadata = usage_metadata.model_dump()
-            if not isinstance(usage_metadata, dict):
-                usage_metadata = None
+        for attempt in range(self._retry_count + 1):
+            measurement = Measurement.start()
+            try:
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.model,
+                    contents=prompt,
+                    config=config_obj,
+                )
+                latency_seconds = measurement.latency_seconds()
 
-            if writer is not None:
-                writer.append_call(
-                    method=trace_method,
-                    model=self.model,
-                    usage=usage_metadata,
-                    latency_seconds=latency_seconds,
-                    started_at=measurement.started_at,
-                )
-            return self._extract_text(response)
-        except Exception:
-            if writer is not None:
-                writer.append_call(
-                    method=f"{trace_method}.error",
-                    model=self.model,
-                    usage={
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                    },
-                    latency_seconds=measurement.latency_seconds(),
-                    started_at=measurement.started_at,
-                )
-            raise
+                usage_metadata = getattr(response, "usage_metadata", None)
+                if hasattr(usage_metadata, "model_dump"):
+                    usage_metadata = usage_metadata.model_dump()
+                if not isinstance(usage_metadata, dict):
+                    usage_metadata = None
+                response_text = self._extract_text(response)
+
+                if writer is not None:
+                    writer.append_call(
+                        method=trace_method,
+                        model=self.model,
+                        usage=usage_metadata,
+                        latency_seconds=latency_seconds,
+                        started_at=measurement.started_at,
+                    )
+                    log_llm_call = getattr(writer, "log_llm_call", None)
+                    if callable(log_llm_call):
+                        log_llm_call(
+                            trace_method=trace_method,
+                            model=self.model,
+                            prompt=prompt,
+                            system_prompt=system_prompt,
+                            response_mime_type=response_mime_type,
+                            response_json_schema=response_json_schema,
+                            response_text=response_text,
+                            usage=usage_metadata,
+                            latency_ms=latency_seconds * 1000.0,
+                            started_at=measurement.started_at,
+                        )
+                return response_text
+            except Exception as exc:
+                if writer is not None:
+                    retry_suffix = f".retry{attempt}" if attempt < self._retry_count else ""
+                    error_method = f"{trace_method}.error{retry_suffix}"
+                    writer.append_call(
+                        method=error_method,
+                        model=self.model,
+                        usage={
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": 0,
+                        },
+                        latency_seconds=measurement.latency_seconds(),
+                        started_at=measurement.started_at,
+                    )
+                    log_llm_call = getattr(writer, "log_llm_call", None)
+                    if callable(log_llm_call):
+                        log_llm_call(
+                            trace_method=error_method,
+                            model=self.model,
+                            prompt=prompt,
+                            system_prompt=system_prompt,
+                            response_mime_type=response_mime_type,
+                            response_json_schema=response_json_schema,
+                            response_text=None,
+                            usage={
+                                "prompt_tokens": 0,
+                                "completion_tokens": 0,
+                                "total_tokens": 0,
+                            },
+                            latency_ms=measurement.latency_seconds() * 1000.0,
+                            started_at=measurement.started_at,
+                            error=str(exc),
+                        )
+                if attempt >= self._retry_count:
+                    raise
+                await asyncio.sleep(self._retry_base_delay * (2 ** attempt))
 
     async def generate_json(
         self,
@@ -208,6 +252,7 @@ class GeminiClient:
         system_prompt: str = "",
         response_json_schema: dict[str, Any],
         trace_method: str,
+        max_response_chars: int | None = None,
     ) -> dict[str, Any]:
         raw = await self.generate(
             prompt=prompt,
@@ -216,10 +261,28 @@ class GeminiClient:
             response_json_schema=response_json_schema,
             trace_method=trace_method,
         )
+        if max_response_chars is not None and len(raw) > max_response_chars:
+            raise ValueError(
+                f"{trace_method} returned oversized JSON "
+                f"({len(raw)} chars > {max_response_chars})"
+            )
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{trace_method} returned invalid JSON") from exc
+            decoder = json.JSONDecoder()
+            data = None
+            for index, char in enumerate(raw):
+                if char != "{":
+                    continue
+                try:
+                    candidate, _ = decoder.raw_decode(raw[index:])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    data = candidate
+                    break
+            if data is None:
+                raise ValueError(f"{trace_method} returned invalid JSON") from exc
         if not isinstance(data, dict):
             raise ValueError(f"{trace_method} expected JSON object")
         return data

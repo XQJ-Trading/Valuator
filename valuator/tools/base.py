@@ -163,6 +163,10 @@ class ToolRegistry:
         """List all registered tools"""
         return [tool.get_info() for tool in self.tools.values()]
 
+    def bind_usage_writer(self, usage_writer: Any | None) -> None:
+        for tool in self.tools.values():
+            tool.bind_usage_writer(usage_writer)
+
     async def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
         """Execute a tool"""
         tool = self.get_tool(tool_name)

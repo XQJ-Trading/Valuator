@@ -1,0 +1,28 @@
+{
+  "task_id": "root.1.0",
+  "parent_id": "root.1",
+  "description": "호르무즈 해협 봉쇄 가능성과 그에 따른 글로벌 원유 공급량 차질 규모 및 국제 유가(WTI, Brent) 변동 예측 데이터 조사",
+  "state": "waiting",
+  "created_at": "2026-03-27T13:21:08.160111Z",
+  "updated_at": "2026-03-27T13:26:11.789369Z",
+  "task_type": "merge",
+  "query_unit_ids": [],
+  "deps": [
+    "root.1.0.0",
+    "root.1.0.1"
+  ],
+  "tool": null,
+  "domain_id": "risk_transmission",
+  "output": "",
+  "merge_instruction": "",
+  "children": [
+    "root.1.0.0",
+    "root.1.0.1"
+  ],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": null,
+    "final_output_path": null
+  }
+}

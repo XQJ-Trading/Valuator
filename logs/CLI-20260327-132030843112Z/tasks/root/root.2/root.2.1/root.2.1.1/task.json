@@ -1,0 +1,27 @@
+{
+  "task_id": "root.2.1.1",
+  "parent_id": "root.2.1",
+  "description": "최근 중동 분쟁 시기 상장지수펀드(ETF) 자금 유입/유출 데이터를 통한 Safe Haven(금, 달러, 국채) 선호도 및 Risk-off 패턴 분석",
+  "state": "running",
+  "created_at": "2026-03-27T13:21:14.941232Z",
+  "updated_at": "2026-03-27T13:26:11.797590Z",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "deps": [],
+  "tool": {
+    "name": "web_search_tool",
+    "args": {
+      "query": "ETF fund flows GLD UUP TLT SPY October 2023 April 2024 Middle East conflict safe haven risk-off analysis"
+    }
+  },
+  "domain_id": "risk_transmission",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": null,
+    "final_output_path": null
+  }
+}

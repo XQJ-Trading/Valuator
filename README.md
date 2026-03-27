@@ -44,7 +44,7 @@ Valuator/
    python3 -m venv .venv
    .venv/bin/pip install -r requirements.txt
    ```
-   - Gemini 3.x 모델 지원을 위해 `google-genai==1.62.0`을 사용합니다.
+   - 최신 Gemini API 모델 지원을 위해 `google-genai==1.62.0`을 사용합니다.
 
 2. **환경 변수 설정**
    
@@ -54,12 +54,12 @@ Valuator/
    # Google API Key (필수)
    GOOGLE_API_KEY=your_google_api_key_here
    
-   # 사용할 모델 선택 (Gemini 3.0 권장)
-   AGENT_MODEL=gemini-3-pro-preview
-   # 또는: gemini-3-flash-preview
+   # 사용할 모델 선택 (기본값: Gemini 3 Flash)
+   AGENT_MODEL=gemini-3-flash-preview
+   # 또는: gemini-3-pro-preview
    
    # 지원 모델 목록
-   SUPPORTED_MODELS=gemini-3-pro-preview,gemini-3-flash-preview
+   SUPPORTED_MODELS=gemini-3-flash-preview,gemini-3-pro-preview
    
    # 참고: thinking_level은 API 요청 파라미터로 전달합니다 (환경 변수 아님)
    ```
@@ -88,9 +88,9 @@ Valuator/
 - **다양한 도구**: 웹 검색, 코드 실행, 파일 시스템, 금융 데이터 분석, Deep Search
 - **실시간 스트리밍**: Server-Sent Events를 통한 실시간 응답
 - **세션 관리**: 대화 기록 저장 및 조회 (파일/MongoDB)
-- **모델 선택**: Gemini 3.0 모델 지원
-- **🆕 Gemini3 Direct API**: google-genai SDK로 최신 Gemini 3.x 모델 직접 호출
-- **🆕 Thinking Level**: Gemini3의 추론 깊이 제어 (high/low)
+- **모델 선택**: Gemini 3 Flash/Pro 모델 지원
+- **🆕 Gemini Direct API**: google-genai SDK로 최신 Gemini 모델 직접 호출
+- **🆕 Thinking Level**: Gemini 추론 깊이 제어 (high/low)
 - **Task Rewrite**: LLM을 활용한 작업 재작성 기능
 
 ## 🛠️ 아키텍처
@@ -156,8 +156,8 @@ Valuator/
 
 1. **환경 변수 설정** (`.env` 파일):
    ```bash
-   # Gemini3 모델 사용
-   AGENT_MODEL=gemini-3-pro-preview
+   # Gemini 3 Flash 모델 사용
+   AGENT_MODEL=gemini-3-flash-preview
    ```
 
 2. **API 요청에서 Thinking Level 설정**:
@@ -167,12 +167,12 @@ Valuator/
    POST /api/v1/sessions
    {
      "query": "복잡한 문제를 분석해주세요",
-     "model": "gemini-3-pro-preview",
+     "model": "gemini-3-flash-preview",
      "thinking_level": "high"  // 또는 "low", null
    }
    ```
    
-   **Thinking Level 옵션** (Gemini 3.0 전용):
+   **Thinking Level 옵션** (Gemini reasoning 모델):
    - `high`: 깊은 추론 (복잡한 작업에 적합, 느림)
    - `low`: 빠른 응답 (간단한 작업에 적합, 빠름)
    - `null` 또는 생략: Thinking Level 비활성화 (기본 동작)

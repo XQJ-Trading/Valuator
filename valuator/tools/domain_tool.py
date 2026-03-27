@@ -7,14 +7,17 @@ from .base import BaseTool, ToolResult
 
 
 class DomainTool(BaseTool):
-    def __init__(self, usage_writer: Any | None = None):
+    def __init__(self, usage_writer: Any | None = None, model: str | None = None):
         super().__init__(
             name="domain_tool",
             description="Execute guide-based domain analysis.",
         )
         from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
 
-        self.client = RuntimeGeminiClient(config.agent_model, usage_writer=usage_writer)
+        self.client = RuntimeGeminiClient(
+            model or config.agent_model,
+            usage_writer=usage_writer,
+        )
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.client.bind_usage_writer(usage_writer)
@@ -38,6 +41,7 @@ class DomainTool(BaseTool):
             f"[CONTEXT]\n{context or '(none)'}\n\n"
             "[INSTRUCTION]\n"
             "각 aspect별로 `### [ASPECT:{aspect_id}]` 헤더 아래 분석을 작성하라.\n"
+            "정량 데이터는 Markdown 표로 정리하라. 표에는 연도, 수치, 변화율을 포함하라.\n"
             "정량 데이터와 절대 시점은 그대로 유지하라.\n"
             "[CONTEXT]의 표, 좌표계, 임계치, 비교 블록이 있으면 관련 aspect 아래에서 구조를 최대한 유지하라.\n"
             "페르소나 해석을 추가하되, [CONTEXT]의 고유 사실을 일반론으로 치환하거나 삭제하지 마라.\n"

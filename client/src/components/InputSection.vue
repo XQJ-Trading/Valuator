@@ -26,11 +26,11 @@
         </select>
       </div>
 
-      <!-- Thinking Level 선택 섹션 (Gemini 3.0 전용) -->
+      <!-- Thinking Level 선택 섹션 -->
       <div class="thinking-section">
         <label class="thinking-label">
           <span class="thinking-icon">🧠</span>
-          Thinking Level (Gemini 3.0)
+          Thinking Level (Gemini Flash/Pro)
         </label>
         <select 
           :value="thinkingLevel" 
@@ -98,8 +98,10 @@ function getModelDisplayName(model: string): string {
   const displayNames: Record<string, string> = {
     'gemini-3-flash-preview': 'Gemini 3 Flash (빠른 응답)',
     'gemini-3-pro-preview': 'Gemini 3 Pro (고성능)',
-    'gemini-flash-latest': 'Gemini Flash (빠른 응답)',
-    'gemini-pro-latest': 'Gemini Pro (고성능)'
+    'gemini-2.5-flash': 'Gemini 3 Flash',
+    'gemini-2.5-pro': 'Gemini 3 Pro',
+    'gemini-flash-latest': 'Gemini 3 Flash',
+    'gemini-pro-latest': 'Gemini 3 Pro'
   }
   return displayNames[model] || model
 }

@@ -37,7 +37,7 @@
         <div class="option-group">
           <label class="option-label">
             <span class="label-icon">🧠</span>
-            Thinking Level (Gemini 3.0)
+            Thinking Level (Gemini Flash/Pro)
           </label>
           <select v-model="thinkingLevel" class="model-select">
             <option value="">기본값 (비활성화)</option>
@@ -138,9 +138,7 @@ async function fetchModels() {
     console.error('Failed to fetch models:', e)
     availableModels.value = [
       'gemini-3-flash-preview',
-      'gemini-3-pro-preview',
-      'gemini-flash-latest',
-      'gemini-pro-latest'
+      'gemini-3-pro-preview'
     ]
     if (!selectedModel.value) {
       selectedModel.value = availableModels.value[0]
@@ -196,8 +194,10 @@ function getModelDisplayName(model: string): string {
   const displayNames: Record<string, string> = {
     'gemini-3-flash-preview': 'Gemini 3 Flash (빠른 응답)',
     'gemini-3-pro-preview': 'Gemini 3 Pro (고성능)',
-    'gemini-flash-latest': 'Gemini Flash (빠른 응답)',
-    'gemini-pro-latest': 'Gemini Pro (고성능)'
+    'gemini-2.5-flash': 'Gemini 3 Flash',
+    'gemini-2.5-pro': 'Gemini 3 Pro',
+    'gemini-flash-latest': 'Gemini 3 Flash',
+    'gemini-pro-latest': 'Gemini 3 Pro'
   }
   return displayNames[model] || model
 }

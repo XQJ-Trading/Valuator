@@ -33,7 +33,7 @@ class TaskRewriteLLMClient:
 
         Args:
             model_name: Name of the Gemini model
-            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
+            thinking_level: Thinking level for Gemini reasoning models ('high', 'low', or None)
 
         Returns:
             GeminiClient instance
@@ -68,7 +68,7 @@ class TaskRewriteLLMClient:
             task: Original task text
             custom_prompt: Optional custom prompt
             model: Gemini model name
-            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
+            thinking_level: Thinking level for Gemini reasoning models ('high', 'low', or None)
 
         Returns:
             Rewritten task text

@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Mapping
 
-from ..domain.company import Company, Listing, Subject, representative_listing
-from ..domain.query import QueryIntent
+from domain.company import Company, Listing, Subject, representative_listing
+from domain.query import QueryIntent
 
 
 class SubjectIdentityLevel(str, Enum):
@@ -80,7 +80,10 @@ def project_subject_for_tool(
     )
     if requirement.market and projection.market != requirement.market:
         return None
-    if requirement.identity_level is SubjectIdentityLevel.LISTING and projection.listing is None:
+    if (
+        requirement.identity_level is SubjectIdentityLevel.LISTING
+        and projection.listing is None
+    ):
         return None
     return projection
 
@@ -160,12 +163,13 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "web_search_tool": ToolSpec(
         name="web_search_tool",
         required=("query",),
-        capability="current news/facts/sources",
+        optional=("search_mode",),
+        capability="web/academic/sec grounded search",
     ),
     "sec_tool": ToolSpec(
         name="sec_tool",
         required=("ticker", "year", "query"),
-        capability="10-K filings and disclosures",
+        capability="year-specific 10-K extraction",
         subject_requirement=SubjectRequirement(
             identity_level=SubjectIdentityLevel.LISTING,
             market="USA",
@@ -176,8 +180,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         required=("ticker",),
         optional=("year",),
         capability=(
-            "financial statements plus valuation/pricing coordinates "
-            "(market_cap, price, PE, PBR)"
+            "Single-year financial statements plus valuation/pricing. "
+            "Call once per year for multi-year trend analysis. "
+            "Returns: balance sheet, income, cashflow, derived ratios, market data."
         ),
         subject_requirement=SubjectRequirement(
             identity_level=SubjectIdentityLevel.LISTING

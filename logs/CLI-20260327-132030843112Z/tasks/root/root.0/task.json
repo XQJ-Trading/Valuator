@@ -1,0 +1,30 @@
+{
+  "task_id": "root.0",
+  "parent_id": "root",
+  "description": "이란-미국 간의 최신 군사적 긴장 상태, 대리전(proxy war) 현황 및 양국 공식 입장 조사",
+  "state": "waiting",
+  "created_at": "2026-03-27T13:20:55.616029Z",
+  "updated_at": "2026-03-27T13:26:11.787855Z",
+  "task_type": "merge",
+  "query_unit_ids": [],
+  "deps": [
+    "root.0.0",
+    "root.0.1",
+    "root.0.2"
+  ],
+  "tool": null,
+  "domain_id": "risk_transmission",
+  "output": "",
+  "merge_instruction": "",
+  "children": [
+    "root.0.0",
+    "root.0.1",
+    "root.0.2"
+  ],
+  "artifacts": {
+    "execution_result_path": null,
+    "execution_meta_path": null,
+    "aggregation_report_path": null,
+    "final_output_path": null
+  }
+}

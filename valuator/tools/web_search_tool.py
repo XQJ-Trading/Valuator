@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 """Web search tool for AI Agent."""
 
+from __future__ import annotations
+
 import asyncio
-import os
 import re
+from typing import Literal
 from typing import Any, Dict
 
-from dotenv import load_dotenv
 try:
     from langchain_core.messages import HumanMessage, SystemMessage
 except Exception:  # pragma: no cover - optional dependency at runtime
@@ -36,9 +35,6 @@ class PerplexitySearchTool(ReActBaseTool):
                 raise ValueError("langchain-perplexity dependency is unavailable")
             api_key = config.perplexity_api_key
             if not api_key:
-                load_dotenv(".env")
-                api_key = os.getenv("PPLX_API_KEY")
-            if not api_key:
                 raise ValueError("PPLX_API_KEY not found in config or environment")
             self.chat = ChatPerplexity(
                 model="sonar",
@@ -59,8 +55,16 @@ class PerplexitySearchTool(ReActBaseTool):
         self,
         query: str | None = None,
         queries: list[str] | None = None,
+        search_mode: str | None = None,
         **_kwargs,
     ) -> ToolResult:
+        selected_search_mode = (search_mode or "web").strip().lower()
+        if selected_search_mode not in {"web", "academic", "sec"}:
+            return ToolResult(
+                success=False,
+                result=None,
+                error="search_mode must be one of: web, academic, sec",
+            )
         if queries:
             if not all(isinstance(q, str) and q.strip() for q in queries):
                 return ToolResult(
@@ -68,14 +72,25 @@ class PerplexitySearchTool(ReActBaseTool):
                     result=None,
                     error="queries must be non-empty strings",
                 )
-            return await self._execute_batch_search(queries)
+            return await self._execute_batch_search(
+                queries,
+                search_mode=selected_search_mode,
+            )
         if not query:
             return ToolResult(
                 success=False, result=None, error="query or queries is required"
             )
-        return await self._execute_single_search(query)
+        return await self._execute_single_search(
+            query,
+            search_mode=selected_search_mode,
+        )
 
-    async def _execute_single_search(self, query: str) -> ToolResult:
+    async def _execute_single_search(
+        self,
+        query: str,
+        *,
+        search_mode: Literal["web", "academic", "sec"],
+    ) -> ToolResult:
         if not self.available or not self.chat:
             return ToolResult(
                 success=False,
@@ -83,13 +98,17 @@ class PerplexitySearchTool(ReActBaseTool):
                 error="Perplexity API not available. Check PPLX_API_KEY configuration or dependencies.",
             )
 
-        from ..core.llm_usage import start_measurement
+        from ..core.llm_usage import Measurement
 
         writer = self.usage_writer
-        measurement = start_measurement()
+        measurement = Measurement.start()
 
         try:
-            logger.info(f"Searching web with Perplexity for: {query}")
+            logger.info(
+                "Searching web with Perplexity for: %s (search_mode=%s)",
+                query,
+                search_mode,
+            )
 
             response = await self.chat.ainvoke(
                 [
@@ -101,7 +120,8 @@ class PerplexitySearchTool(ReActBaseTool):
                         )
                     ),
                     HumanMessage(content=query),
-                ]
+                ],
+                extra_body={"web_search_options": {"search_mode": search_mode}},
             )
             latency_seconds = measurement.latency_seconds()
             answer = response.content
@@ -141,6 +161,7 @@ class PerplexitySearchTool(ReActBaseTool):
                 metadata={
                     "search_type": "perplexity_web",
                     "model": "sonar",
+                    "search_mode": search_mode,
                     "usage": usage_meta,
                 },
             )
@@ -163,7 +184,12 @@ class PerplexitySearchTool(ReActBaseTool):
                 success=False, result=None, error=f"Search failed: {str(e)}"
             )
 
-    async def _execute_batch_search(self, queries: list[str]) -> ToolResult:
+    async def _execute_batch_search(
+        self,
+        queries: list[str],
+        *,
+        search_mode: Literal["web", "academic", "sec"],
+    ) -> ToolResult:
         if not self.available or not self.chat:
             return ToolResult(
                 success=False,
@@ -175,7 +201,7 @@ class PerplexitySearchTool(ReActBaseTool):
                 success=False, result=None, error="queries must be a non-empty list"
             )
         results = await asyncio.gather(
-            *(self._execute_single_search(q) for q in queries)
+            *(self._execute_single_search(q, search_mode=search_mode) for q in queries)
         )
         if any(not r.success for r in results):
             return ToolResult(
@@ -201,7 +227,11 @@ class PerplexitySearchTool(ReActBaseTool):
                 "findings": findings_text,
                 "results": rows,
             },
-            metadata={"search_type": "perplexity_web_batch", "count": len(results)},
+            metadata={
+                "search_type": "perplexity_web_batch",
+                "count": len(results),
+                "search_mode": search_mode,
+            },
         )
 
     def get_schema(self) -> Dict[str, Any]:
@@ -216,6 +246,11 @@ class PerplexitySearchTool(ReActBaseTool):
                         "query": {
                             "type": "string",
                             "description": "Search query for current web information",
+                        },
+                        "search_mode": {
+                            "type": "string",
+                            "enum": ["web", "academic", "sec"],
+                            "description": "Perplexity search corpus to query",
                         },
                         "queries": {
                             "type": "array",

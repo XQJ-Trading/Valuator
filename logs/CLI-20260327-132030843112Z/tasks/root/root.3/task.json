@@ -1,0 +1,28 @@
+{
+  "task_id": "root.3",
+  "parent_id": "root",
+  "description": "미국 대선 등 국내 정치가 대외 정책 및 중동 개입 의지에 미치는 영향 조사",
+  "state": "running",
+  "created_at": "2026-03-27T13:20:55.620145Z",
+  "updated_at": "2026-03-27T13:26:11.797846Z",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "deps": [],
+  "tool": {
+    "name": "web_search_tool",
+    "args": {
+      "query": "2024 US Presidential Election impact on Middle East foreign policy Iran-Israel conflict",
+      "search_mode": "web"
+    }
+  },
+  "domain_id": "risk_transmission",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": null,
+    "final_output_path": null
+  }
+}

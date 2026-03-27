@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..utils.config import config
+from valuator.utils.config import config
 from .company import ListingSeed, resolve_subjects
 from .query import (
     QueryAnalysis,
@@ -18,7 +18,7 @@ from .query import (
 from .types import DomainIndex, DomainModule
 
 if TYPE_CHECKING:
-    from ..models.gemini_direct import GeminiClient
+    from valuator.models.gemini_direct import GeminiClient
 
 _SYSTEM_PROMPT = (
     "Return concise JSON only. No markdown. "
@@ -26,7 +26,7 @@ _SYSTEM_PROMPT = (
 )
 _QUERY_ANALYSIS_RULES = (
     "- Return query_intent, domain_ids, entities, units, requirements, intent_tags, rationale.",
-    "- query_intent must contain company_names only. Put concrete company/security names, aliases, tickers, or codes there. For Korean-listed companies, use the Korean name as commonly known (for example, '삼성전자', '현대모비스'). Do not translate Korean company names to English. For overseas issuers, use the official English company name or ticker. If no concrete subject is named, use an empty array.",
+    "- query_intent must contain company_names and tickers. company_names: concrete company/security names or aliases. For Korean-listed companies, use the Korean name as commonly known (for example, '삼성전자', '현대모비스'). For overseas issuers, use the official English company name. tickers: stock ticker symbols for every company mentioned (for example, 'NOW' for ServiceNow, '005930' for 삼성전자). Always populate tickers when the company is identifiable. If no concrete subject is named, use empty arrays for both.",
     "- entities are for non-security items such as business units, products, CEOs, themes, or macro variables. Use entity kind `company`/`ticker`/`security` only for concrete issuers or securities explicitly present or clearly recoverable.",
     "- units must be semantic retrieval units, not formatting instructions.",
     "- Every unit must include id, objective, retrieval_query, domain_ids, entity_ids, time_scope.",
@@ -79,7 +79,9 @@ def _build_query_intent(
     raw_entities: list[QueryEntityPayload],
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
 ) -> QueryIntent:
-    company_names = _dedupe_strings(raw_intent.company_names)
+    company_names = _dedupe_strings(
+        [*raw_intent.tickers, *raw_intent.company_names]
+    )
     return QueryIntent(
         query=query,
         subjects=resolve_subjects(
@@ -276,9 +278,13 @@ def _response_schema(module_ids: list[str]) -> dict[str, Any]:
             "query_intent": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["company_names"],
+                "required": ["company_names", "tickers"],
                 "properties": {
                     "company_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "tickers": {
                         "type": "array",
                         "items": {"type": "string"},
                     },
@@ -383,6 +389,7 @@ class QueryIntentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     company_names: list[str] = Field(default_factory=list)
+    tickers: list[str] = Field(default_factory=list)
 
 
 class QueryEntityPayload(BaseModel):
@@ -482,7 +489,9 @@ class QueryAnalyzer:
         on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
     ) -> None:
         if client is None:
-            from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
+            from valuator.models.gemini_direct import (
+                GeminiClient as RuntimeGeminiClient,
+            )
 
             client = RuntimeGeminiClient(config.agent_model)
         self.client = client

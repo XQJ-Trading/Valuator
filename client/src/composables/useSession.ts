@@ -76,9 +76,7 @@ export function useSession() {
       console.error('모델 목록을 가져오는데 실패했습니다:', error)
       availableModels.value = [
         'gemini-3-flash-preview',
-        'gemini-3-pro-preview',
-        'gemini-flash-latest',
-        'gemini-pro-latest'
+        'gemini-3-pro-preview'
       ]
       selectedModel.value = availableModels.value[0]
     }

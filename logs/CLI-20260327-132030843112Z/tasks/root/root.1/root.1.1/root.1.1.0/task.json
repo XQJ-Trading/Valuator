@@ -1,0 +1,28 @@
+{
+  "task_id": "root.1.1.0",
+  "parent_id": "root.1.1",
+  "description": "중동 긴장 고조에 따른 홍해 및 호르무즈 해협 우회 관련 해상 운임(SCFI, FBX 등) 추이와 물류 지연 기간 데이터 조사",
+  "state": "done",
+  "created_at": "2026-03-27T13:21:24.845001Z",
+  "updated_at": "2026-03-27T13:26:11.790557Z",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "deps": [],
+  "tool": {
+    "name": "web_search_tool",
+    "args": {
+      "query": "Red Sea Hormuz Strait shipping freight rate trends SCFI FBX 2024 2025 logistics delay data",
+      "search_mode": "web"
+    }
+  },
+  "domain_id": "risk_transmission",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": "aggregation/report.md",
+    "final_output_path": null
+  }
+}

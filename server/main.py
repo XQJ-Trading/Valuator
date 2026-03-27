@@ -5,7 +5,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -16,10 +16,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, field_validator
 
-from valuator.core import Engine
-from valuator.models.gemini_direct import ensure_supported_google_genai_runtime
-from valuator.utils.config import config
-from valuator.utils.logger import logger
+from domain import DomainLoader, DomainRouter, QueryAnalyzer, QueryIntent
+from valuator.agent_runtime import create_tool_registry, final_output_text, finalize_trace
+from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, SharedState
+from valuator.core.llm_usage import Measurement
+from valuator.models.gemini_direct import GeminiClient, ensure_supported_google_genai_runtime
+from valuator.session_store import ValuatorSessionStore
+from valuator.utils.config import canonical_model_name, config
+from valuator.utils.logger import (
+    close_session_log_file,
+    logger,
+    session_log_file,
+)
+from valuator.utils.session_trace import SessionTraceWriter
 from .repositories import (
     FileSessionRepository,
     FileTaskRewriteRepository,
@@ -34,23 +43,13 @@ from .services.task_rewrite.service import TaskRewriteService
 # Initialize history repository for server (separate from ReactLogger)
 def create_history_repository():
     """Create history repository instance for server history (separate from ReactLogger)"""
-    mongodb_enabled = os.getenv("MONGODB_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    mongodb_uri = os.getenv("MONGODB_URI")
-    mongodb_database = os.getenv("MONGODB_DATABASE", "valuator")
-    mongodb_collection = os.getenv("MONGODB_COLLECTION", "sessions")
-
-    if mongodb_enabled and mongodb_uri:
+    if config.mongodb_enabled and config.mongodb_uri:
         try:
             # Use different collection for server history
             return MongoSessionRepository(
-                mongodb_uri=mongodb_uri,
-                database=mongodb_database,
-                collection=f"{mongodb_collection}_server_history",
+                mongodb_uri=config.mongodb_uri,
+                database=config.mongodb_database,
+                collection=f"{config.mongodb_collection}_server_history",
             )
         except Exception as e:
             print(f"Failed to initialize MongoDB repository for server history: {e}")
@@ -64,20 +63,11 @@ def create_history_repository():
 # Initialize task rewrite repository
 def create_task_rewrite_repository() -> TaskRewriteRepository:
     """Create task rewrite repository instance"""
-    mongodb_enabled = os.getenv("MONGODB_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    mongodb_uri = os.getenv("MONGODB_URI")
-    mongodb_database = os.getenv("MONGODB_DATABASE", "valuator")
-
-    if mongodb_enabled and mongodb_uri:
+    if config.mongodb_enabled and config.mongodb_uri:
         try:
             return MongoTaskRewriteRepository(
-                mongodb_uri=mongodb_uri,
-                database=mongodb_database,
+                mongodb_uri=config.mongodb_uri,
+                database=config.mongodb_database,
                 collection="task_rewrite",
             )
         except Exception as e:
@@ -86,6 +76,139 @@ def create_task_rewrite_repository() -> TaskRewriteRepository:
             return FileTaskRewriteRepository("logs/task_rewrite")
     else:
         return FileTaskRewriteRepository("logs/task_rewrite")
+
+
+async def build_query_analysis(
+    query: str,
+    model: str,
+    *,
+    usage_writer: Any | None = None,
+):
+    measurement = Measurement.start()
+    try:
+        domain_index, modules = DomainLoader().load()
+        router = DomainRouter(
+            analyzer=QueryAnalyzer(client=GeminiClient(model=model)),
+        )
+        router.bind_usage_writer(usage_writer)
+        _, analysis = await router.analyze(
+            QueryIntent(query=query),
+            domain_index,
+            modules,
+        )
+    except Exception as exc:
+        write_diagnostic_record = getattr(usage_writer, "write_diagnostic_record", None)
+        if callable(write_diagnostic_record):
+            write_diagnostic_record(
+                category="analysis",
+                method="query_analysis.analyze",
+                status="failed",
+                summary=str(exc),
+                started_at=measurement.started_at,
+                duration_ms=round(measurement.latency_seconds() * 1000.0, 3),
+                input_payload={"query": query, "model": model},
+                result_payload={"error": str(exc)},
+                error=str(exc),
+            )
+        raise
+
+    write_diagnostic_record = getattr(usage_writer, "write_diagnostic_record", None)
+    if callable(write_diagnostic_record):
+        write_diagnostic_record(
+            category="analysis",
+            method="query_analysis.analyze",
+            status="success",
+            summary=(
+                f"domains={len(analysis.domain_ids)} "
+                f"units={len(analysis.units)} "
+                f"requirements={len(analysis.requirements)}"
+            ),
+            started_at=measurement.started_at,
+            duration_ms=round(measurement.latency_seconds() * 1000.0, 3),
+            input_payload={"query": query, "model": model},
+            result_payload=asdict(analysis),
+        )
+    return analysis
+
+
+def agent_event_to_stream_event(event: AgentEvent) -> dict[str, Any]:
+    detail = event.detail
+    if event.type == "step_start":
+        return {
+            "type": "thought",
+            "task_id": event.task_id,
+            "content": (
+                f"Task step 시작 - {event.task_id} "
+                f"({detail.get('step', '?')}): {detail.get('description', '')}"
+            ).strip(),
+        }
+    if event.type == "tool_execute":
+        tool_result = detail.get("tool_result")
+        result_content = ""
+        if isinstance(tool_result, dict):
+            result_content = str(tool_result.get("result") or tool_result.get("error") or "")
+        duration_ms = detail.get("duration_ms")
+        duration_text = (
+            f" ({float(duration_ms):.1f}ms)"
+            if isinstance(duration_ms, (int, float))
+            else ""
+        )
+        return {
+            "type": "action",
+            "task_id": event.task_id,
+            "tool": detail.get("tool"),
+            "tool_input": detail.get("args"),
+            "tool_result": tool_result,
+            "content": (
+                f"Tool 실행 - {detail.get('tool', '')}{duration_text}: {result_content}"
+            ).strip(),
+        }
+    if event.type == "step_invalid":
+        return {
+            "type": "observation",
+            "task_id": event.task_id,
+            "error": detail.get("error"),
+            "content": (
+                f"Invalid step - {event.task_id} "
+                f"({detail.get('invalid_decision_count', '?')}): {detail.get('error', '')}"
+            ).strip(),
+        }
+    if event.type == "decision":
+        action = str(detail.get("action") or "").upper()
+        reason = str(detail.get("reason") or "").strip()
+        return {
+            "type": "thought",
+            "task_id": event.task_id,
+            "content": f"{event.task_id} → {action}: {reason}".strip(),
+        }
+    if event.type == "task_done":
+        return {
+            "type": "observation",
+            "task_id": event.task_id,
+            "content": f"Task 완료 - {event.task_id}",
+            "tool_output": detail.get("output"),
+        }
+    if event.type == "conflict":
+        return {
+            "type": "observation",
+            "task_id": event.task_id,
+            "content": (
+                f"Conflict 감지 - {detail.get('key')}: "
+                f"{detail.get('existing')} vs {detail.get('incoming')}"
+            ),
+        }
+    if event.type == "task_failed":
+        return {
+            "type": "observation",
+            "task_id": event.task_id,
+            "error": detail.get("error"),
+            "content": f"Task 실패 - {event.task_id}: {detail.get('error', '')}".strip(),
+        }
+    return {
+        "type": "observation",
+        "task_id": event.task_id,
+        "content": str(detail),
+    }
 
 
 def sessions_to_summaries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -194,6 +317,8 @@ class _RuntimeSession:
     thinking_level: str | None = None
     context: dict[str, Any] | None = None
     task: asyncio.Task | None = None
+    session_store: ValuatorSessionStore | None = None
+    trace_writer: SessionTraceWriter | None = None
 
 
 class SessionService:
@@ -228,7 +353,15 @@ class SessionService:
             subscribers=[],
             thinking_level=thinking_level,
             context=normalized_context,
+            session_store=ValuatorSessionStore(
+                session_id=session_id,
+                query=query,
+                model=record.model,
+                created_at=record.created_at,
+                context=normalized_context,
+            ),
         )
+        runtime.trace_writer = runtime.session_store.trace_writer
         runtime.task = asyncio.create_task(self._run(runtime))
         self._active[session_id] = runtime
         return record
@@ -284,6 +417,9 @@ class SessionService:
             runtime.record.status = SessionStatus.FAILED
             runtime.record.completed_at = datetime.utcnow()
             runtime.record.error = "terminated"
+            self._write_session_status(runtime)
+            self._write_review(runtime)
+            self._finalize_trace(runtime)
             await self._persist(runtime.record, success=False)
         await self._finish(session_id)
         return True
@@ -297,106 +433,126 @@ class SessionService:
 
     async def _run(self, runtime: _RuntimeSession) -> None:
         record = runtime.record
-        try:
-            await self._emit(
-                runtime,
-                {"type": "start", "query": record.query, "content": record.query},
-            )
-            effective_query = self._build_effective_query(
-                record.query,
-                thinking_level=runtime.thinking_level,
-                context=runtime.context,
-            )
-            await self._emit(
-                runtime,
-                {
-                    "type": "thought",
-                    "content": "Valuator pipeline 시작",
-                },
-            )
-
-            engine = Engine.create(session_id=record.session_id, model=record.model)
-            async def _on_leaf_start(task: Any) -> None:
+        runtime_log_path = (
+            runtime.trace_writer.runtime_log_path
+            if runtime.trace_writer is not None
+            else None
+        )
+        with session_log_file(runtime_log_path):
+            try:
+                await self._emit(
+                    runtime,
+                    {"type": "start", "query": record.query, "content": record.query},
+                )
+                effective_query = self._build_effective_query(
+                    record.query,
+                    thinking_level=runtime.thinking_level,
+                    context=runtime.context,
+                )
+                root_task = ComplexTask(
+                    id="root",
+                    description=f"Valuation: {effective_query}",
+                )
+                if runtime.session_store is not None:
+                    runtime.session_store.update_trace_query(effective_query)
+                    runtime.session_store.sync_task_tree(root_task)
                 await self._emit(
                     runtime,
                     {
-                        "type": "action",
-                        "stage": "execute-task",
-                        "task_id": task.id,
-                        "content": f"Leaf 시작 - {task.id}",
+                        "type": "thought",
+                        "content": "Valuator agent 시작",
                     },
                 )
-
-            async def _on_leaf_complete(task: Any, _: dict[str, Any]) -> None:
                 await self._emit(
                     runtime,
                     {
-                        "type": "observation",
-                        "stage": "execute-task",
-                        "task_id": task.id,
-                        "content": f"Leaf 완료 - {task.id}",
+                        "type": "thought",
+                        "content": "Query analysis 생성",
                     },
                 )
 
-            async def _on_task_aggregated(
-                task: Any, index: int, total: int
-            ) -> None:
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "observation",
-                        "stage": "aggregate-task",
-                        "task_id": task.id,
-                        "content": f"집계 완료 - {task.id} ({index}/{total})",
-                    },
+                analysis = await build_query_analysis(
+                    effective_query,
+                    record.model,
+                    usage_writer=runtime.trace_writer,
                 )
-
-            result = await engine.run(
-                effective_query,
-                on_leaf_start=_on_leaf_start,
-                on_leaf_complete=_on_leaf_complete,
-                on_task_aggregated=_on_task_aggregated,
-            )
-
-            final_path = Path(result["final_path"])
-            final_markdown = ""
-            if final_path.exists():
-                final_markdown = final_path.read_text(encoding="utf-8").strip()
-            if final_markdown:
-                await self._emit(
-                    runtime,
-                    {
-                        "type": "final_answer",
-                        "content": final_markdown,
-                    },
+                if runtime.session_store is not None:
+                    runtime.session_store.write_plan(
+                        effective_query=effective_query,
+                        analysis=analysis,
+                        root_task=root_task,
+                    )
+                tool_registry = create_tool_registry(
+                    record.model,
+                    usage_writer=runtime.trace_writer,
                 )
-
-            await self._emit(
-                runtime,
-                {
-                    "type": "review",
-                    "stage": "summary",
-                    "content": (
-                        f"최종 상태: {str(result.get('status', 'unknown')).upper()}"
+                agent = Agent(
+                    scheduler=Scheduler(
+                        max_steps_per_task=config.agent_max_steps_per_task,
+                        concurrency=config.agent_concurrency,
                     ),
-                },
-            )
-            await self._emit(runtime, {"type": "end", "content": "완료"})
-            record.status = SessionStatus.COMPLETED
-            record.completed_at = datetime.utcnow()
-            await self._persist(record, success=True)
-        except Exception as exc:
-            logger.error("Session run failed: %s", exc)
-            record.status = SessionStatus.FAILED
-            record.completed_at = datetime.utcnow()
-            record.error = str(exc)
-            await self._emit(runtime, {"type": "error", "message": str(exc)})
-            await self._persist(record, success=False)
-        finally:
-            await self._finish(record.session_id)
+                    shared_state=SharedState(),
+                    tool_registry=tool_registry,
+                    llm_client=GeminiClient(
+                        model=record.model,
+                        usage_writer=runtime.trace_writer,
+                    ),
+                    query_analysis=analysis,
+                    on_event=lambda event: self._emit(
+                        runtime,
+                        agent_event_to_stream_event(event),
+                    ),
+                    session_store=runtime.session_store,
+                )
+                final_markdown = final_output_text(
+                    await agent.run(effective_query, root_task)
+                )
+
+                if final_markdown:
+                    await self._emit(
+                        runtime,
+                        {
+                            "type": "final_answer",
+                            "content": final_markdown,
+                        },
+                    )
+                    if runtime.session_store is not None:
+                        runtime.session_store.write_final_output(final_markdown, root_task=root_task)
+                        runtime.session_store.sync_task_tree(root_task)
+
+                await self._emit(
+                    runtime,
+                    {
+                        "type": "review",
+                        "stage": "summary",
+                        "content": "최종 상태: COMPLETED",
+                    },
+                )
+                await self._emit(runtime, {"type": "end", "content": "완료"})
+                record.status = SessionStatus.COMPLETED
+                record.completed_at = datetime.utcnow()
+                self._write_review(runtime)
+                self._write_session_status(runtime)
+                self._finalize_trace(runtime)
+                await self._persist(record, success=True)
+            except Exception as exc:
+                logger.error("Session run failed: %s", exc)
+                record.status = SessionStatus.FAILED
+                record.completed_at = datetime.utcnow()
+                record.error = str(exc)
+                await self._emit(runtime, {"type": "error", "message": str(exc)})
+                self._write_review(runtime)
+                self._write_session_status(runtime)
+                self._finalize_trace(runtime)
+                await self._persist(record, success=False)
+            finally:
+                close_session_log_file(runtime_log_path)
+                await self._finish(record.session_id)
 
     async def _emit(self, runtime: _RuntimeSession, event: dict[str, Any]) -> None:
         runtime.record.steps.append(event)
+        if runtime.trace_writer is not None:
+            runtime.trace_writer.append_event(event)
         for queue in list(runtime.subscribers):
             queue.put_nowait(event)
 
@@ -491,6 +647,30 @@ class SessionService:
             return 0.0
         return max(0.0, (record.completed_at - record.created_at).total_seconds())
 
+    def _finalize_trace(self, runtime: _RuntimeSession) -> None:
+        finalize_trace(
+            runtime.trace_writer,
+            status=runtime.record.status.value,
+            completed_at=runtime.record.completed_at,
+            error=runtime.record.error,
+            final_answer=self._final_answer(runtime.record.steps),
+            duration=self._duration_seconds(runtime.record),
+        )
+
+    def _write_review(self, runtime: _RuntimeSession) -> None:
+        if runtime.session_store is None:
+            return
+        runtime.session_store.write_review(status=runtime.record.status.value)
+
+    def _write_session_status(self, runtime: _RuntimeSession) -> None:
+        if runtime.session_store is None:
+            return
+        runtime.session_store.update_session(
+            status=runtime.record.status.value,
+            error=runtime.record.error,
+            updated_at=runtime.record.completed_at or datetime.utcnow(),
+        )
+
 
 # Global instances
 history_repository = None
@@ -571,12 +751,15 @@ class ChatRequest(BaseModel):
     @field_validator("model")
     @classmethod
     def validate_model(cls, v):
-        if v is not None and v not in config.supported_models:
+        if v is None:
+            return None
+        model = canonical_model_name(v)
+        if model not in config.supported_models:
             raise ValueError(
                 f"Unsupported model: {v}. "
                 f"Supported models are: {', '.join(config.supported_models)}"
             )
-        return v
+        return model
 
     @field_validator("thinking_level")
     @classmethod
@@ -597,12 +780,15 @@ class TaskRewriteRequest(BaseModel):
     @field_validator("model")
     @classmethod
     def validate_model(cls, v):
-        if v is not None and v not in config.supported_models:
+        if v is None:
+            return None
+        model = canonical_model_name(v)
+        if model not in config.supported_models:
             raise ValueError(
                 f"Unsupported model: {v}. "
                 f"Supported models are: {', '.join(config.supported_models)}"
             )
-        return v
+        return model
 
     @field_validator("thinking_level")
     @classmethod
@@ -1140,45 +1326,59 @@ def _load_valuator_snapshot_payload(
 
     query = str(plan.get("query", "")).strip()
     if not query:
-        input_path = session_dir / "input" / "user_input.md"
-        if input_path.exists():
-            query = input_path.read_text(encoding="utf-8").strip()
+        for name in ("user_query.md", "user_input.md"):
+            input_path = session_dir / "input" / name
+            if input_path.exists():
+                query = input_path.read_text(encoding="utf-8").strip()
+                if query:
+                    break
 
     execution_artifacts: list[dict[str, Any]] = []
-    execution_round_dir, execution_round = _latest_round_dir(session_dir / "execution")
-    if execution_round_dir is not None:
-        outputs_dir = execution_round_dir / "outputs"
-        if outputs_dir.exists():
-            for task_dir in sorted(outputs_dir.iterdir()):
-                if not task_dir.is_dir():
-                    continue
-                task_id = task_dir.name
-                result_path = task_dir / "result.md"
-                if not result_path.exists():
-                    continue
-                meta = _read_json_dict(task_dir / "result.md.meta.json") or {}
-                execution_artifacts.append(
-                    {
-                        "task_id": task_id,
-                        "logical_output_path": f"/execution/outputs/{task_id}/result.md",
-                        "tool": meta.get("tool"),
-                        "args_hash": meta.get("args_hash"),
-                        "exists": True,
-                    }
-                )
-
     aggregation_reports: list[dict[str, Any]] = []
-    aggregation_round_dir, aggregation_round = _latest_round_dir(
-        session_dir / "aggregation"
-    )
-    if aggregation_round_dir is not None:
-        for report in sorted(aggregation_round_dir.rglob("report.md")):
-            task_id = report.parent.name
+    session_root = session_dir.resolve()
+    tasks_root = session_dir / "tasks"
+    for task_json_path in sorted(tasks_root.rglob("task.json")):
+        task_payload = _read_json_dict(task_json_path) or {}
+        task_id = str(task_payload.get("task_id") or task_json_path.parent.name)
+        artifacts = task_payload.get("artifacts")
+        if not isinstance(artifacts, dict):
+            continue
+
+        execution_result_path = artifacts.get("execution_result_path")
+        if isinstance(execution_result_path, str) and execution_result_path.strip():
+            result_path = (task_json_path.parent / execution_result_path).resolve()
+            meta: dict[str, Any] = {}
+            execution_meta_path = artifacts.get("execution_meta_path")
+            if isinstance(execution_meta_path, str) and execution_meta_path.strip():
+                meta = _read_json_dict(
+                    (task_json_path.parent / execution_meta_path).resolve()
+                ) or {}
+            try:
+                logical_output_path = f"/{result_path.relative_to(session_root)}"
+            except ValueError:
+                logical_output_path = execution_result_path
+            execution_artifacts.append(
+                {
+                    "task_id": task_id,
+                    "logical_output_path": logical_output_path,
+                    "tool": meta.get("tool"),
+                    "args_hash": meta.get("args_hash"),
+                    "exists": result_path.exists(),
+                }
+            )
+
+        aggregation_report_path = artifacts.get("aggregation_report_path")
+        if isinstance(aggregation_report_path, str) and aggregation_report_path.strip():
+            report_path = (task_json_path.parent / aggregation_report_path).resolve()
+            try:
+                logical_report_path = f"/{report_path.relative_to(session_root)}"
+            except ValueError:
+                logical_report_path = aggregation_report_path
             aggregation_reports.append(
                 {
                     "task_id": task_id,
-                    "logical_report_path": f"/aggregation/{task_id}/report.md",
-                    "exists": True,
+                    "logical_report_path": logical_report_path,
+                    "exists": report_path.exists(),
                 }
             )
 
@@ -1196,7 +1396,7 @@ def _load_valuator_snapshot_payload(
         "quant_axes": review_raw.get("quant_axes") or {},
     }
 
-    latest_round = review.get("round") or execution_round or aggregation_round
+    latest_round = review.get("round")
     output_exists = (session_dir / "output" / "final.md").exists()
     status = str(review.get("status") or ("completed" if output_exists else "running"))
     snapshot_plan = project_snapshot_plan(plan)

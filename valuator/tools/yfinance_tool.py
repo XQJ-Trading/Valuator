@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ..domain.knowledge.financial import (
+from domain.knowledge.financial import (
     DERIVED_DIFFERENCES,
     DERIVED_RATIOS,
     STATEMENT_FIELDS,

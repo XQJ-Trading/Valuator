@@ -43,7 +43,7 @@ class TaskRewriteService:
             task: Original task text
             model: Gemini model name
             custom_prompt: Optional custom prompt
-            thinking_level: Thinking level for Gemini 3.0 ('high', 'low', or None)
+            thinking_level: Thinking level for Gemini reasoning models ('high', 'low', or None)
 
         Returns:
             TaskRewriteHistory instance

@@ -1,0 +1,28 @@
+{
+  "task_id": "root.0.0",
+  "parent_id": "root.0",
+  "description": "이란-미국 간의 최신 군사적 충돌 및 긴장 고조 사건 조사 (2024년 말~2026년 현재)",
+  "state": "running",
+  "created_at": "2026-03-27T13:21:03.728258Z",
+  "updated_at": "2026-03-27T13:26:11.788151Z",
+  "task_type": "leaf",
+  "query_unit_ids": [],
+  "deps": [],
+  "tool": {
+    "name": "web_search_tool",
+    "args": {
+      "query": "Iran vs USA military conflict recent events 2024 2025 2026 current status escalation",
+      "search_mode": "web"
+    }
+  },
+  "domain_id": "risk_transmission",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": "execution/result.md",
+    "execution_meta_path": "execution/result.md.meta.json",
+    "aggregation_report_path": null,
+    "final_output_path": null
+  }
+}

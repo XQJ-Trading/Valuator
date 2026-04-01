@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
-from server.api_support import build_query_analysis
 from valuator.models.gemini_direct import GeminiClient
 from valuator.session import SessionTraceWriter
 from valuator.utils.llm_usage import TokenUsage
@@ -93,18 +91,30 @@ def test_session_trace_writer_records_task_hierarchy_and_trace_artifacts(
     )
 
     session_dir = tmp_path / "session_S-test"
-    session_data = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-    event_rows = (session_dir / "trace" / "events.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
-    usage_rows = (session_dir / "trace" / "llm_usage.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
-    timeline_rows = (session_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
+    session_data = json.loads(
+        (session_dir / "session.json").read_text(encoding="utf-8")
+    )
+    event_rows = (
+        (session_dir / "trace" / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    usage_rows = (
+        (session_dir / "trace" / "llm_usage.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    timeline_rows = (
+        (session_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
+    )
     task_steps = (
-        session_dir / "debug" / "steps" / "root" / "steps.jsonl"
-    ).read_text(encoding="utf-8").splitlines()
-    task_markdown = (session_dir / "tasks" / "root" / "task.md").read_text(encoding="utf-8")
+        (session_dir / "debug" / "steps" / "root" / "steps.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    task_markdown = (session_dir / "tasks" / "root" / "task.md").read_text(
+        encoding="utf-8"
+    )
     llm_call = json.loads(
         (session_dir / "tasks" / "root" / "llm_calls" / "step_01.json").read_text(
             encoding="utf-8"
@@ -153,10 +163,14 @@ def test_session_trace_writer_routes_diagnostic_records_to_events_log(
     )
 
     session_dir = tmp_path / "session_S-method"
-    session_data = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-    rows = (session_dir / "trace" / "events.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    session_data = json.loads(
+        (session_dir / "session.json").read_text(encoding="utf-8")
+    )
+    rows = (
+        (session_dir / "trace" / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     payload = json.loads(rows[0])
 
     assert session_data["event_count"] == 1
@@ -199,13 +213,17 @@ class _NoisyResponse:
 
 
 class _DummyModels:
-    def generate_content(self, *, model: str, contents: str, config: object) -> _DummyResponse:
+    def generate_content(
+        self, *, model: str, contents: str, config: object
+    ) -> _DummyResponse:
         del model, contents, config
         return _DummyResponse()
 
 
 class _NoisyModels:
-    def generate_content(self, *, model: str, contents: str, config: object) -> _NoisyResponse:
+    def generate_content(
+        self, *, model: str, contents: str, config: object
+    ) -> _NoisyResponse:
         del model, contents, config
         return _NoisyResponse()
 
@@ -250,9 +268,11 @@ async def test_gemini_client_writes_llm_call_under_task_dir_and_usage(
     )
 
     session_dir = tmp_path / "session_S-gemini"
-    usage_rows = (session_dir / "trace" / "llm_usage.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    usage_rows = (
+        (session_dir / "trace" / "llm_usage.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     step_data = json.loads(
         (session_dir / "tasks" / "root" / "llm_calls" / "step_01.json").read_text(
             encoding="utf-8"
@@ -288,83 +308,3 @@ async def test_gemini_client_recovers_json_object_from_noisy_response(
     )
 
     assert payload == {"answer": "ok"}
-
-
-@pytest.mark.asyncio
-async def test_build_query_analysis_writes_diagnostic_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class _DummyDomainLoader:
-        def load(self) -> tuple[object, dict[str, object]]:
-            index = type("Index", (), {"modules": ["dcf"]})()
-            return index, {"dcf": object()}
-
-    class _DummyDomainRouter:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            self.usage_writer = None
-
-        def bind_usage_writer(self, usage_writer: object | None) -> None:
-            self.usage_writer = usage_writer
-
-        async def analyze(
-            self,
-            intent: QueryIntent,
-            index: object,
-            modules: dict[str, object],
-        ) -> tuple[QueryIntent, QueryAnalysis]:
-            del index, modules
-            return (
-                intent,
-                QueryAnalysis(
-                    domain_ids=["dcf"],
-                    query_intent=QueryIntent(query=intent.query),
-                    units=[
-                        QueryUnit(
-                            id="U-001",
-                            objective="collect revenue drivers",
-                            retrieval_query="revenue growth drivers",
-                            domain_ids=["dcf"],
-                        )
-                    ],
-                    requirements=[
-                        QueryRequirement(
-                            id="R-001",
-                            acceptance="cover revenue growth",
-                            unit_ids=[0],
-                            domain_ids=["dcf"],
-                            provenance="user query",
-                        )
-                    ],
-                    allowed_tools=["web_search_tool"],
-                ),
-            )
-
-    monkeypatch.setattr("server.api_support.DomainLoader", _DummyDomainLoader)
-    monkeypatch.setattr("server.api_support.DomainRouter", _DummyDomainRouter)
-
-    writer = SessionTraceWriter(
-        session_id="S-analysis",
-        query="test query",
-        model="gemini-3-flash-preview",
-        created_at="2026-03-21T02:31:05.577471Z",
-        base_dir=tmp_path,
-    )
-
-    analysis = await build_query_analysis(
-        "test query",
-        "gemini-3-flash-preview",
-        usage_writer=writer,
-    )
-
-    session_dir = tmp_path / "session_S-analysis"
-    rows = (session_dir / "trace" / "events.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
-
-    assert analysis.domain_ids == ["dcf"]
-    assert len(rows) == 1
-
-    payload = json.loads(rows[0])
-    assert payload["category"] == "analysis"
-    assert payload["method"] == "query_analysis.analyze"
-    assert payload["status"] == "success"

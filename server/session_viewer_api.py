@@ -33,6 +33,7 @@ def guide_data_root() -> Path:
 
 
 def ensure_viewer_roots() -> None:
+    session_data_root().mkdir(parents=True, exist_ok=True)
     guide_data_root().mkdir(parents=True, exist_ok=True)
 
 
@@ -61,6 +62,22 @@ def _require_path(rel_path: str) -> str:
     if rel_path:
         return rel_path
     raise HTTPException(status_code=400, detail="path required")
+
+
+def _resolve_source_base_root(source: str | None) -> tuple[str, Path]:
+    resolved_source = _require_source(source)
+    return resolved_source, _root_for_source(resolved_source)
+
+
+def _resolve_abs_path(
+    *, base_root: Path, rel_path: str, not_found_detail: str = "not found"
+) -> Path:
+    abs_path = _safe_path(rel_path, base_root)
+    if abs_path is None:
+        raise HTTPException(status_code=403, detail="forbidden")
+    if not abs_path.exists():
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return abs_path
 
 
 def _to_rel_posix(abs_path: Path, base_root: Path) -> str:
@@ -194,11 +211,11 @@ class SaveFileRequest(DeleteEntryRequest):
 @router.post("/api/fs/create")
 async def create_entry(request: CreateEntryRequest):
     base_root = _root_for_source(request.source)
-    parent_abs = _safe_path(request.parentPath, base_root)
-    if parent_abs is None:
-        raise HTTPException(status_code=403, detail="forbidden")
-    if not parent_abs.exists():
-        raise HTTPException(status_code=404, detail="parent not found")
+    parent_abs = _resolve_abs_path(
+        base_root=base_root,
+        rel_path=request.parentPath,
+        not_found_detail="parent not found",
+    )
     if not parent_abs.is_dir():
         raise HTTPException(status_code=400, detail="parent is not a directory")
 
@@ -215,17 +232,17 @@ async def create_entry(request: CreateEntryRequest):
 @router.post("/api/fs/rename")
 async def rename_entry(request: RenameEntryRequest):
     base_root = _root_for_source(request.source)
-    abs_path = _safe_path(request.path, base_root)
-    if abs_path is None:
-        raise HTTPException(status_code=403, detail="forbidden")
+    abs_path = _resolve_abs_path(base_root=base_root, rel_path=request.path)
 
     dest_abs = abs_path.parent / request.newName
     if dest_abs == abs_path:
-        return {"path": request.path, "finalPath": request.path, "name": request.newName}
+        return {
+            "path": request.path,
+            "finalPath": request.path,
+            "name": request.newName,
+        }
     if dest_abs.exists():
         raise HTTPException(status_code=409, detail="target exists")
-    if not abs_path.exists():
-        raise HTTPException(status_code=404, detail="not found")
 
     abs_path.rename(dest_abs)
     final_path = _to_rel_posix(dest_abs, base_root)
@@ -235,11 +252,7 @@ async def rename_entry(request: RenameEntryRequest):
 @router.post("/api/fs/delete")
 async def delete_entry(request: DeleteEntryRequest):
     base_root = _root_for_source(request.source)
-    abs_path = _safe_path(request.path, base_root)
-    if abs_path is None:
-        raise HTTPException(status_code=403, detail="forbidden")
-    if not abs_path.exists():
-        raise HTTPException(status_code=404, detail="not found")
+    abs_path = _resolve_abs_path(base_root=base_root, rel_path=request.path)
 
     if abs_path.is_dir():
         shutil.rmtree(abs_path)
@@ -256,7 +269,11 @@ async def move_entry(request: MoveCopyEntryRequest):
     if src_abs is None or target_dir_abs is None:
         raise HTTPException(status_code=403, detail="forbidden")
     if _parent_rel_path(request.path) == request.targetDirPath:
-        return {"path": request.path, "finalPath": request.path, "name": _basename_rel(request.path)}
+        return {
+            "path": request.path,
+            "finalPath": request.path,
+            "name": _basename_rel(request.path),
+        }
     if not target_dir_abs.exists():
         raise HTTPException(status_code=404, detail="target dir not found")
     if not target_dir_abs.is_dir():
@@ -306,12 +323,9 @@ async def get_tree(
     source: str | None = Query(default=None),
     path: str = Query(default=""),
 ):
-    resolved_source = _require_source(source)
-    base_root = _root_for_source(resolved_source)
-    abs_path = _safe_path(path, base_root)
-    if abs_path is None:
-        raise HTTPException(status_code=403, detail="forbidden")
-    if not abs_path.exists() or not abs_path.is_dir():
+    _, base_root = _resolve_source_base_root(source)
+    abs_path = _resolve_abs_path(base_root=base_root, rel_path=path)
+    if not abs_path.is_dir():
         raise HTTPException(status_code=404, detail="not found")
 
     children = []
@@ -398,13 +412,13 @@ async def search_files(
         all_entries.sort(key=lambda entry: entry["path"])
         return {"results": all_entries[:clamped_limit]}
 
-    ranked = [
-        (entry, _search_score(query, entry))
-        for entry in all_entries
-        if _search_score(query, entry) < 999
-    ]
-    ranked.sort(key=lambda item: (item[1], item[0]["path"]))
-    return {"results": [entry for entry, _ in ranked[:clamped_limit]]}
+    ranked: list[tuple[int, dict[str, str]]] = []
+    for entry in all_entries:
+        score = _search_score(query, entry)
+        if score < 999:
+            ranked.append((score, entry))
+    ranked.sort(key=lambda item: (item[0], item[1]["path"]))
+    return {"results": [entry for _, entry in ranked[:clamped_limit]]}
 
 
 @router.get("/api/file")
@@ -412,14 +426,9 @@ async def get_file(
     source: str | None = Query(default=None),
     path: str = Query(default=""),
 ):
-    resolved_source = _require_source(source)
+    _, base_root = _resolve_source_base_root(source)
     rel_path = _require_path(path)
-    base_root = _root_for_source(resolved_source)
-    abs_path = _safe_path(rel_path, base_root)
-    if abs_path is None:
-        raise HTTPException(status_code=403, detail="forbidden")
-    if not abs_path.exists():
-        raise HTTPException(status_code=404, detail="not found")
+    abs_path = _resolve_abs_path(base_root=base_root, rel_path=rel_path)
     if abs_path.is_dir():
         raise HTTPException(status_code=400, detail="is a directory")
 
@@ -442,11 +451,7 @@ async def save_file(request: SaveFileRequest):
         raise HTTPException(status_code=413, detail="file too large")
 
     base_root = _root_for_source(request.source)
-    abs_path = _safe_path(request.path, base_root)
-    if abs_path is None:
-        raise HTTPException(status_code=403, detail="forbidden")
-    if not abs_path.exists():
-        raise HTTPException(status_code=404, detail="not found")
+    abs_path = _resolve_abs_path(base_root=base_root, rel_path=request.path)
     if abs_path.is_dir():
         raise HTTPException(status_code=400, detail="is a directory")
 

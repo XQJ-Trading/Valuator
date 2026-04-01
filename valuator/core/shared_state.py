@@ -9,6 +9,12 @@ class Fact:
     key: str
     value: Any
     source_task_id: str
+    grounded: bool = False
+    as_of_utc: str = ""
+    time_scope: str = ""
+    target_start: str = ""
+    target_end: str = ""
+    source_urls: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -35,10 +41,31 @@ class SharedState:
     def __init__(self) -> None:
         self._facts: dict[str, Fact] = {}
         self._conflicts: list[Conflict] = []
-        self._fact_waiters: dict[str, set[str]] = {}
 
-    def publish(self, key: str, value: Any, source_task_id: str) -> Conflict | None:
-        incoming = Fact(key=key, value=value, source_task_id=source_task_id)
+    def publish(
+        self,
+        key: str,
+        value: Any,
+        source_task_id: str,
+        *,
+        grounded: bool = False,
+        as_of_utc: str = "",
+        time_scope: str = "",
+        target_start: str = "",
+        target_end: str = "",
+        source_urls: tuple[str, ...] = (),
+    ) -> Conflict | None:
+        incoming = Fact(
+            key=key,
+            value=value,
+            source_task_id=source_task_id,
+            grounded=grounded,
+            as_of_utc=as_of_utc,
+            time_scope=time_scope,
+            target_start=target_start,
+            target_end=target_end,
+            source_urls=tuple(source_urls),
+        )
         existing = self._facts.get(key)
         if existing is not None and existing.value != value:
             conflict = Conflict(key=key, existing=existing, incoming=incoming)
@@ -53,22 +80,6 @@ class SharedState:
 
     def has(self, key: str) -> bool:
         return key in self._facts
-
-    def subscribe(self, key: str, task_id: str) -> None:
-        self._fact_waiters.setdefault(key, set()).add(task_id)
-
-    def remove_task_waits(self, task_id: str) -> None:
-        empty_keys: list[str] = []
-        for key, waiters in self._fact_waiters.items():
-            waiters.discard(task_id)
-            if not waiters:
-                empty_keys.append(key)
-        for key in empty_keys:
-            self._fact_waiters.pop(key, None)
-
-    def drain_waiters(self, key: str) -> list[str]:
-        waiters = self._fact_waiters.pop(key, set())
-        return sorted(waiters)
 
     def conflict_count(self) -> int:
         return len(self._conflicts)

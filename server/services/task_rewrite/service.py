@@ -53,13 +53,18 @@ class TaskRewriteService:
         """
         try:
             logger.info(f"Starting task rewrite (model: {model})")
+            effective_thinking_level = (
+                config.gemini_thinking_level
+                if thinking_level is None
+                else thinking_level
+            )
 
             # Call LLM to rewrite the task
             rewritten_task = await self.llm_client.rewrite_task(
                 task=task,
                 custom_prompt=custom_prompt,
                 model=model,
-                thinking_level=thinking_level,
+                thinking_level=effective_thinking_level,
             )
 
             # Create history record

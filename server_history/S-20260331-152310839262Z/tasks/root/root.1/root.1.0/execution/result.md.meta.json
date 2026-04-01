@@ -1,0 +1,24 @@
+{
+  "tool": "web_search_tool",
+  "args_hash": "9b3c61b96ebf42c7d543e4a4f37fce95b10538444699891bb0ff1fa9a08fe0dd",
+  "args": {
+    "query": "Planet Labs (PL) government vs commercial revenue mix, Remaining Performance Obligations (RPO), backlog growth, debt ratio, and cash flow health from latest 10-K and 10-Q filings",
+    "search_mode": "sec",
+    "as_of_utc": "2026-03-31T15:23:10.839403",
+    "time_scope": "future"
+  },
+  "success": true,
+  "error": null,
+  "retrieval": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "sec",
+    "usage": {
+      "input_tokens": 69,
+      "output_tokens": 852,
+      "total_tokens": 921
+    }
+  },
+  "started_at": "2026-03-31T15:23:47.093708Z",
+  "duration_ms": 6970.553
+}

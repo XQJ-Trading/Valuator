@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from valuator.core.decomposition_gate import (
+from valuator.core.decomposition.gate import (
     BackpropagationTracker,
     breadth_cost,
     combine,
@@ -10,9 +10,13 @@ from valuator.core.decomposition_gate import (
     depth_cost,
     pre_filter,
     token_pressure,
-    tool_resolvability,
 )
-from valuator.core.decomposition_types import CriticVerdict, DecompositionOutcome, FilterVerdict, GateConfig
+from valuator.core.decomposition.gate_config import GateConfig
+from valuator.core.decomposition.types import (
+    CriticVerdict,
+    DecompositionOutcome,
+    FilterVerdict,
+)
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.core.types import TaskSpec, TaskState
 
@@ -23,6 +27,7 @@ def test_depth_cost_matches_spec_curve() -> None:
     assert depth_cost(2, 4) == pytest.approx(0.25)
     assert depth_cost(3, 4) == pytest.approx(0.5625)
     assert depth_cost(4, 4) == pytest.approx(1.0)
+    assert depth_cost(5, 4) == pytest.approx(1.0)
 
 
 def test_breadth_cost_matches_spec_curve() -> None:
@@ -30,18 +35,6 @@ def test_breadth_cost_matches_spec_curve() -> None:
     assert breadth_cost(3, 8) == pytest.approx(0.5283208336)
     assert breadth_cost(5, 8) == pytest.approx(0.7739760316)
     assert breadth_cost(8, 8) == pytest.approx(1.0)
-
-
-def test_tool_resolvability_uses_available_tools_only() -> None:
-    children = [
-        TaskSpec(description="collect alpha", tool_hint="dummy_tool"),
-        TaskSpec(description="collect beta", tool_hint="other_tool"),
-        TaskSpec(description="collect gamma"),
-    ]
-
-    score = tool_resolvability(children, frozenset({"dummy_tool"}))
-
-    assert score == pytest.approx(1.0 / 3.0)
 
 
 def test_token_pressure_matches_budget_formula() -> None:
@@ -54,13 +47,12 @@ def test_pre_filter_returns_accept_with_custom_accept_bound() -> None:
     result = pre_filter(
         task_depth=0,
         children=[TaskSpec(description="collect alpha", tool_hint="dummy_tool")],
-        executable_tools=frozenset({"dummy_tool"}),
         max_steps_per_task=30,
-        config=GateConfig(accept_bound=0.2),
+        config=GateConfig(accept_bound=-0.01),
     )
 
     assert result.verdict is FilterVerdict.ACCEPT
-    assert result.static_score == pytest.approx(0.2933333333)
+    assert result.static_score == pytest.approx(-0.008333333333333333)
 
 
 def test_pre_filter_returns_reject_with_unresolvable_children() -> None:
@@ -70,26 +62,24 @@ def test_pre_filter_returns_reject_with_unresolvable_children() -> None:
             TaskSpec(description="alpha"),
             TaskSpec(description="beta"),
         ],
-        executable_tools=frozenset(),
         max_steps_per_task=10,
         config=GateConfig(reject_bound=-0.05),
     )
 
     assert result.verdict is FilterVerdict.REJECT
-    assert result.static_score == pytest.approx(-0.1066666667)
+    assert result.static_score == pytest.approx(-0.16666666666666666)
 
 
 def test_pre_filter_returns_uncertain_in_gray_zone() -> None:
     result = pre_filter(
         task_depth=0,
         children=[TaskSpec(description="collect alpha", tool_hint="dummy_tool")],
-        executable_tools=frozenset({"dummy_tool"}),
         max_steps_per_task=10,
         config=GateConfig(accept_bound=0.5, reject_bound=-0.05),
     )
 
     assert result.verdict is FilterVerdict.UNCERTAIN
-    assert result.static_score == pytest.approx(0.28)
+    assert result.static_score == pytest.approx(-0.025)
 
 
 def test_critic_to_score_matches_spec_formula() -> None:
@@ -105,14 +95,13 @@ def test_critic_to_score_matches_spec_formula() -> None:
         actual_children=3,
     )
 
-    assert score == pytest.approx(-0.4)
+    assert score == pytest.approx(-0.55)
 
 
 def test_combine_uses_weighted_static_and_critic_scores() -> None:
     filter_result = pre_filter(
         task_depth=0,
         children=[TaskSpec(description="collect alpha", tool_hint="dummy_tool")],
-        executable_tools=frozenset({"dummy_tool"}),
         max_steps_per_task=10,
         config=GateConfig(accept_bound=0.5, reject_bound=-0.05),
     )
@@ -133,7 +122,7 @@ def test_combine_uses_weighted_static_and_critic_scores() -> None:
         threshold=0.0,
     )
 
-    assert decision.net_score == pytest.approx(0.292)
+    assert decision.net_score == pytest.approx(0.17)
     assert decision.rejected is False
     assert decision.used_critic is True
 

@@ -1,0 +1,142 @@
+{
+  "session_id": "CLI-20260401-050320317475Z",
+  "llm_call_index": 58,
+  "started_at": "2026-04-01T05:05:39.379657Z",
+  "timestamp": "20260401_050539_379657",
+  "trace_method": "agent.step.root.2.1",
+  "task_id": "root.2.1",
+  "model": "gemini-3-flash-preview",
+  "prompt": "[TASK_ID]\nroot.2.1\n\n[TASK]\n아마존의 거버넌스 리스크를 검토합니다. Andy Jassy 체제의 성과 평가, 이사회의 독립성, 최근 DEF 14A(Proxy Statement) 기반 지배구조 이슈를 조사합니다.\n\n[STATE]\nstep_count=1\nstatus=running\n\n[ALLOWED_ACTIONS]\ndecompose, execute, wait, aggregate, fail\n\n[TEMPORAL_CONTRACT]\nas_of_utc=2026-04-01T05:03:20.317475Z\ntime_scope=Current\n\n[QUERY_UNITS]\n2: id=unit_gov_fin_risk; objective=Assess financial health and governance risks including management reputation and board independence.; retrieval_query=Amazon financial stability ratios leverage liquidity Andy Jassy leadership evaluation board governance risks; time_scope=Current; target_start=(none); target_end=(none)\n\n[TOOL_HINT]\nweb_search_tool\n\n[CHILD_OUTPUTS]\nroot.2.1.0: \"아마존의 최신 DEF 14A(Proxy Statement, 2025년 보고서 기준)를 분석한 결과, 이사회 독립성과 지배구조 및 주주 제안에 관한 주요 사항은 다음과 같습니다.\\n\\n### 1. 이사회 독립성 및 구조\\n- **이사회 구성**: 아마존 이사회는 총 12명으로 구성되어 있으며, 대다수가 독립 사외이사로 구성되어 기업 지배구조의 투명성을 유지하고 있습니다.\\n- **리더십 구조**: 아마존은 이사회 의장(Jeff Bezos)과 CEO(Andy Jassy) 역할을 분리하여 운영하고 있으며, 독립적인 리드 사외이사(Lead Independent Director) 제도를 통해 경영진에 대한 이사회의 견제와 균형을 꾀하고 있습니다.\\n\\n### 2. 주요 지배구조 이슈\\n- **경영 승계 및 리더십**: Andy Jassy 체제 하에서의 전략적 방향성과 이사회의 감독 역할이 강조되고 있습니다.\\n- **다양성 및 전문성**: 이사회는 기술, 물류, 소매 및 공공 정책 분야의 다양한 배경을 가진 전문가들로 구성되어 글로벌 비즈니스 복잡성에 대응하고 있습니다.\\n\\n### 3. 주주 제안 및 투표 결과\\n- **환경 및 사회적 이슈(ESG)**: 기후 변화 대응 보고서, 패키징 폐기물 감축, 근로자 안전 및 인권 실사 등 환경 및 사회적 책임에 관한 다수의 주주 제안이 상정되었습니다.\\n- **지배구조 관련 제안**: 독립적 의장 선임 요구 및 투표권 구조 변경(차등의결권 등)에 대한 제안이 지속적으로 제기되고 있으나, 경영진의 반대 권고와 함께 대부분 부결되거나 낮은 지지율을 기록하는 경향을 보입니다.\\n- **투표 결과**: 경영진이 추천한 이사 후보들은 압도적인 찬성으로 재선임되었으며, 보상 체계(Say-on-Pay)에 대한 자문 투표도 통과되었습니다. 다만, 일부 사회적 이슈 제안에 대해서는 상당수 주주들의 지지(약 20~30% 수준)가 확인되어 향후 경영 방침에 대한 잠재적 압박 요인으로 작용하고 있습니다.\"\nroot.2.1.1: \"앤디 재시(Andy Jassy) 아마존 CEO의 리더십 성과와 시장 평가는 효율성 극대화와 차세대 AI 패권 확보라는 두 가지 축으로 요약됩니다. 2021년 취임 이후 그는 제프 베이조스의 확장 전략에서 탈피하여 '수익성 개선'과 'AWS 재도약'에 집중해 왔습니다.\\n\\n### 1. 전략적 전환 및 비용 절감 성과\\n- **물류 네트워크 지역화(Regionalization):** 미국 내 물류 네트워크를 8개 지역으로 분할하는 구조적 개편을 통해 배송 거리를 단축하고 비용을 획기적으로 절감했습니다. 이는 2024년 이후 아마존의 영업이익률 개선에 핵심적인 기여를 했습니다.\\n- **강력한 비용 통제:** 수만 명 규모의 인력 감축과 비핵심 프로젝트(Alexa 부문 일부, 물리적 매장 확장 등)의 중단을 통해 전사적인 운영 효율성을 제고했습니다.\\n- **수익 구조 다변화:** 광고 비즈니스를 고마진 핵심 사업으로 성장시켜 리테일 부문의 낮은 마진을 보완하는 전략적 전환을 성공시켰습니다.\\n\\n### 2. AWS 성장 및 AI 리더십\\n- **AWS 재가속화:** 클라우드 시장의 성장 둔화 우려 속에서도 생성형 AI 수요를 흡수하며 AWS의 매출 성장률을 다시 끌어올렸습니다.\\n- **AI 수직 계열화:** '트레니움(Trainium)', '인퍼런시아(Inferentia)' 등 자체 AI 칩 개발과 '베드록(Bedrock)' 플랫폼을 통해 엔비디아 의존도를 낮추고 AI 인프라 비용 경쟁력을 확보하려는 전략을 추진 중입니다.\\n\\n### 3. 시장의 평가 (Bull vs. Bear)\\n- **긍정적 평가 (Bull):** 운영 효율성 개선을 통해 사상 최고 수준의 영업이익을 달성한 '실행의 대가'로 평가받습니다. 특히 AWS와 광고라는 고수익 엔진을 동시에 가동하며 현금 흐름을 개선한 점이 높게 평가됩니다.\\n- **부정적 평가 (Bear):** 생성형 AI 분야에서 마이크로소프트(MSFT)-오픈AI 연합에 비해 초기 대응이 늦었다는 지적이 있습니다. 또한, AI 주도권을 잡기 위한 대규모 자본 지출(CapEx) 확대가 단기적인 잉여현금흐름(FCF)에 부담을 줄 수 있다는 우려가 공존합니다.\\n\\n### 4. 결론 및 향후 과제\\n앤디 재시는 아마존을 '성장만 하는 기업'에서 '효율적으로 돈을 버는 기업'으로 탈바꿈시키는 데 성공했습니다. 향후 그의 리더십에 대한 최종 평가는 현재 진행 중인 막대한 AI 투자가 AWS의 시장 점유율 수성과 실질적인 수익성 증가로 연결될 수 있는지에 달려 있습니다.\"\n\n[CURRENT_CHILDREN]\nroot.2.1.0: done - 아마존의 최신 DEF 14A(Proxy Statement)를 분석하여 이사회 독립성, 지배구조 이슈, 주주 제안 및 투표 결과를 조사합니다. | output=\"아마존의 최신 DEF 14A(Proxy Statement, 2025년 보고서 기준)를 분석한 결과, 이사회 독립성과 지배구조 및 주주 제안에 관한 주요 사항은 다음과 같습니다.\\n\\n### 1. 이사회 독립성 및 구조\\n- **이사회 구성**: 아마존 이사회는 총 12명으로 구성되어 있으며, 대다수가 독립 사외이사로 구성되어 기업 지배구조의 투명성을 유지하고 있습니다.\\n- **리더십 구조**: 아마존은 이사회 의장(Jeff Bezos)과 CEO(Andy Jassy) 역할을 분리하여 운영하고 있으며, 독립적인 리드 사외이사(...\nroot.2.1.1: done - Andy Jassy CEO의 리더십 성과(전략적 전환, 비용 절감, AWS 성장 등)와 시장의 평가를 분석합니다. | output=\"앤디 재시(Andy Jassy) 아마존 CEO의 리더십 성과와 시장 평가는 효율성 극대화와 차세대 AI 패권 확보라는 두 가지 축으로 요약됩니다. 2021년 취임 이후 그는 제프 베이조스의 확장 전략에서 탈피하여 '수익성 개선'과 'AWS 재도약'에 집중해 왔습니다.\\n\\n### 1. 전략적 전환 및 비용 절감 성과\\n- **물류 네트워크 지역화(Regionalization):** 미국 내 물류 네트워크를 8개 지역으로 분할하는 구조적 개편을 통해 배송 거리를 단축하고 비용을 획기적으로 절감했습니다. 이는 2024년 이후 아...\n\n[SHARED_FACTS]\nai_demand_data_status: \"facts_only_with_gaps\" (from root.1.0, grounded=False, time_scope=Forward looking 1-2 years)\ninfrastructure_cost_status: \"insufficient_data\" (from root.1.0, grounded=False, time_scope=Forward looking 1-2 years)\ngovernance_solvency_status: \"requirement_unmet_gap_identified\" (from root.1.0, grounded=False, time_scope=Forward looking 1-2 years)\ntarget_period: \"2024-2026\" (from root.1.0, grounded=False, time_scope=Forward looking 1-2 years)\nas_of_utc: \"2026-04-01T05:03:20.317475Z\" (from root.1.0, grounded=False, time_scope=Forward looking 1-2 years)\ndata_availability: \"facts_only\" (from root.2.0, grounded=False, time_scope=Current)\nstatus: \"quantitative_data_gap\" (from root.2.0, grounded=False, time_scope=Current)\nmissing_metrics: [\"Debt-to-Equity Ratio (2022-2025)\", \"Current/Quick Ratio (2022-2025)\", \"Free Cash Flow Trends (2022-2025)\"] (from root.2.0, grounded=False, time_scope=Current)\nboard_independence: \"Majority of 12 directors are independent\" (from root.2.1.0, grounded=False, time_scope=Current)\nleadership_structure: \"Separate Chair and CEO with Lead Independent Director\" (from root.2.1.0, grounded=False, time_scope=Current)\nshareholder_proposals: \"Focus on ESG (climate, safety, human rights) and governance (independent chair)\" (from root.2.1.0, grounded=False, time_scope=Current)\nvoting_trends: \"Management-backed directors and compensation plans passed; ESG proposals generally failed but retain significant minority support\" (from root.2.1.0, grounded=False, time_scope=Current)\namazon_segment_data_2023_2025: {\"north_america\": [\"2023 Sales: $352,828M, OpInc: $14,877M\", \"2024 Sales: $387,497M, OpInc: $24,967M\", \"2025 Sales: $426,305M, OpInc: $29,619M\"], \"data_status\": \"partial_due_to_truncation\", \"missing_segments\": [\"International\", \"AWS\"]} (from root.0.0.0, grounded=False, time_scope=Last 5 years)\nsegment_data_2021_2022: {\"north_america\": [\"2021: Rev $279,833M, OpInc $7,271M\", \"2022: Rev $315,880M, OpInc -$2,847M\"], \"international\": [\"2021: Rev $127,787M, OpInc $5,920M\", \"2022: Rev $118,007M, OpInc -$7,746M\"], \"aws\": [\"2021: Rev $62,202M, OpInc $18,532M\", \"2022: Rev $80,096M, OpInc $22,841M\"]} (from root.0.0.1, grounded=False, time_scope=Last 5 years)\ndata_source: \"FY2022 10-K Filing\" (from root.0.0.1, grounded=False, time_scope=Last 5 years)\nretail_efficiency_status: \"regionalization_ongoing\" (from root.1.1, grounded=False, time_scope=Forward looking 1-2 years)\nlabor_risk_factors: [\"wage_inflation\", \"unionization_attempts\", \"SBC_pressure\"] (from root.1.1, grounded=False, time_scope=Forward looking 1-2 years)\ngovernance_status: \"leadership_under_evaluation\" (from root.1.1, grounded=False, time_scope=Forward looking 1-2 years)\ndata_gap: [\"2026_2027_financial_projections\", \"specific_solvency_ratios_future\"] (from root.1.1, grounded=False, time_scope=Forward looking 1-2 years)\nleadership_style: \"Operational efficiency and cost optimization focused\" (from root.2.1.1, grounded=False, time_scope=Current)\nkey_achievements: [\"Logistics regionalization\", \"AWS growth re-acceleration\", \"High-margin advertising business scaling\"] (from root.2.1.1, grounded=False, time_scope=Current)\nstrategic_risks: [\"High CapEx for AI infrastructure\", \"Competition with Microsoft/Google in Generative AI\"] (from root.2.1.1, grounded=False, time_scope=Current)\nmarket_sentiment: \"Mixed to Positive (Credit for margin expansion, Caution on AI spending)\" (from root.2.1.1, grounded=False, time_scope=Current)\n\n[SIBLINGS]\nroot.2.0: done - 아마존(AMZN)의 최근 3~4개년 부채비율, 유동성, 잉여현금흐름(FCF) 추이 및 자본 구조의 안정성을 분석합니다. | output=\"### 아마존(AMZN) 재무 안정성 및 자본 구조 분석 (데이터 공백 보고)\\n\\n현재 분석 단계에서 아마존(AMZN)의 2022년부터 2025년(또는 최신 시점)까지의 구체적인 재무 지표를 산출하기 위한 정량적 데이터가 확보되지 않았습니다. 이에 따라 요청된 지표에 대한 추이 분석 결과를 다음과 같이 정리합니다.\\n\\n#### 1. 재무 지표 분석 현황\\n*   **부채비율 (Debt-to-Equity):** 데이터 부재로 인해 자본 구조 내 타인자본 의존도 및 레버리지 변화 추이를 확인할 수 없음.\\n*   **유동성 ...\n\n[ANCESTRY]\nroot.2 -> root\n\n[REQUIREMENTS]\n  req_synthesis: A balanced conclusion providing distinct Bull and Bear scenarios for AMZN stock.\n\n[AVAILABLE_TOOLS]\ncode_execute_tool: args=code, timeout?; capability=deterministic calculations\ndomain_tool: args=corp?, company_name?, ticker?, query?, context?, grounding_mode?, as_of_utc?, time_scope?, target_start?, target_end?, domain_guide?, domain_persona?, domain_rubric?, domain_format?, domain_id?; capability=aspect-guided domain analysis via persona/rubric/format\nsec_tool: args=ticker, year, query; capability=year-specific 10-K extraction\nweb_search_tool: args=query, search_mode?{web|academic|sec}; capability=web/academic/sec grounded search\nyfinance_balance_sheet: args=ticker, year?, min_year?; capability=Single-year financial statements plus valuation/pricing. Call once per year for multi-year trend analysis. Returns: balance sheet, income, cashflow, derived ratios, market data.\n\nReturn valid JSON only.",
+  "system_prompt": "As-of UTC timestamp: 2026-04-01T05:03:20.317475Z\n\nYou are the step function of a recursive valuation agent.\nReturn JSON for the next step. Fill only the structural fields needed for the next transition.\nDo not include action. The runtime infers the transition from tool_request, children, wait_for, output, or facts.\nTreat [QUERY_UNITS] as the execution contract. Preserve as_of_utc and target period exactly.\n\nEXECUTE: a SINGLE tool call. MUST include tool_request with tool_name and args.\n  - Use ONLY when you can name EXACTLY ONE tool and its args.\nDECOMPOSE: break the task into smaller children. Requires at least one child.\n  - Use when the task is too broad for a single tool call.\n  - Each child MUST include description.\n  - task_name is optional; if you provide it, keep it concise, <= 30 chars, and use only letters/digits/underscores.\n  - If a likely execution tool is obvious, include tool_hint.\n  - Never return children as an empty list. If you cannot name concrete children now, use EXECUTE, WAIT, AGGREGATE, or FAIL.\n  - query_unit_ids must use the numeric prefixes shown in [QUERY_UNITS] exactly (zero-based).\nWAIT: suspend until a sibling or dependency task is complete.\n  - Requires wait_for (task ids).\n  - Never wait on your own task id.\n  - If the needed dependency is already done, or you already have enough tool/child output, use AGGREGATE instead.\nAGGREGATE: collect child outputs and complete this task. Must include output or facts.\n  - output은 한국어 Markdown으로 작성하라. 수치·티커·직접 인용은 원문 표기를 유지할 수 있다.\n  - AGGREGATE 전에 [REQUIREMENTS]를 대조하라. 미충족 항목이 있고 추가 child로 해결 가능하면 DECOMPOSE를 먼저 하라.\n  - 추가 tool 호출이 필요하면 AGGREGATE에 tool_request를 붙이지 말고 EXECUTE를 사용하라.\n  - 동일 지표가 여러 child에 연도별로 분산되어 있으면, 하나의 Markdown 표로 join하라.\n  - child별로 나열하지 마라. 주제별로 결합하라.\n  - 결합 시 원본 수치를 보존하라.\n  - child output에 status='facts_only'가 있거나 미검증/공백이 표시되면, 그 불확실성을 유지하라.\n  - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.\n  - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.\nFAIL: stop the task when it cannot continue with the available tools or facts.\n\nUse web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.\nUse sec_tool only for extracting data from a specific year's 10-K.\nFor web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.\nUse domain_tool with grounding_mode='grounded_required' for current/historical/mixed tasks.\nUse domain_tool with grounding_mode='synthesis_only' only for future-only scenario synthesis.\nPrefer WAIT over inventing missing facts.\n\n[REQUIREMENTS]는 분석이 충족해야 할 조건이다.\nAGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확인하라.\n미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.\n수집 불가한 requirement는 output에서 gap으로 명시하라.\n\n재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 yfinance_balance_sheet를 연도별로 분리 호출하되, 반드시 하나의 부모 태스크로 묶어라. 단일 연도 데이터로 추세를 주장하지 마라.\n\n포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:\n  - 비용 구조: SBC, CapEx, 영업 레버리지\n  - 경쟁 포지셔닝: 동종업체 비교, 시장 점유율, 상대 멀티플\n  - 매출 세분화: 제품/지역별, 부문별 성장률\nThis task already has children. Prefer WAIT or AGGREGATE. Only DECOMPOSE if you are adding genuinely new, non-overlapping children.\nIf the task needs multiple tool calls, use DECOMPOSE instead.\nIf you cannot name a specific tool and args, you MUST use DECOMPOSE, not EXECUTE.\nPrefer shallow decomposition when one tool call plus AGGREGATE is enough.\nFINALIZE is only allowed for the root task.\nPrefer tool_hint=web_search_tool when EXECUTE is appropriate.",
+  "response_mime_type": "application/json",
+  "response_json_schema": {
+    "$defs": {
+      "Action": {
+        "enum": [
+          "decompose",
+          "execute",
+          "wait",
+          "aggregate",
+          "fail"
+        ],
+        "title": "Action",
+        "type": "string"
+      },
+      "_TaskSpecPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "task_name": {
+            "title": "Task Name",
+            "type": "string"
+          },
+          "tool_hint": {
+            "default": "",
+            "title": "Tool Hint",
+            "type": "string"
+          },
+          "depends_on_siblings": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Depends On Siblings",
+            "type": "array"
+          },
+          "query_unit_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Query Unit Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "description",
+          "task_name"
+        ],
+        "title": "_TaskSpecPayload",
+        "type": "object"
+      },
+      "_ToolRequestPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "args": {
+            "additionalProperties": true,
+            "title": "Args",
+            "type": "object"
+          }
+        },
+        "required": [
+          "tool_name"
+        ],
+        "title": "_ToolRequestPayload",
+        "type": "object"
+      }
+    },
+    "description": "LLM step JSON: fields may combine; runtime maps to a single Action (§6).",
+    "properties": {
+      "action": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Action"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "children": {
+        "items": {
+          "$ref": "#/$defs/_TaskSpecPayload"
+        },
+        "title": "Children",
+        "type": "array"
+      },
+      "tool_request": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/_ToolRequestPayload"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "wait_for": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Wait For",
+        "type": "array"
+      },
+      "output": {
+        "default": null,
+        "title": "Output"
+      },
+      "facts": {
+        "additionalProperties": true,
+        "title": "Facts",
+        "type": "object"
+      }
+    },
+    "title": "StepIntentPayload",
+    "type": "object"
+  },
+  "response_text": "{\n  \"action\": \"aggregate\",\n  \"output\": \"### 아마존(AMZN) 거버넌스 리스크 및 경영진 평가 보고서\\n\\n아마존의 최신 DEF 14A(Proxy Statement)와 앤디 재시(Andy Jassy) CEO의 성과를 분석한 결과, 강력한 운영 효율성과 전문성 확보에도 불구하고 AI 투자와 지배구조 구조를 둘러싼 잠재적 리스크가 공존하고 있습니다.\\n\\n#### 1. Andy Jassy 체제 성과 및 시장 평가\\n앤디 재시 CEO는 2021년 취임 이후 제프 베이조스의 확장 중심 전략에서 **'수익성 및 효율성 극대화'**로의 체질 개선을 성공적으로 주도했습니다.\\n- **운영 효율성 개선:** 미국 물류 네트워크의 지역화(Regionalization)와 대규모 비용 절감(인력 감축, 비핵심 사업 정리)을 통해 영업이익률을 사상 최고 수준으로 끌어올렸습니다.\\n- **AWS 및 AI 전략:** 클라우드 부문의 성장을 재가속화하고, 자체 AI 칩(Trainium 등)과 베드록(Bedrock) 플랫폼을 통해 생성형 AI 시장에서의 수직 계열화를 추진 중입니다.\\n- **리스크 요인:** 마이크로소프트-오픈AI 연합에 비해 AI 대응이 늦었다는 시장의 우려와, 경쟁력 유지를 위한 막대한 자본 지출(CapEx)이 잉여현금흐름(FCF)에 미칠 압박이 주요 비판 지점입니다.\\n\\n#### 2. 이사회 독립성 및 리더십 구조\\n- **구조적 분리:** 아마존은 제프 베이조스(이사회 의장)와 앤디 재시(CEO)의 역할을 명확히 분리하고 있으며, 독립적인 리드 사외이사(Lead Independent Director) 제도를 운영하여 경영진 견제 장치를 마련했습니다.\\n- **이사회 구성:** 총 12명의 이사 중 대다수가 독립 사외이사로 구성되어 있으며, 기술·물류·공공 정책 등 각 분야 전문가를 배치하여 글로벌 복잡성에 대응하고 있습니다.\\n\\n#### 3. 최근 DEF 14A 기반 지배구조 이슈\\n2025년 Proxy Statement 분석을 통해 확인된 주요 쟁점은 다음과 같습니다.\\n- **주주 제안의 성격:** 기후 변화 대응, 패키징 폐기물 감축, 근로자 안전 및 인권 실사 등 **ESG 관련 제안**이 주를 이루고 있습니다. 특히 독립적 이사회 의장 선임 요구와 투표권 구조 변경(차등의결권 등)에 대한 지배구조 개선 요구가 지속되고 있습니다.\\n- **투표 경향:** 경영진이 추천한 이사 선임 및 보상 체계(Say-on-Pay)는 통과되었으나, 일부 사회적 이슈 관련 제안들이 20~30%의 유의미한 지지를 얻고 있어 향후 경영 방침에 대한 잠재적 압박으로 작용할 전망입니다.\\n\\n#### 4. 종합 거버넌스 리스크 진단\\n*   **Bull:** 경영 효율화 성과가 뚜렷하며, 이사회 의장과 CEO의 분리를 통해 과도한 권력 집중을 방지하고 전문적인 리더십을 발휘하고 있습니다.\\n*   **Bear:** 창업자 제프 베이조스의 여전한 영향력과 독립 의장 선임을 둘러싼 주주들과의 갈등이 존재하며, AI 패권 다툼을 위한 공격적인 투자가 거버넌스 차원에서의 재무적 통제력을 시험할 수 있습니다.\",\n  \"facts\": {\n    \"ceo_evaluation\": \"Positive on efficiency and AWS recovery, cautious on AI CapEx\",\n    \"board_independence_confirmed\": true,\n    \"lead_independent_director_exists\": true,\n    \"proxy_report_year\": 2025,\n    \"shareholder_pressure_areas\": [\n      \"ESG disclosure\",\n      \"Independent Board Chair\",\n      \"Worker safety\"\n    ]\n  }\n}",
+  "usage": {
+    "prompt_tokens": 4739,
+    "completion_tokens": 937,
+    "total_tokens": 6627
+  },
+  "latency_ms": 11609.19162502978,
+  "error": null
+}

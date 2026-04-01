@@ -1,0 +1,35 @@
+{
+  "task_id": "root.0",
+  "task_type": "leaf",
+  "query_unit_ids": [
+    0
+  ],
+  "tool_name": "web_search_tool",
+  "domain_id": "ceo",
+  "domain_summary": "Based on the available search results, I can provide limited information about Planet Labs' financial performance, though the results do not contain detailed segment or product line revenue breakdowns for the requested fiscal years.\n\n## Revenue Performance\n\nPlanet Labs reported **record annual revenue of $307.7 million for fiscal year 2026**, representing 26% year-over-year growth.[1] Fourth quarter 2026 revenue reached $86.8 million, a 41% increase year-over-year.[1] The company's revenue is primarily generated through a \"one-to-many\" data subscription model, with 98% of annual contract value (ACV) being recurring as of the end of fiscal year 2026.[1]\n\n## Operating Margin Trends\n\nThe search results provide limited operating margin data across the requested fiscal years. However, they indicate that Planet Labs achieved **adjusted EBITDA profitability for the first time in full year 2026**, marking a significant milestone.[2] Despite this achievement, the company reported a **net loss of $246.9 million for the year ended January 31, 2026**, with an accumulated deficit of $1.45 billion.[3]\n\nThe company generated $134 million in net cash from operating activities and $53 million in free cash flow during fiscal year 2026.[1]\n\n## Data Limitations\n\nThe search results do not contain:\n- Revenue breakdowns by specific product lines or customer segments\n- Detailed operating margin percentages for FY2023, FY2024, FY2025, and FY2026\n- Comparative margin trend analysis across these fiscal years\n\nTo obtain this detailed information, you would need to access Planet Labs' complete 10-K filings directly, which typically include segment revenue and detailed expense breakdowns in their financial statements and management discussion sections.",
+  "domain_key_values": {},
+  "tool_metadata": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "sec",
+    "usage": {
+      "input_tokens": 66,
+      "output_tokens": 362,
+      "total_tokens": 428
+    }
+  },
+  "raw_result": {
+    "query": "Planet Labs (PL) revenue by segment and product line, operating margin trends in 10-K filings for FY2023, FY2024, FY2025, and FY2026",
+    "findings": "Based on the available search results, I can provide limited information about Planet Labs' financial performance, though the results do not contain detailed segment or product line revenue breakdowns for the requested fiscal years.\n\n## Revenue Performance\n\nPlanet Labs reported **record annual revenue of $307.7 million for fiscal year 2026**, representing 26% year-over-year growth.[1] Fourth quarter 2026 revenue reached $86.8 million, a 41% increase year-over-year.[1] The company's revenue is primarily generated through a \"one-to-many\" data subscription model, with 98% of annual contract value (ACV) being recurring as of the end of fiscal year 2026.[1]\n\n## Operating Margin Trends\n\nThe search results provide limited operating margin data across the requested fiscal years. However, they indicate that Planet Labs achieved **adjusted EBITDA profitability for the first time in full year 2026**, marking a significant milestone.[2] Despite this achievement, the company reported a **net loss of $246.9 million for the year ended January 31, 2026**, with an accumulated deficit of $1.45 billion.[3]\n\nThe company generated $134 million in net cash from operating activities and $53 million in free cash flow during fiscal year 2026.[1]\n\n## Data Limitations\n\nThe search results do not contain:\n- Revenue breakdowns by specific product lines or customer segments\n- Detailed operating margin percentages for FY2023, FY2024, FY2025, and FY2026\n- Comparative margin trend analysis across these fiscal years\n\nTo obtain this detailed information, you would need to access Planet Labs' complete 10-K filings directly, which typically include segment revenue and detailed expense breakdowns in their financial statements and management discussion sections.",
+    "sources": [
+      "https://www.businesswire.com/news/home/20260319782110/en/Planet-Reports-Financial-Results-for-Fourth-Quarter-and-Full-Fiscal-Year-2026",
+      "https://simplywall.st/stocks/us/commercial-services/nyse-pl/planet-labs-pbc/past",
+      "https://www.stocktitan.net/sec-filings/PL/10-k-planet-labs-pbc-files-annual-report-0e2f4b932bdd.html",
+      "https://investors.planet.com/financials/quarterly-results/default.aspx",
+      "https://www.sec.gov/Archives/edgar/data/1836833/000183683324000118/pl-20241031.htm",
+      "https://investors.planet.com/financials/sec-filings/sec-filings-details/default.aspx?FilingId=15731875",
+      "https://investors.planet.com/financials/sec-filings/default.aspx",
+      "https://content.edgar-online.com/ExternalLink/EDGAR/0001836833-24-000037.html?hash=1151321696cee26a2701e10a8c9833fef2fa8892102e6dfbdca24017e3adffa0&dest=pl-20240131_htm"
+    ]
+  }
+}

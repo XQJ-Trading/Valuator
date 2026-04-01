@@ -289,29 +289,3 @@ class SECTool(BaseTool):
                 metadata={"error_code": "other"},
             )
 
-    def get_schema(self) -> dict[str, object]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Focused retrieval query for 10-K content",
-                        },
-                        "ticker": {
-                            "type": "string",
-                            "description": "Ticker symbol (e.g., AMZN, TSLA)",
-                        },
-                        "year": {
-                            "type": "integer",
-                            "description": "Target filing year",
-                        },
-                    },
-                    "required": ["ticker", "query", "year"],
-                },
-            },
-        }

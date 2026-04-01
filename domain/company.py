@@ -78,6 +78,14 @@ class ListingSeed:
     listing: Listing
 
 
+@dataclass(frozen=True, slots=True)
+class CompanySurfaceResolution:
+    """Result of resolving user-provided company/ticker surface strings."""
+
+    subjects: tuple[Subject, ...]
+    unresolved_surface_forms: tuple[str, ...]
+
+
 @dataclass(slots=True)
 class _EntityIndex:
     companies_by_id: dict[str, Company] = field(default_factory=dict)
@@ -85,6 +93,33 @@ class _EntityIndex:
     listings_by_id: dict[str, Listing] = field(default_factory=dict)
     listings_by_identifier: dict[str, Listing] = field(default_factory=dict)
     listings_by_company_id: dict[str, tuple[Listing, ...]] = field(default_factory=dict)
+
+
+def resolve_company_surfaces(
+    *,
+    company_names: tuple[str, ...],
+    on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
+) -> CompanySurfaceResolution:
+    """Resolve surface strings without failing the whole batch on one miss."""
+    normalized = tuple(
+        dict.fromkeys(name.strip() for name in company_names if name.strip())
+    )
+    if not normalized:
+        return CompanySurfaceResolution(subjects=(), unresolved_surface_forms=())
+
+    index = _entity_index()
+    resolved: list[Subject] = []
+    failures: list[str] = []
+    for surface in normalized:
+        try:
+            resolved.append(_subject_from_surface_form(index, surface, on_miss=on_miss))
+        except ValueError:
+            failures.append(surface)
+
+    return CompanySurfaceResolution(
+        subjects=merge_subjects(tuple(resolved)),
+        unresolved_surface_forms=tuple(failures),
+    )
 
 
 def resolve_subjects(
@@ -108,20 +143,23 @@ def resolve_subjects(
         ticker=normalized_ticker,
         security_code=normalized_security_code,
     )
-    company_subjects: list[Subject] = []
-    failures: list[str] = []
-    for company_name in normalized_company_names:
-        try:
-            company_subjects.append(
-                _subject_from_surface_form(index, company_name, on_miss=on_miss)
-            )
-        except ValueError:
-            failures.append(company_name)
+    if not normalized_company_names:
+        return merge_subjects(identifier_subjects, ())
 
-    if not identifier_subjects and not company_subjects and failures:
-        raise ValueError(f"unknown company: {failures[0]}")
+    surface_resolution = resolve_company_surfaces(
+        company_names=normalized_company_names,
+        on_miss=on_miss,
+    )
+    if (
+        not identifier_subjects
+        and not surface_resolution.subjects
+        and surface_resolution.unresolved_surface_forms
+    ):
+        raise ValueError(
+            f"unknown company: {surface_resolution.unresolved_surface_forms[0]}"
+        )
 
-    return merge_subjects(identifier_subjects, tuple(company_subjects))
+    return merge_subjects(identifier_subjects, surface_resolution.subjects)
 
 
 def merge_subjects(*groups: Iterable[Subject]) -> tuple[Subject, ...]:
@@ -469,29 +507,34 @@ def _load_krx_listing_seeds() -> list[ListingSeed]:
     return seeds
 
 
+def listing_seed_from_sec_record(record: dict[str, Any]) -> ListingSeed | None:
+    """Boundary: build a US listing seed from a SEC company_tickers.json row."""
+    ticker = str(record.get("ticker") or "").strip().upper()
+    title = str(record.get("title") or "").strip()
+    if not ticker:
+        return None
+    company_name = _sec_company_name(title, ticker)
+    listing = Listing(
+        listing_id=f"USA:{ticker}",
+        company_id=_sec_company_id(record, ticker),
+        security_code=ticker,
+        exchange="USA",
+        vendor_symbols={"yahoo": ticker},
+    )
+    return ListingSeed(
+        company_id=listing.company_id,
+        company_name=company_name,
+        company_aliases=_sec_company_aliases(title, company_name),
+        listing=listing,
+    )
+
+
 def _load_sec_listing_seeds() -> list[ListingSeed]:
     seeds: list[ListingSeed] = []
     for record in _load_json_records(SEC_TICKERS_PATH):
-        ticker = str(record.get("ticker") or "").strip().upper()
-        title = str(record.get("title") or "").strip()
-        if not ticker:
-            continue
-        company_name = _sec_company_name(title, ticker)
-        listing = Listing(
-            listing_id=f"USA:{ticker}",
-            company_id=_sec_company_id(record, ticker),
-            security_code=ticker,
-            exchange="USA",
-            vendor_symbols={"yahoo": ticker},
-        )
-        seeds.append(
-            ListingSeed(
-                company_id=listing.company_id,
-                company_name=company_name,
-                company_aliases=_sec_company_aliases(title, company_name),
-                listing=listing,
-            )
-        )
+        seed = listing_seed_from_sec_record(dict(record))
+        if seed is not None:
+            seeds.append(seed)
     return seeds
 
 
@@ -569,3 +612,8 @@ def _trim_trailing_words(words: list[str], suffixes: frozenset[str]) -> list[str
 
 def _name_key(text: str) -> str:
     return "".join(char for char in text.strip().upper() if char.isalnum())
+
+
+def normalized_name_key(text: str) -> str:
+    """Stable key for company/title matching (shared with SEC resolve boundary)."""
+    return _name_key(text)

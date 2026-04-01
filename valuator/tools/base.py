@@ -1,96 +1,47 @@
 from __future__ import annotations
 
-"""Base tool implementation for AI Agent"""
-
 import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
-
+from ..core.types import ToolResult
 from ..utils.logger import logger
-
-
-class ToolResult(BaseModel):
-    """Result from tool execution"""
-
-    success: bool = Field(..., description="Whether the tool execution was successful")
-    result: Any = Field(..., description="Tool execution result")
-    error: Optional[str] = Field(None, description="Error message if execution failed")
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
-    )
-
-
-@dataclass
-class ObservationData:
-    data: Any
-    observation: Optional[str] = None
-    error: Optional[str] = None
-    store_output: bool = True
-    store_result: bool = True
-    skip_llm: bool = False
-    log_query: Optional[str] = None
-    log_response: Optional[str] = None
 
 
 class BaseTool(ABC):
     """Base class for all tools"""
 
     def __init__(self, name: str, description: str):
-        """
-        Initialize tool
-
-        Args:
-            name: Tool name
-            description: Tool description
-        """
         self.name = name
         self.description = description
         self.logger = logger.getChild(f"tool.{name}")
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:
-        """
-        Execute the tool
-
-        Args:
-            **kwargs: Tool-specific parameters
-
-        Returns:
-            ToolResult object
-        """
         pass
-
-    @abstractmethod
-    def get_schema(self) -> Dict[str, Any]:
-        """
-        Get tool schema for function calling
-
-        Returns:
-            Tool schema dictionary
-        """
-        pass
-
-    def validate_parameters(self, **_kwargs) -> bool:
-        """
-        Validate tool parameters
-
-        Args:
-            **kwargs: Parameters to validate
-
-        Returns:
-            True if valid, False otherwise
-        """
-        return True
 
     def get_info(self) -> Dict[str, Any]:
-        """Get tool information"""
+        from .specs import TOOL_SPECS
+
+        if self.name in TOOL_SPECS:
+            schema = TOOL_SPECS[self.name].to_llm_schema(self.description)
+        else:
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                },
+            }
         return {
             "name": self.name,
             "description": self.description,
-            "schema": self.get_schema(),
+            "schema": schema,
         }
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
@@ -100,27 +51,14 @@ class BaseTool(ABC):
 class ReActBaseTool(BaseTool, ABC):
     def __init__(self, name: str, description: str):
         super().__init__(name, description)
-        self.execution_count = 0
-        self.success_count = 0
-        self.last_execution = None
 
     async def execute(self, **kwargs) -> ToolResult:
-        self.execution_count += 1
         loop = asyncio.get_event_loop()
         start_time = loop.time()
 
         try:
             result = await self._execute_impl(**kwargs)
-            if result.success:
-                self.success_count += 1
-            result.metadata.update(
-                {
-                    "execution_time": loop.time() - start_time,
-                    "execution_count": self.execution_count,
-                    "success_rate": self.success_count / self.execution_count,
-                }
-            )
-            self.last_execution = result
+            result.metadata.update({"execution_time": loop.time() - start_time})
             return result
         except Exception as e:
             self.logger.error(f"Error in {self.name}: {e}")
@@ -128,10 +66,7 @@ class ReActBaseTool(BaseTool, ABC):
                 success=False,
                 result=None,
                 error=str(e),
-                metadata={
-                    "execution_time": loop.time() - start_time,
-                    "execution_count": self.execution_count,
-                },
+                metadata={"execution_time": loop.time() - start_time},
             )
 
     async def _execute_impl(self, **kwargs) -> ToolResult:
@@ -148,12 +83,6 @@ class ToolRegistry:
         """Register a tool"""
         self.tools[tool.name] = tool
         logger.info(f"Registered tool: {tool.name}")
-
-    def unregister(self, tool_name: str):
-        """Unregister a tool"""
-        if tool_name in self.tools:
-            del self.tools[tool_name]
-            logger.info(f"Unregistered tool: {tool_name}")
 
     def get_tool(self, tool_name: str) -> Optional[BaseTool]:
         """Get a tool by name"""
@@ -176,13 +105,6 @@ class ToolRegistry:
             )
 
         try:
-            if not tool.validate_parameters(**kwargs):
-                return ToolResult(
-                    success=False,
-                    result=None,
-                    error=f"Invalid parameters for tool '{tool_name}'",
-                )
-
             result = await tool.execute(**kwargs)
             logger.debug(f"Executed tool '{tool_name}': success={result.success}")
             return result

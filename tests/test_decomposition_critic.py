@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent
 from valuator.core.context import TaskContext, TaskSummary
-from valuator.core.decomposition_critic import DecompositionCritic
+from valuator.core.decomposition.critic import DecompositionCritic
 from valuator.core.shared_state import SharedStateView
 from valuator.core.task import ComplexTask
 from valuator.core.types import Action, TaskDecision, TaskSpec, TaskState
@@ -27,8 +27,10 @@ class ScriptedLLM:
         response_json_schema: dict[str, Any],
         trace_method: str,
         max_response_chars: int | None = None,
+        max_output_tokens: int | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
-        del max_response_chars
+        del max_response_chars, max_output_tokens, kwargs
         self.calls.append(
             {
                 "prompt": prompt,
@@ -83,7 +85,6 @@ async def test_decomposition_critic_maps_json_to_verdict() -> None:
             TaskSpec(description="collect revenue", tool_hint="dummy_tool"),
             TaskSpec(description="collect filings", tool_hint="web_search_tool"),
         ],
-        reason="split the work",
     )
 
     verdict = await critic.evaluate(task, decision, _context())
@@ -113,7 +114,6 @@ async def test_decomposition_critic_raises_on_invalid_payload() -> None:
     decision = TaskDecision(
         action=Action.DECOMPOSE,
         children=[TaskSpec(description="collect revenue", tool_hint="dummy_tool")],
-        reason="split the work",
     )
 
     with pytest.raises(ValidationError):
@@ -142,7 +142,6 @@ async def test_decomposition_critic_prompt_contains_required_context() -> None:
             TaskSpec(description="collect revenue", tool_hint="dummy_tool"),
             TaskSpec(description="collect filings", tool_hint="web_search_tool"),
         ],
-        reason="split the work",
     )
 
     await critic.evaluate(task, decision, _context())
@@ -225,7 +224,6 @@ async def test_root_prompt_includes_subject_context() -> None:
             TaskSpec(description="revenue analysis", tool_hint="sec_tool"),
             TaskSpec(description="market position", tool_hint="web_search_tool"),
         ],
-        reason="break into tracks",
     )
 
     await critic.evaluate(task, decision, _root_context())
@@ -261,7 +259,6 @@ async def test_non_root_prompt_excludes_subject_context() -> None:
     decision = TaskDecision(
         action=Action.DECOMPOSE,
         children=[TaskSpec(description="quarterly data", tool_hint="sec_tool")],
-        reason="split further",
     )
 
     await critic.evaluate(task, decision, _context())

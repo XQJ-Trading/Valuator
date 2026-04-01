@@ -36,6 +36,14 @@ def is_concrete_subject_kind(kind: str) -> bool:
 
 
 @dataclass(slots=True)
+class TemporalContract:
+    as_of_utc: str = ""
+    time_scope: str = ""
+    target_start: str = ""
+    target_end: str = ""
+
+
+@dataclass(slots=True)
 class QueryIntent:
     query: str
     subjects: tuple[Subject, ...] = field(default_factory=tuple)
@@ -67,6 +75,8 @@ class QueryUnit:
     domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
+    target_start: str = ""
+    target_end: str = ""
     parent_unit_id: str = ""
 
 
@@ -89,6 +99,7 @@ class QueryAnalysis:
     participation derived from ``QueryUnit.entity_ids``.
     """
 
+    as_of_utc: str = ""
     domain_ids: list[DomainId] = field(default_factory=list)
     query_intent: QueryIntent = field(default_factory=lambda: QueryIntent(query=""))
     entities: dict[str, str] = field(default_factory=dict)
@@ -109,6 +120,8 @@ class QueryStep:
     domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
+    target_start: str = ""
+    target_end: str = ""
     parent_unit_id: str = ""
 
 
@@ -144,6 +157,8 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
             domain_ids=list(unit.domain_ids),
             entity_ids=list(unit.entity_ids),
             time_scope=unit.time_scope,
+            target_start=unit.target_start,
+            target_end=unit.target_end,
             parent_unit_id=unit.parent_unit_id,
         )
         for index, unit in enumerate(analysis.units)
@@ -164,6 +179,34 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
         steps=steps,
         entities=entities,
         relations=relations,
+    )
+
+
+def summarize_temporal_contract(
+    *,
+    as_of_utc: str,
+    units: list[QueryUnit],
+) -> TemporalContract:
+    if not units:
+        return TemporalContract(as_of_utc=as_of_utc)
+
+    scopes = list(dict.fromkeys(unit.time_scope for unit in units if unit.time_scope))
+    starts = list(dict.fromkeys(unit.target_start for unit in units if unit.target_start))
+    ends = list(dict.fromkeys(unit.target_end for unit in units if unit.target_end))
+
+    time_scope = scopes[0] if len(scopes) == 1 else "mixed" if scopes else ""
+    if len(scopes) == 1:
+        target_start = starts[0] if len(starts) == 1 else ""
+        target_end = ends[0] if len(ends) == 1 else ""
+    else:
+        target_start = ""
+        target_end = ""
+
+    return TemporalContract(
+        as_of_utc=as_of_utc,
+        time_scope=time_scope,
+        target_start=target_start,
+        target_end=target_end,
     )
 
 

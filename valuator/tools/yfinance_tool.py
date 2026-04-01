@@ -187,36 +187,6 @@ class YFinanceBalanceSheetTool(BaseTool):
             },
         )
 
-    def get_schema(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "ticker": {
-                            "type": "string",
-                            "description": "Ticker symbol (e.g., 'AAPL' or '005930')",
-                        },
-                        "year": {
-                            "type": "string",
-                            "description": "Year (e.g., '2025') or 'latest' to use the most recent available",
-                            "default": "latest",
-                        },
-                        "min_year": {
-                            "type": "integer",
-                            "description": "Minimum acceptable year when using 'latest' (e.g., 2025)",
-                            "default": None,
-                        },
-                    },
-                    "required": ["ticker"],
-                },
-            },
-        }
-
-
 def _load_statements(yf_module: Any, ticker: str) -> LoadedStatements | None:
     ticker_client = yf_module.Ticker(ticker)
     balance_sheet = _first_available_statement(

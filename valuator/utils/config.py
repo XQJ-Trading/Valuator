@@ -7,17 +7,28 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from valuator.models.naming import canonical_model_name, is_openrouter_model_name
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = ROOT_DIR / ".env"
 DEFAULT_AGENT_MODEL = "gemini-3-flash-preview"
+DEFAULT_GEMINI_THINKING_LEVEL = "low"
+DEFAULT_LLM_BACKEND = "google_genai"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_CODE_EXECUTION_ALLOWED_IMPORTS = ("json",)
+DEFAULT_OPENROUTER_AUTO_ALLOWED_MODELS = (
+    "xiaomi/mimo-v2-pro",
+    "minimax/minimax-m2.7",
+    "deepseek/deepseek-v3.2",
+    "moonshotai/kimi-k2.5",
+)
 
-MODEL_ALIASES = {
-    "gemini-2.5-flash": "gemini-3-flash-preview",
-    "gemini-flash-latest": "gemini-3-flash-preview",
-    "gemini-2.5-pro": "gemini-3-pro-preview",
-    "gemini-pro-latest": "gemini-3-pro-preview",
-}
+
+def resolve_llm_model_name(value: str, *, openrouter_backend: bool) -> str:
+    name = value.strip()
+    if openrouter_backend:
+        return name
+    return canonical_model_name(name)
 
 
 def _split_csv(value: str | None) -> tuple[str, ...]:
@@ -53,7 +64,12 @@ def _as_float(value: str | None, default: float) -> float:
 @dataclass(frozen=True)
 class Config:
     agent_model: str
+    llm_backend: str
+    gemini_thinking_level: str
     google_api_key: str | None
+    openrouter_api_key: str | None
+    openrouter_base_url: str
+    openrouter_auto_allowed_models: tuple[str, ...]
     opendart_api_key: str | None
     perplexity_api_key: str | None
     supported_models: tuple[str, ...]
@@ -70,26 +86,10 @@ class Config:
     agent_max_invalid_decisions_per_task: int
     agent_max_steps_per_task: int
     agent_concurrency: int
-    decomposition_gate_enabled: bool
-    decomposition_gate_initial_threshold: float
-    decomposition_gate_learning_rate: float
-    decomposition_gate_accept_bound: float
-    decomposition_gate_reject_bound: float
-    decomposition_gate_max_depth: int
-    decomposition_gate_max_children: int
-    decomposition_gate_weight_depth: float
-    decomposition_gate_weight_breadth: float
-    decomposition_gate_weight_tool: float
-    decomposition_gate_weight_token_pressure: float
-    decomposition_gate_static_weight: float
-    decomposition_gate_critic_weight: float
     agent_llm_retry_count: int
     agent_llm_retry_base_delay: float
-
-
-def canonical_model_name(value: str) -> str:
-    name = value.strip()
-    return MODEL_ALIASES.get(name, name)
+    web_search_retry_count: int
+    web_search_retry_base_delay: float
 
 
 def normalize_supported_models(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -122,74 +122,62 @@ def get_opendart_api_key(*, required: bool = False) -> str:
     return get_env("OPENDART_API_KEY", required=required)
 
 
-def _validate_decomposition_gate_config(
-    *,
-    accept_bound: float,
-    reject_bound: float,
-    static_weight: float,
-    critic_weight: float,
-    max_depth: int,
-    max_children: int,
-) -> None:
-    if accept_bound <= reject_bound:
-        raise ValueError("decomposition gate requires accept_bound > reject_bound")
-    if static_weight + critic_weight <= 0:
-        raise ValueError(
-            "decomposition gate requires static_weight + critic_weight > 0"
-        )
-    if max_depth < 1:
-        raise ValueError("decomposition gate requires max_depth >= 1")
-    if max_children < 2:
-        raise ValueError("decomposition gate requires max_children >= 2")
-
-
 def load_config() -> Config:
-    model = canonical_model_name(
+    llm_backend = (
+        (read_env("LLM_BACKEND", DEFAULT_LLM_BACKEND) or DEFAULT_LLM_BACKEND)
+        .strip()
+        .lower()
+    )
+    if llm_backend not in {"google_genai", "openrouter"}:
+        raise ValueError("LLM_BACKEND must be one of: google_genai, openrouter")
+    openrouter_api_key = read_env("OPENROUTER_API_KEY")
+    openrouter_enabled = llm_backend == "openrouter" and bool(openrouter_api_key)
+
+    raw_agent_model = (
         read_env("AGENT_MODEL", DEFAULT_AGENT_MODEL) or DEFAULT_AGENT_MODEL
     )
-    supported = normalize_supported_models(
-        _split_csv(read_env("SUPPORTED_MODELS"))
-        or (
-            model,
-            DEFAULT_AGENT_MODEL,
-        )
+    requested_model = resolve_llm_model_name(
+        raw_agent_model, openrouter_backend=openrouter_enabled
     )
-    decomposition_gate_accept_bound = _as_float(
-        read_env("DECOMPOSITION_GATE_ACCEPT_BOUND"),
-        default=0.4,
+    model = requested_model
+    if not openrouter_enabled and is_openrouter_model_name(model):
+        model = DEFAULT_AGENT_MODEL
+
+    supported_items = _split_csv(read_env("SUPPORTED_MODELS")) or (
+        requested_model,
+        DEFAULT_AGENT_MODEL,
     )
-    decomposition_gate_reject_bound = _as_float(
-        read_env("DECOMPOSITION_GATE_REJECT_BOUND"),
-        default=-0.3,
-    )
-    decomposition_gate_static_weight = _as_float(
-        read_env("DECOMPOSITION_GATE_STATIC_WEIGHT"),
-        default=0.4,
-    )
-    decomposition_gate_critic_weight = _as_float(
-        read_env("DECOMPOSITION_GATE_CRITIC_WEIGHT"),
-        default=0.6,
-    )
-    decomposition_gate_max_depth = _as_int(
-        read_env("DECOMPOSITION_GATE_MAX_DEPTH"),
-        default=4,
-    )
-    decomposition_gate_max_children = _as_int(
-        read_env("DECOMPOSITION_GATE_MAX_CHILDREN"),
-        default=8,
-    )
-    _validate_decomposition_gate_config(
-        accept_bound=decomposition_gate_accept_bound,
-        reject_bound=decomposition_gate_reject_bound,
-        static_weight=decomposition_gate_static_weight,
-        critic_weight=decomposition_gate_critic_weight,
-        max_depth=decomposition_gate_max_depth,
-        max_children=decomposition_gate_max_children,
-    )
+    filtered_models: list[str] = []
+    for item in supported_items:
+        normalized = resolve_llm_model_name(item, openrouter_backend=openrouter_enabled)
+        if not normalized:
+            continue
+        if not openrouter_enabled and is_openrouter_model_name(normalized):
+            continue
+        filtered_models.append(normalized)
+    supported = tuple(dict.fromkeys(filtered_models))
+    if not supported:
+        supported = (model,)
+    elif model not in supported:
+        supported = tuple(dict.fromkeys((model, *supported)))
 
     return Config(
         agent_model=model,
+        llm_backend=llm_backend,
+        gemini_thinking_level=(
+            read_env("GEMINI_THINKING_LEVEL", DEFAULT_GEMINI_THINKING_LEVEL)
+            or DEFAULT_GEMINI_THINKING_LEVEL
+        ).lower(),
         google_api_key=read_env("GOOGLE_API_KEY"),
+        openrouter_api_key=openrouter_api_key,
+        openrouter_base_url=(
+            read_env("OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL)
+            or DEFAULT_OPENROUTER_BASE_URL
+        ),
+        openrouter_auto_allowed_models=_split_csv(
+            read_env("OPENROUTER_AUTO_ALLOWED_MODELS")
+        )
+        or DEFAULT_OPENROUTER_AUTO_ALLOWED_MODELS,
         opendart_api_key=read_env("OPENDART_API_KEY"),
         perplexity_api_key=read_env("PPLX_API_KEY"),
         supported_models=supported,
@@ -207,7 +195,8 @@ def load_config() -> Config:
         code_execution_timeout=_as_int(read_env("CODE_EXECUTION_TIMEOUT"), default=10),
         code_execution_allowed_imports=_split_csv(
             read_env("CODE_EXECUTION_ALLOWED_IMPORTS")
-        ),
+        )
+        or DEFAULT_CODE_EXECUTION_ALLOWED_IMPORTS,
         agent_step_repair_retries=_as_int(
             read_env("AGENT_STEP_REPAIR_RETRIES"), default=2
         ),
@@ -215,48 +204,16 @@ def load_config() -> Config:
             read_env("AGENT_MAX_INVALID_DECISIONS_PER_TASK"), default=5
         ),
         agent_max_steps_per_task=_as_int(
-            read_env("AGENT_MAX_STEPS_PER_TASK"), default=100
+            read_env("AGENT_MAX_STEPS_PER_TASK"), default=30
         ),
         agent_concurrency=_as_int(read_env("AGENT_CONCURRENCY"), default=8),
-        decomposition_gate_enabled=_as_bool(
-            read_env("DECOMPOSITION_GATE_ENABLED"),
-            default=True,
-        ),
-        decomposition_gate_initial_threshold=_as_float(
-            read_env("DECOMPOSITION_GATE_INITIAL_THRESHOLD"),
-            default=0.0,
-        ),
-        decomposition_gate_learning_rate=_as_float(
-            read_env("DECOMPOSITION_GATE_LEARNING_RATE"),
-            default=0.1,
-        ),
-        decomposition_gate_accept_bound=decomposition_gate_accept_bound,
-        decomposition_gate_reject_bound=decomposition_gate_reject_bound,
-        decomposition_gate_max_depth=decomposition_gate_max_depth,
-        decomposition_gate_max_children=decomposition_gate_max_children,
-        decomposition_gate_weight_depth=_as_float(
-            read_env("DECOMPOSITION_GATE_WEIGHT_DEPTH"),
-            default=0.3,
-        ),
-        decomposition_gate_weight_breadth=_as_float(
-            read_env("DECOMPOSITION_GATE_WEIGHT_BREADTH"),
-            default=0.3,
-        ),
-        decomposition_gate_weight_tool=_as_float(
-            read_env("DECOMPOSITION_GATE_WEIGHT_TOOL"),
-            default=0.2,
-        ),
-        decomposition_gate_weight_token_pressure=_as_float(
-            read_env("DECOMPOSITION_GATE_WEIGHT_TOKEN_PRESSURE"),
-            default=0.2,
-        ),
-        decomposition_gate_static_weight=decomposition_gate_static_weight,
-        decomposition_gate_critic_weight=decomposition_gate_critic_weight,
-        agent_llm_retry_count=_as_int(
-            read_env("AGENT_LLM_RETRY_COUNT"), default=3
-        ),
+        agent_llm_retry_count=_as_int(read_env("AGENT_LLM_RETRY_COUNT"), default=2),
         agent_llm_retry_base_delay=_as_float(
             read_env("AGENT_LLM_RETRY_BASE_DELAY"), default=2.0
+        ),
+        web_search_retry_count=_as_int(read_env("WEB_SEARCH_RETRY_COUNT"), default=2),
+        web_search_retry_base_delay=_as_float(
+            read_env("WEB_SEARCH_RETRY_BASE_DELAY"), default=2.0
         ),
     )
 

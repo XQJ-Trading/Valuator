@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Literal
-from typing import Any, Dict
+from typing import Any, Literal
 
 try:
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -19,7 +18,9 @@ except Exception:  # pragma: no cover - optional dependency at runtime
     ChatPerplexity = None
 
 from ..utils.config import config
+from ..utils.llm_usage import TokenUsage
 from ..utils.logger import logger
+from ..utils.time_utils import Measurement
 from .base import ReActBaseTool, ToolResult
 
 
@@ -98,91 +99,98 @@ class PerplexitySearchTool(ReActBaseTool):
                 error="Perplexity API not available. Check PPLX_API_KEY configuration or dependencies.",
             )
 
-        from ..core.llm_usage import Measurement
-
         writer = self.usage_writer
-        measurement = Measurement.start()
+        max_retries = max(int(config.web_search_retry_count), 0)
+        base_delay = float(config.web_search_retry_base_delay)
 
-        try:
-            logger.info(
-                "Searching web with Perplexity for: %s (search_mode=%s)",
-                query,
-                search_mode,
-            )
-
-            response = await self.chat.ainvoke(
-                [
-                    SystemMessage(
-                        content=(
-                            "You are a comprehensive search assistant. "
-                            "Provide detailed, accurate, and up-to-date information with sources. "
-                            "Be thorough and analytical in your responses."
-                        )
-                    ),
-                    HumanMessage(content=query),
-                ],
-                extra_body={"web_search_options": {"search_mode": search_mode}},
-            )
-            latency_seconds = measurement.latency_seconds()
-            answer = response.content
-            meta = getattr(response, "response_metadata", {}) or {}
-            extra = getattr(response, "additional_kwargs", {}) or {}
-            usage_meta = getattr(response, "usage_metadata", {}) or {}
-            if hasattr(usage_meta, "model_dump"):
-                usage_meta = usage_meta.model_dump()
-            if not isinstance(usage_meta, dict):
-                usage_meta = {}
-
-            if writer is not None:
-                writer.append_call(
-                    method="web_search_tool._execute_single_search",
-                    model="sonar",
-                    usage=usage_meta,
-                    latency_seconds=latency_seconds,
-                    started_at=measurement.started_at,
+        for attempt in range(max_retries + 1):
+            measurement = Measurement.start()
+            try:
+                logger.info(
+                    "Searching web with Perplexity for: %s (search_mode=%s)",
+                    query,
+                    search_mode,
                 )
 
-            sources = (
-                meta.get("citations")
-                or meta.get("sources")
-                or extra.get("citations")
-                or extra.get("sources")
-                or re.findall(r"https?://[^\s)]+", answer)
-                or [f"[{n}]" for n in sorted(set(re.findall(r"\[(\d+)\]", answer)))]
-            )
+                response = await self.chat.ainvoke(
+                    [
+                        SystemMessage(
+                            content=(
+                                "You are a comprehensive search assistant. "
+                                "Provide detailed, accurate, and up-to-date information with sources. "
+                                "Be thorough and analytical in your responses."
+                            )
+                        ),
+                        HumanMessage(content=query),
+                    ],
+                    extra_body={"web_search_options": {"search_mode": search_mode}},
+                )
+                latency_seconds = measurement.latency_seconds()
+                answer = response.content
+                meta = getattr(response, "response_metadata", {}) or {}
+                extra = getattr(response, "additional_kwargs", {}) or {}
+                usage_meta = getattr(response, "usage_metadata", {}) or {}
+                if hasattr(usage_meta, "model_dump"):
+                    usage_meta = usage_meta.model_dump()
+                if not isinstance(usage_meta, dict):
+                    usage_meta = {}
 
-            return ToolResult(
-                success=True,
-                result={
-                    "query": query,
-                    "findings": answer,
-                    "sources": sources,
-                },
-                metadata={
-                    "search_type": "perplexity_web",
-                    "model": "sonar",
-                    "search_mode": search_mode,
-                    "usage": usage_meta,
-                },
-            )
-        except Exception as e:
-            latency_seconds = measurement.latency_seconds()
-            if writer is not None:
-                writer.append_call(
-                    method="web_search_tool._execute_single_search.error",
-                    model="sonar",
-                    usage={
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
+                if writer is not None:
+                    writer.append_call(
+                        method="web_search_tool._execute_single_search",
+                        model="sonar",
+                        usage=TokenUsage.from_raw(usage_meta),
+                        latency_seconds=latency_seconds,
+                        started_at=measurement.started_at,
+                    )
+
+                sources = (
+                    meta.get("citations")
+                    or meta.get("sources")
+                    or extra.get("citations")
+                    or extra.get("sources")
+                    or re.findall(r"https?://[^\s)]+", answer)
+                    or [f"[{n}]" for n in sorted(set(re.findall(r"\[(\d+)\]", answer)))]
+                )
+
+                return ToolResult(
+                    success=True,
+                    result={
+                        "query": query,
+                        "findings": answer,
+                        "sources": sources,
                     },
-                    latency_seconds=latency_seconds,
-                    started_at=measurement.started_at,
+                    metadata={
+                        "search_type": "perplexity_web",
+                        "model": "sonar",
+                        "search_mode": search_mode,
+                        "usage": usage_meta,
+                    },
                 )
-            logger.error(f"Perplexity search failed: {e}")
-            return ToolResult(
-                success=False, result=None, error=f"Search failed: {str(e)}"
-            )
+            except Exception as e:
+                latency_seconds = measurement.latency_seconds()
+                if attempt < max_retries:
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        "Perplexity search attempt %s failed (%s), retrying in %ss",
+                        attempt + 1,
+                        e,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                if writer is not None:
+                    writer.append_call(
+                        method="web_search_tool._execute_single_search.error",
+                        model="sonar",
+                        usage=TokenUsage(),
+                        latency_seconds=latency_seconds,
+                        started_at=measurement.started_at,
+                    )
+                logger.error(f"Perplexity search failed: {e}")
+                return ToolResult(
+                    success=False, result=None, error=f"Search failed: {str(e)}"
+                )
 
     async def _execute_batch_search(
         self,
@@ -233,32 +241,3 @@ class PerplexitySearchTool(ReActBaseTool):
                 "search_mode": search_mode,
             },
         )
-
-    def get_schema(self) -> Dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query for current web information",
-                        },
-                        "search_mode": {
-                            "type": "string",
-                            "enum": ["web", "academic", "sec"],
-                            "description": "Perplexity search corpus to query",
-                        },
-                        "queries": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Parallel search queries",
-                        },
-                    },
-                    "required": [],
-                },
-            },
-        }

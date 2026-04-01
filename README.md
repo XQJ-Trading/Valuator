@@ -41,32 +41,18 @@ Valuator/
 
 1. **의존성 설치**
    ```bash
-   python3 -m venv .venv
-   .venv/bin/pip install -r requirements.txt
+   pip install -r requirements.txt
    ```
-   - 최신 Gemini API 모델 지원을 위해 `google-genai==1.62.0`을 사용합니다.
 
 2. **환경 변수 설정**
-   
-   `.env` 파일 생성 후 다음 설정:
-   
    ```bash
-   # Google API Key (필수)
-   GOOGLE_API_KEY=your_google_api_key_here
-   
-   # 사용할 모델 선택 (기본값: Gemini 3 Flash)
-   AGENT_MODEL=gemini-3-flash-preview
-   # 또는: gemini-3-pro-preview
-   
-   # 지원 모델 목록
-   SUPPORTED_MODELS=gemini-3-flash-preview,gemini-3-pro-preview
-   
-   # 참고: thinking_level은 API 요청 파라미터로 전달합니다 (환경 변수 아님)
+   cp .env.example .env
+   # .env 파일에서 API 키 설정
    ```
 
 3. **서버 실행**
    ```bash
-   .venv/bin/python -m uvicorn server.main:app --reload --port 8001
+   python3 -m uvicorn server.main:app --reload --port 8001
    ```
 
 ### 프론트엔드 설정
@@ -85,13 +71,10 @@ Valuator/
 ## 📋 기능
 
 - **ReAct Engine**: Reasoning + Acting 패턴으로 문제 해결
-- **다양한 도구**: 웹 검색, 코드 실행, 파일 시스템, 금융 데이터 분석, Deep Search
-- **실시간 스트리밍**: Server-Sent Events를 통한 실시간 응답
-- **세션 관리**: 대화 기록 저장 및 조회 (파일/MongoDB)
-- **모델 선택**: Gemini 3 Flash/Pro 모델 지원
-- **🆕 Gemini Direct API**: google-genai SDK로 최신 Gemini 모델 직접 호출
-- **🆕 Thinking Level**: Gemini 추론 깊이 제어 (high/low)
-- **Task Rewrite**: LLM을 활용한 작업 재작성 기능
+- **다양한 도구**: 웹 검색, 코드 실행, 파일 시스템, 금융 데이터 분석
+- **실시간 스트리밍**: WebSocket을 통한 실시간 응답
+- **세션 관리**: 대화 기록 저장 및 조회
+- **모델 선택**: 다양한 AI 모델 지원
 
 ## 🛠️ 아키텍처
 
@@ -137,64 +120,6 @@ Valuator/
 1. `server/core/models/` 에 새 모델 클래스 생성
 2. `BaseModel` 인터페이스 구현
 3. 설정에서 모델 선택 가능
-
-## 🆕 Gemini3 Direct API 기능
-
-### 개요
-
- LangChain 래퍼 대신 Google AI Python SDK(`google-genai`)를 직접 사용하여 Gemini3의 최신 기능을 활용합니다.
-
-### 주요 이점
-
-- ✅ **Thinking Mode 지원**: Gemini3의 사고 과정 활성화
-- ✅ **최신 기능 즉시 사용**: Google API 업데이트 즉시 반영
-- ✅ **더 나은 제어**: 직접 API 호출로 세밀한 제어
-- ✅ **성능 향상**: 래퍼 레이어 제거로 지연 시간 감소
-- ✅ **완전한 호환성**: 기존 LangChain 인터페이스와 호환
-
-### 설정 방법
-
-1. **환경 변수 설정** (`.env` 파일):
-   ```bash
-   # Gemini 3 Flash 모델 사용
-   AGENT_MODEL=gemini-3-flash-preview
-   ```
-
-2. **API 요청에서 Thinking Level 설정**:
-   Thinking Level은 각 API 요청의 파라미터로 전달합니다:
-   
-   ```json
-   POST /api/v1/sessions
-   {
-     "query": "복잡한 문제를 분석해주세요",
-     "model": "gemini-3-flash-preview",
-     "thinking_level": "high"  // 또는 "low", null
-   }
-   ```
-   
-   **Thinking Level 옵션** (Gemini reasoning 모델):
-   - `high`: 깊은 추론 (복잡한 작업에 적합, 느림)
-   - `low`: 빠른 응답 (간단한 작업에 적합, 빠름)
-   - `null` 또는 생략: Thinking Level 비활성화 (기본 동작)
-
-### 아키텍처
-
-```
-┌─────────────────────┐
-│   GeminiModel       │
-├─────────────────────┤
-│ GeminiDirectModel   │
-│ (Direct SDK)        │
-│ - thinking_level    │
-│ - 최신 기능 지원     │
-└─────────────────────┘
-```
-
-### 관련 문서
-
-- [마이그레이션 가이드](docs/GEMINI3_DIRECT_API_MIGRATION.md)
-- [구현 계획](docs/PLAN_gemini3_direct_api.md)
-- [Thinking 파라미터 조사](docs/FINDINGS_thinking_parameter.md)
 
 ## 📝 라이센스
 

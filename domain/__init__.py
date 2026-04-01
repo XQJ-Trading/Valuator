@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from .company import Company, Listing, ListingSeed, Subject, resolve_subjects
+from .company import (
+    Company,
+    CompanySurfaceResolution,
+    Listing,
+    ListingSeed,
+    Subject,
+    resolve_company_surfaces,
+    resolve_subjects,
+)
 from .query import (
     QueryAnalysis,
     QueryBreakdown,
@@ -11,14 +19,17 @@ from .query import (
     QueryRelation,
     QueryRequirement,
     QueryStep,
+    TemporalContract,
     QueryUnit,
     build_query_breakdown,
     fill_routing_defaults,
+    summarize_temporal_contract,
 )
 
 __all__ = [
     "AcceptanceCheck",
     "Company",
+    "CompanySurfaceResolution",
     "DomainIndex",
     "DomainLoader",
     "DomainModule",
@@ -34,6 +45,7 @@ __all__ = [
     "QueryRelation",
     "QueryRequirement",
     "QueryStep",
+    "TemporalContract",
     "QueryUnit",
     "RubricAspect",
     "Subject",
@@ -41,7 +53,9 @@ __all__ = [
     "analyze_query",
     "build_query_breakdown",
     "fill_routing_defaults",
+    "resolve_company_surfaces",
     "resolve_subjects",
+    "summarize_temporal_contract",
 ]
 
 _LAZY_EXPORTS = {

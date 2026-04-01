@@ -15,10 +15,13 @@ async def analyze_query(
     domain_index: DomainIndex,
     modules: dict[str, DomainModule],
     analyzer: QueryAnalyzer | None = None,
+    *,
+    as_of_utc: str = "",
 ) -> tuple[QueryIntent, QueryAnalysis]:
     _analyzer = analyzer or QueryAnalyzer()
     analysis = await _analyzer.analyze(
         query=intent.query or "",
+        as_of_utc=as_of_utc,
         index=domain_index,
         modules=modules,
     )
@@ -57,8 +60,16 @@ class DomainRouter:
         intent: QueryIntent,
         index: DomainIndex,
         modules: dict[str, DomainModule],
+        *,
+        as_of_utc: str = "",
     ) -> tuple[QueryIntent, QueryAnalysis]:
-        return await analyze_query(intent, index, modules, self._analyzer)
+        return await analyze_query(
+            intent,
+            index,
+            modules,
+            self._analyzer,
+            as_of_utc=as_of_utc,
+        )
 
 
 def _merged_intent_tags(

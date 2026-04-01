@@ -1,0 +1,35 @@
+{
+  "task_id": "root.1",
+  "parent_id": "root",
+  "description": "위성 이미지 산업의 전방 수요(정부, 상업용)와 밸류체인을 분석하고, 차년도 실적에 영향을 미칠 긍정적 요인과 리스크를 전망합니다.",
+  "task_name": "core_business_outlook",
+  "state": "waiting",
+  "error": null,
+  "created_at": "2026-03-31T15:23:30.734954Z",
+  "updated_at": "2026-03-31T15:24:15.604602Z",
+  "task_type": "merge",
+  "query_unit_ids": [
+    1
+  ],
+  "deps": [
+    "root.1.0",
+    "root.1.1",
+    "root.1.2"
+  ],
+  "tool": null,
+  "domain_id": "ceo",
+  "output": "",
+  "merge_instruction": "",
+  "children": [
+    "root.1.0",
+    "root.1.1",
+    "root.1.2"
+  ],
+  "artifacts": {
+    "execution_result_path": null,
+    "execution_meta_path": null,
+    "aggregation_report_path": null,
+    "aggregation_raw_results_path": null,
+    "final_output_path": null
+  }
+}

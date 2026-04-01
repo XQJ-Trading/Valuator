@@ -1,9 +1,6 @@
-from .agent import Agent
-from .scheduler import Scheduler
-from .shared_state import Conflict, Fact, SharedState, SharedStateView
-from .step_planner import StepPlanner
-from .task import AtomicTask, ComplexTask, Task
-from .types import Action, AgentEvent, TaskDecision, TaskSpec, TaskState, ToolRequest
+from __future__ import annotations
+
+from importlib import import_module
 
 __all__ = [
     "Action",
@@ -12,6 +9,7 @@ __all__ = [
     "AtomicTask",
     "ComplexTask",
     "Conflict",
+    "EventType",
     "Fact",
     "Scheduler",
     "SharedState",
@@ -22,4 +20,36 @@ __all__ = [
     "TaskSpec",
     "TaskState",
     "ToolRequest",
+    "ToolResult",
 ]
+
+_LAZY_EXPORTS = {
+    "Action": (".types", "Action"),
+    "Agent": (".agent", "Agent"),
+    "AgentEvent": (".types", "AgentEvent"),
+    "AtomicTask": (".task", "AtomicTask"),
+    "ComplexTask": (".task", "ComplexTask"),
+    "Conflict": (".shared_state", "Conflict"),
+    "EventType": (".types", "EventType"),
+    "Fact": (".shared_state", "Fact"),
+    "Scheduler": (".scheduler", "Scheduler"),
+    "SharedState": (".shared_state", "SharedState"),
+    "SharedStateView": (".shared_state", "SharedStateView"),
+    "StepPlanner": (".planning", "StepPlanner"),
+    "Task": (".task", "Task"),
+    "TaskDecision": (".types", "TaskDecision"),
+    "TaskSpec": (".types", "TaskSpec"),
+    "TaskState": (".types", "TaskState"),
+    "ToolRequest": (".types", "ToolRequest"),
+    "ToolResult": (".types", "ToolResult"),
+}
+
+
+def __getattr__(name: str):
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _LAZY_EXPORTS[name]
+    module = import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value

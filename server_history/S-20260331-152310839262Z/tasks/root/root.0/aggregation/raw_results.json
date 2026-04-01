@@ -1,0 +1,30 @@
+{
+  "task_id": "root.0",
+  "task_type": "leaf",
+  "query_unit_ids": [
+    0
+  ],
+  "domain_ids": [
+    "ceo",
+    "dcf",
+    "risk_transmission"
+  ],
+  "source_task_ids": [],
+  "child_results": [],
+  "output": {
+    "status": "facts_only",
+    "facts": {
+      "fy2026_revenue": "307.7 million USD",
+      "fy2026_growth": "26% YoY",
+      "q4_fy2026_revenue": "86.8 million USD"
+    },
+    "source_task_id": "root.0"
+  },
+  "facts": {
+    "fy2026_revenue": "307.7 million USD",
+    "fy2026_growth": "26% YoY",
+    "q4_fy2026_revenue": "86.8 million USD"
+  },
+  "aspect_facts": [],
+  "uncovered_aspects": []
+}

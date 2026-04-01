@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from valuator.utils.config import config
-from .company import ListingSeed, resolve_subjects
+from .boundary.query_temporal import normalize_target_date_token
+from .company import ListingSeed, resolve_company_surfaces, resolve_subjects
 from .query import (
     QueryAnalysis,
     QueryIntent,
@@ -134,6 +135,8 @@ def _build_units(
                     ]
                 ),
                 time_scope=item.time_scope,
+                target_start=item.target_start,
+                target_end=item.target_end,
                 parent_unit_id=item.parent_unit_id,
             )
         )
@@ -334,6 +337,8 @@ def _response_schema(module_ids: list[str]) -> dict[str, Any]:
                             "items": {"type": "string", "minLength": 1},
                         },
                         "time_scope": {"type": "string"},
+                        "target_start": {"type": "string"},
+                        "target_end": {"type": "string"},
                         "parent_unit_id": {"type": "string"},
                     },
                 },
@@ -409,7 +414,20 @@ class QueryUnitPayload(BaseModel):
     domain_ids: list[str] = Field(default_factory=list, min_length=1)
     entity_ids: list[str] = Field(default_factory=list)
     time_scope: str = ""
+    target_start: str = ""
+    target_end: str = ""
     parent_unit_id: str = ""
+
+    @model_validator(mode="after")
+    def _normalize_temporal_bounds(self, info: ValidationInfo) -> "QueryUnitPayload":
+        ctx = info.context or {}
+        as_of = ctx.get("as_of_utc")
+        as_of_s = as_of if isinstance(as_of, str) else None
+        self.target_start = normalize_target_date_token(
+            self.target_start, as_of_utc=as_of_s
+        )
+        self.target_end = normalize_target_date_token(self.target_end, as_of_utc=as_of_s)
+        return self
 
 
 class QueryRequirementPayload(BaseModel):
@@ -437,14 +455,47 @@ class QueryAnalysisPayload(BaseModel):
     rationale: str = Field(min_length=1)
 
 
+def _merge_ticker_enrichment_payload(
+    payload: dict[str, Any],
+    enrich: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge ticker-resolution enrichment into a raw LLM analysis payload dict."""
+    merged = dict(payload)
+    qi = dict(merged.get("query_intent") or {})
+    tickers = _dedupe_strings([*qi.get("tickers", []), *enrich.get("tickers", [])])
+    company_names = _dedupe_strings(
+        [*qi.get("company_names", []), *enrich.get("canonical_company_names", [])]
+    )
+    qi["tickers"] = tickers
+    qi["company_names"] = company_names
+    merged["query_intent"] = qi
+    return merged
+
+
+def _company_surfaces_fully_resolved(
+    raw: QueryIntentPayload,
+    on_miss: Callable[[str], Iterable[ListingSeed]] | None,
+) -> bool:
+    combined = _dedupe_strings([*raw.tickers, *raw.company_names])
+    if not combined:
+        return True
+    resolution = resolve_company_surfaces(
+        company_names=tuple(combined),
+        on_miss=on_miss,
+    )
+    return not resolution.unresolved_surface_forms
+
+
 def _build_query_analysis(
     payload: dict[str, Any],
     *,
     query: str,
     valid_domain_ids: set[str],
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
+    as_of_utc: str = "",
 ) -> QueryAnalysis:
-    raw = QueryAnalysisPayload.model_validate(payload)
+    validation_ctx = {"as_of_utc": as_of_utc} if as_of_utc.strip() else None
+    raw = QueryAnalysisPayload.model_validate(payload, context=validation_ctx)
     domain_ids = _validated_domain_ids(
         raw.domain_ids, valid_domain_ids=valid_domain_ids
     )
@@ -470,6 +521,7 @@ def _build_query_analysis(
         unit_count=len(units),
     )
     return QueryAnalysis(
+        as_of_utc=as_of_utc,
         domain_ids=domain_ids,
         query_intent=query_intent,
         entities=entities,
@@ -506,6 +558,7 @@ class QueryAnalyzer:
         query: str,
         index: DomainIndex,
         modules: dict[str, DomainModule],
+        as_of_utc: str = "",
     ) -> QueryAnalysis:
         valid_ids = set(index.modules)
         if not valid_ids:
@@ -522,4 +575,5 @@ class QueryAnalyzer:
             query=query,
             valid_domain_ids=valid_ids,
             on_miss=self._on_miss,
+            as_of_utc=as_of_utc,
         )

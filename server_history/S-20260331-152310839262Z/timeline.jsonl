@@ -1,0 +1,26 @@
+{"global_seq": 1, "task_id": "root", "task_seq": 1, "timestamp": "2026-03-31T15:23:18.842065Z", "phase": "decision", "action": "decompose", "summary": "action=decompose"}
+{"global_seq": 2, "task_id": "root.2", "task_seq": 1, "timestamp": "2026-03-31T15:23:30.751804Z", "phase": "decision", "action": "decompose", "summary": "action=decompose"}
+{"global_seq": 3, "task_id": "root.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:30.750428Z", "phase": "decision", "action": "decompose", "summary": "action=decompose"}
+{"global_seq": 4, "task_id": "root.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:30.748523Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 5, "task_id": "root.1.2", "task_seq": 1, "timestamp": "2026-03-31T15:23:37.960100Z", "phase": "decision", "action": "decompose", "summary": "action=decompose"}
+{"global_seq": 6, "task_id": "root.2.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:37.069585Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 7, "task_id": "root.1.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:37.956183Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 8, "task_id": "root.2.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:37.067844Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 9, "task_id": "root.2.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:47.214301Z", "phase": "tool_result", "action": "execute", "summary": "tool=yfinance_balance_sheet success=True"}
+{"global_seq": 10, "task_id": "root.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:41.450952Z", "phase": "tool_result", "action": "execute", "summary": "tool=web_search_tool success=True"}
+{"global_seq": 11, "task_id": "root.1.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:37.958465Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 12, "task_id": "root.2.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:45.727535Z", "phase": "tool_result", "action": "execute", "summary": "tool=web_search_tool success=True"}
+{"global_seq": 13, "task_id": "root.1.2.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:43.630024Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 14, "task_id": "root.1.2.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:43.627309Z", "phase": "decision", "action": "execute", "summary": "action=execute"}
+{"global_seq": 15, "task_id": "root.1.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:47.093708Z", "phase": "tool_result", "action": "execute", "summary": "tool=web_search_tool success=True"}
+{"global_seq": 16, "task_id": "root.0", "task_seq": 2, "timestamp": "2026-03-31T15:23:49.583165Z", "phase": "decision", "action": "aggregate", "summary": "action=aggregate"}
+{"global_seq": 17, "task_id": "root.0", "task_seq": 2, "timestamp": "2026-03-31T15:23:58.348058Z", "phase": "task_result", "action": "aggregate", "summary": "done"}
+{"global_seq": 18, "task_id": "root.1.2.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:52.560529Z", "phase": "tool_result", "action": "execute", "summary": "tool=web_search_tool success=True"}
+{"global_seq": 19, "task_id": "root.1.2.0", "task_seq": 1, "timestamp": "2026-03-31T15:23:53.020209Z", "phase": "tool_result", "action": "execute", "summary": "tool=web_search_tool success=True"}
+{"global_seq": 20, "task_id": "root.2.1", "task_seq": 2, "timestamp": "2026-03-31T15:23:50.293973Z", "phase": "decision", "action": "aggregate", "summary": "action=aggregate"}
+{"global_seq": 21, "task_id": "root.2.1", "task_seq": 2, "timestamp": "2026-03-31T15:24:06.144301Z", "phase": "task_result", "action": "aggregate", "summary": "done"}
+{"global_seq": 22, "task_id": "root.1.1", "task_seq": 1, "timestamp": "2026-03-31T15:23:49.552631Z", "phase": "tool_result", "action": "execute", "summary": "tool=domain_tool success=True"}
+{"global_seq": 23, "task_id": "root.1.0", "task_seq": 2, "timestamp": "2026-03-31T15:23:54.112040Z", "phase": "decision", "action": "aggregate", "summary": "action=aggregate"}
+{"global_seq": 24, "task_id": "root.1.0", "task_seq": 2, "timestamp": "2026-03-31T15:24:11.515894Z", "phase": "task_result", "action": "aggregate", "summary": "done"}
+{"global_seq": 25, "task_id": "root.1.2.1", "task_seq": 2, "timestamp": "2026-03-31T15:23:58.376609Z", "phase": "decision", "action": "aggregate", "summary": "action=aggregate"}
+{"global_seq": 26, "task_id": "root.1.2.1", "task_seq": 2, "timestamp": "2026-03-31T15:24:15.667494Z", "phase": "task_result", "action": "aggregate", "summary": "done"}

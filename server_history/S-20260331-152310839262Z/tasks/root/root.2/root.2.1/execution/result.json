@@ -1,0 +1,34 @@
+{
+  "task_id": "root.2.1",
+  "task_type": "leaf",
+  "query_unit_ids": [
+    3
+  ],
+  "tool_name": "web_search_tool",
+  "domain_id": "ceo",
+  "domain_summary": "Planet Labs PBC (NYSE: PL) maintains a dual-class voting structure where **Class A common stock** carries 1 vote per share and **Class B common stock** carries 20 votes per share, with stockholders voting together as a single class without cumulative voting rights.[1][5] At the 2025 annual meeting, 176,302,669 shares (Class A and B) represented 578,296,803 total votes, highlighting the super-voting power of Class B shares.[1]\n\n### Board Independence\nPlanet Labs' board committee composition includes independent directors serving on key committees, such as Ita Brennan (likely on audit, compensation, or nominating/governance committees based on available data).[4] Recent elections re-elected Class I directors William Marshall, Robert Schingler, Jr., and Gary B. Smith for three-year terms, with strong shareholder support (e.g., Smith received 523M votes in favor vs. 1.3M against, alongside 52M broker non-votes).[1] Historical context notes founders (e.g., Will Marshall, Robbie Schingler) hold high-vote Class B shares with 20:1 voting power.[3]\n\n### Shareholder Ownership\n- **Institutional ownership**: Approximately 50.41% (treasury method), with major holders including Alphabet, Inc. (10.06%), State Street Corp. (1.89%), and others; Vanguard recently reported 0% following a 2026 realignment.[2][7]\n- **Individuals**: 11.07%.[7]\n- **Founders/control**: Planet founders historically control over 63% of voting power via Class B shares.[6]\nNo DEF 14A from 2025 or 2026 is directly available in results; the latest cited is from May 2023, which confirms the voting structure.[5] 2025 meeting results derive from a related SEC press release filing.[1]",
+  "domain_key_values": {},
+  "tool_metadata": {
+    "search_type": "perplexity_web",
+    "model": "sonar",
+    "search_mode": "sec",
+    "usage": {
+      "input_tokens": 45,
+      "output_tokens": 400,
+      "total_tokens": 445
+    }
+  },
+  "raw_result": {
+    "query": "Planet Labs PL latest DEF 14A proxy statement board independence shareholder ownership voting structure",
+    "findings": "Planet Labs PBC (NYSE: PL) maintains a dual-class voting structure where **Class A common stock** carries 1 vote per share and **Class B common stock** carries 20 votes per share, with stockholders voting together as a single class without cumulative voting rights.[1][5] At the 2025 annual meeting, 176,302,669 shares (Class A and B) represented 578,296,803 total votes, highlighting the super-voting power of Class B shares.[1]\n\n### Board Independence\nPlanet Labs' board committee composition includes independent directors serving on key committees, such as Ita Brennan (likely on audit, compensation, or nominating/governance committees based on available data).[4] Recent elections re-elected Class I directors William Marshall, Robert Schingler, Jr., and Gary B. Smith for three-year terms, with strong shareholder support (e.g., Smith received 523M votes in favor vs. 1.3M against, alongside 52M broker non-votes).[1] Historical context notes founders (e.g., Will Marshall, Robbie Schingler) hold high-vote Class B shares with 20:1 voting power.[3]\n\n### Shareholder Ownership\n- **Institutional ownership**: Approximately 50.41% (treasury method), with major holders including Alphabet, Inc. (10.06%), State Street Corp. (1.89%), and others; Vanguard recently reported 0% following a 2026 realignment.[2][7]\n- **Individuals**: 11.07%.[7]\n- **Founders/control**: Planet founders historically control over 63% of voting power via Class B shares.[6]\nNo DEF 14A from 2025 or 2026 is directly available in results; the latest cited is from May 2023, which confirms the voting structure.[5] 2025 meeting results derive from a related SEC press release filing.[1]",
+    "sources": [
+      "https://www.investing.com/news/sec-filings/planet-labs-shareholders-reelect-directors-and-approve-executive-pay-at-annual-meeting-93CH-4132460",
+      "https://www.stocktitan.net/sec-filings/PL/schedule-13g-a-planet-labs-pbc-amended-passive-investment-disclosure-18b1128a4cb4.html",
+      "https://www.planet.com/investors/presentations/2021/investor-presentation-20210707.pdf",
+      "https://investors.planet.com/governance/committee-composition/default.aspx",
+      "https://content.edgar-online.com/ExternalLink/EDGAR/0001836833-23-000033.html?hash=6f3214b205c13952332336eea8fba771486b3d6407c1095770d66e874987f73e&dest=pl-20230530_htm",
+      "https://www.sec.gov/Archives/edgar/data/1836833/000119312521368023/d267173ds1.htm",
+      "https://www.marketscreener.com/quote/stock/PLANET-LABS-PBC-202708972/company-shareholders/"
+    ]
+  }
+}

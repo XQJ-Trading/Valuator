@@ -41,7 +41,11 @@ async def test_web_search_tool_passes_sec_search_mode(monkeypatch) -> None:
     monkeypatch.setattr(
         module,
         "config",
-        SimpleNamespace(perplexity_api_key="test-key"),
+        SimpleNamespace(
+            perplexity_api_key="test-key",
+            web_search_retry_count=2,
+            web_search_retry_base_delay=2.0,
+        ),
     )
 
     tool = PerplexitySearchTool()

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 import argparse
 import asyncio
 import json
@@ -8,15 +10,21 @@ import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from valuator.agent_runtime import create_tool_registry, final_output_text, finalize_trace
-from valuator.core.llm_usage import Measurement
-from valuator.session_store import ValuatorSessionStore
-from valuator.utils.logger import close_session_log_file, session_log_file
+from valuator.runtime import (
+    create_tool_registry,
+    final_output_text,
+    finalize_trace,
+)  # noqa: E402
+from valuator.models.gemini_direct import GeminiClient  # noqa: E402
+from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
+from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
+from valuator.utils.time_utils import Measurement  # noqa: E402
 
 DEFAULT_QUERY_FILE = ROOT / "scripts" / "queries" / "amazon_analysis_ko.txt"
 
@@ -105,10 +113,10 @@ async def build_query_analysis(
     query: str,
     model: str,
     *,
+    as_of_utc: str,
     usage_writer: object | None = None,
 ):
     from domain import DomainLoader, DomainRouter, QueryAnalyzer, QueryIntent
-    from valuator.models.gemini_direct import GeminiClient
 
     measurement = Measurement.start()
     try:
@@ -121,18 +129,20 @@ async def build_query_analysis(
             QueryIntent(query=query),
             domain_index,
             modules,
+            as_of_utc=as_of_utc,
         )
     except Exception as exc:
         write_diagnostic_record = getattr(usage_writer, "write_diagnostic_record", None)
         if callable(write_diagnostic_record):
-            write_diagnostic_record(
+            await asyncio.to_thread(
+                write_diagnostic_record,
                 category="analysis",
                 method="query_analysis.analyze",
                 status="failed",
                 summary=str(exc),
                 started_at=measurement.started_at,
                 duration_ms=round(measurement.latency_seconds() * 1000.0, 3),
-                input_payload={"query": query, "model": model},
+                input_payload={"query": query, "model": model, "as_of_utc": as_of_utc},
                 result_payload={"error": str(exc)},
                 error=str(exc),
             )
@@ -140,7 +150,8 @@ async def build_query_analysis(
 
     write_diagnostic_record = getattr(usage_writer, "write_diagnostic_record", None)
     if callable(write_diagnostic_record):
-        write_diagnostic_record(
+        await asyncio.to_thread(
+            write_diagnostic_record,
             category="analysis",
             method="query_analysis.analyze",
             status="success",
@@ -151,10 +162,55 @@ async def build_query_analysis(
             ),
             started_at=measurement.started_at,
             duration_ms=round(measurement.latency_seconds() * 1000.0, 3),
-            input_payload={"query": query, "model": model},
+            input_payload={"query": query, "model": model, "as_of_utc": as_of_utc},
             result_payload=asdict(analysis),
         )
     return analysis
+
+
+def _write_cli_trace_compat(trace_writer: SessionTraceWriter) -> None:
+    session_dir = trace_writer.session_dir
+    output_dir = session_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    events_src = session_dir / "diagnostics" / "events.jsonl"
+    if events_src.exists():
+        shutil.copyfile(events_src, output_dir / "events.jsonl")
+
+    runtime_src = session_dir / "diagnostics" / "runtime.log"
+    if runtime_src.exists():
+        shutil.copyfile(runtime_src, output_dir / "runtime.log")
+
+    method_rows: list[dict[str, object]] = []
+    for steps_path in sorted(session_dir.glob("tasks/**/steps.jsonl")):
+        task_id = str(steps_path.parent.relative_to(session_dir / "tasks")).replace("/", ".")
+        for line in steps_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            method_rows.append(
+                {
+                    "category": row.get("phase"),
+                    "method": f"task.{task_id}",
+                    "task_id": task_id,
+                    "status": row.get("status"),
+                    "summary": row.get("summary", ""),
+                    "started_at": row.get("timestamp"),
+                    "duration_ms": row.get("duration_ms"),
+                    "input": row.get("input"),
+                    "result": row.get("result"),
+                    "error": row.get("error"),
+                }
+            )
+    with (output_dir / "method_calls.jsonl").open("w", encoding="utf-8") as file_obj:
+        for row in method_rows:
+            file_obj.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    for index, llm_path in enumerate(
+        sorted(session_dir.glob("tasks/**/llm_calls/step_*.json")),
+        start=1,
+    ):
+        shutil.copyfile(llm_path, session_dir / f"step_{index:02d}.json")
 
 
 def render_event(event, *, jsonl: bool) -> str:
@@ -175,8 +231,7 @@ def render_event(event, *, jsonl: bool) -> str:
         return f"[step] {task_id} {step_text} {detail.get('description', '')}".strip()
     if event_type == "decision":
         action = str(detail.get("action") or "").upper()
-        reason = str(detail.get("reason") or "").strip()
-        return f"[decision] {task_id} {action} {reason}".strip()
+        return f"[decision] {task_id} {action}".strip()
     if event_type == "tool_execute":
         tool = str(detail.get("tool") or "").strip()
         duration_ms = detail.get("duration_ms")
@@ -209,7 +264,6 @@ def render_event(event, *, jsonl: bool) -> str:
 
 async def run(args: argparse.Namespace) -> int:
     from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, SharedState
-    from valuator.models.gemini_direct import GeminiClient
     from valuator.utils.config import config
 
     raw_query = read_query(args)
@@ -226,9 +280,7 @@ async def run(args: argparse.Namespace) -> int:
         else config.agent_max_steps_per_task
     )
     concurrency = (
-        args.concurrency
-        if args.concurrency is not None
-        else config.agent_concurrency
+        args.concurrency if args.concurrency is not None else config.agent_concurrency
     )
     created_at = datetime.now(timezone.utc)
     session_id = f"CLI-{created_at.strftime('%Y%m%d-%H%M%S%fZ')}"
@@ -239,6 +291,7 @@ async def run(args: argparse.Namespace) -> int:
         created_at=created_at,
         root_dir=ROOT / "logs",
     )
+    # Agent and task steps use session_store.trace_writer; LLM usage and on_event must use the same writer.
     trace_writer = session_store.trace_writer
     runtime_log_path = trace_writer.runtime_log_path
 
@@ -253,16 +306,19 @@ async def run(args: argparse.Namespace) -> int:
             )
             root_task = ComplexTask(
                 id="root",
-                description=f"Valuation: {effective_query}",
+                description=f"Analysis: {effective_query}",
             )
-            session_store.update_trace_query(effective_query)
-            session_store.sync_task_tree(root_task)
+            await asyncio.to_thread(session_store.update_trace_query, effective_query)
+            await asyncio.to_thread(session_store.sync_task_tree, root_task)
             analysis = await build_query_analysis(
                 effective_query,
                 model,
+                as_of_utc=created_at.isoformat().replace("+00:00", "Z"),
                 usage_writer=trace_writer,
             )
-            session_store.write_plan(
+            root_task.query_unit_ids = list(range(len(analysis.units)))
+            await asyncio.to_thread(
+                session_store.write_plan,
                 effective_query=effective_query,
                 analysis=analysis,
                 root_task=root_task,
@@ -273,7 +329,7 @@ async def run(args: argparse.Namespace) -> int:
                 print()
 
             async def on_event(event: AgentEvent) -> None:
-                trace_writer.append_event(asdict(event))
+                await asyncio.to_thread(trace_writer.append_event, asdict(event))
                 print(render_event(event, jsonl=args.jsonl_events), flush=True)
 
             agent = Agent(
@@ -293,46 +349,69 @@ async def run(args: argparse.Namespace) -> int:
                 query_analysis=analysis,
                 on_event=on_event,
                 session_store=session_store,
+                trace_writer=trace_writer,
             )
             output = await agent.run(effective_query, root_task)
             final_text = final_output_text(output)
-            session_store.write_final_output(final_text, root_task=root_task)
-            session_store.sync_task_tree(root_task)
-            trace_writer.append_event(
+            final_text = await asyncio.to_thread(session_store.final_output_markdown, output)
+            await asyncio.to_thread(
+                session_store.write_final_output,
+                final_text,
+                root_task=root_task,
+            )
+            await asyncio.to_thread(session_store.sync_task_tree, root_task)
+            await asyncio.to_thread(session_store.build_browse_tree)
+            await asyncio.to_thread(
+                trace_writer.append_event,
                 {
                     "type": "final_answer",
                     "content": final_text,
-                }
+                },
             )
-            trace_writer.append_event({"type": "end", "content": "completed"})
+            await asyncio.to_thread(
+                trace_writer.append_event,
+                {"type": "end", "content": "completed"},
+            )
             completed_at = datetime.now(timezone.utc)
-            finalize_trace(
+            await asyncio.to_thread(
+                finalize_trace,
                 trace_writer,
                 status="completed",
                 completed_at=completed_at,
                 final_answer=final_text,
                 duration=max(0.0, (completed_at - created_at).total_seconds()),
             )
-            session_store.update_session(status="completed", updated_at=completed_at)
+            await asyncio.to_thread(
+                session_store.update_session,
+                status="completed",
+                updated_at=completed_at,
+            )
+            await asyncio.to_thread(_write_cli_trace_compat, trace_writer)
             print("\n[final]\n")
             print(final_text)
             return 0
         except BaseException as exc:
             error_text = str(exc) or exc.__class__.__name__
-            trace_writer.append_event({"type": "error", "message": error_text})
+            await asyncio.to_thread(
+                trace_writer.append_event,
+                {"type": "error", "message": error_text},
+            )
             completed_at = datetime.now(timezone.utc)
-            finalize_trace(
+            await asyncio.to_thread(
+                finalize_trace,
                 trace_writer,
                 status="failed",
                 completed_at=completed_at,
                 error=error_text,
                 duration=max(0.0, (completed_at - created_at).total_seconds()),
             )
-            session_store.update_session(
+            await asyncio.to_thread(
+                session_store.update_session,
                 status="failed",
                 error=error_text,
                 updated_at=completed_at,
             )
+            await asyncio.to_thread(_write_cli_trace_compat, trace_writer)
             raise
         finally:
             close_session_log_file(runtime_log_path)

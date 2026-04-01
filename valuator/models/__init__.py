@@ -1,3 +1,1 @@
-from .gemini_direct import GeminiClient, GeminiSession
-
-__all__ = ["GeminiClient", "GeminiSession"]
+"""LLM client submodules — import explicitly (e.g. ``valuator.models.gemini_direct``)."""

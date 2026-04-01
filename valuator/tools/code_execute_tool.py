@@ -178,27 +178,6 @@ class ExecuteCodeTool(ReActBaseTool):
             metadata=metadata,
         )
 
-    def get_schema(self) -> dict:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "Python code to execute",
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "Execution timeout in seconds",
-                        "default": 10,
-                    },
-                },
-                "required": ["code"],
-            },
-        }
-
     @staticmethod
     def _normalize_code(code: str) -> str:
         text = (code or "").replace("\\n", "\n").replace("\\t", "\t").strip()
@@ -222,7 +201,7 @@ class ExecuteCodeTool(ReActBaseTool):
     @staticmethod
     def _allowed_imports() -> list[str]:
         imports = getattr(config, "code_execution_allowed_imports", ()) or ()
-        return list(imports)
+        return list(imports) or ["json"]
 
     @staticmethod
     def _build_command(*, code: str, allowed_imports: list[str]) -> list[str]:

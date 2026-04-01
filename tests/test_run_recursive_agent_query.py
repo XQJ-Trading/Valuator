@@ -9,7 +9,7 @@ import pytest
 
 from domain.query import QueryAnalysis
 from valuator.core.types import AgentEvent
-from valuator.utils.session_trace import SessionTraceWriter
+from valuator.session import SessionTraceWriter
 
 
 def _load_script_module():

@@ -1,0 +1,30 @@
+{
+  "task_id": "root.3",
+  "parent_id": "root",
+  "description": "이전 단계의 분석 결과를 종합하여 강점(Bull)과 약점(Bear)을 정리하고 최종 투자 전망을 제시합니다.",
+  "task_name": "final_investment_outlook",
+  "state": "created",
+  "error": null,
+  "created_at": "2026-03-31T15:23:30.735435Z",
+  "updated_at": "2026-03-31T15:24:15.613217Z",
+  "task_type": "leaf",
+  "query_unit_ids": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "deps": [],
+  "tool": null,
+  "domain_id": "ceo",
+  "output": "execution/result.md",
+  "merge_instruction": "",
+  "children": [],
+  "artifacts": {
+    "execution_result_path": null,
+    "execution_meta_path": null,
+    "aggregation_report_path": null,
+    "aggregation_raw_results_path": null,
+    "final_output_path": null
+  }
+}

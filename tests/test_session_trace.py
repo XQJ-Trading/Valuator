@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
-from server.main import build_query_analysis
+from server.api_support import build_query_analysis
 from valuator.models.gemini_direct import GeminiClient
+from valuator.session import SessionTraceWriter
+from valuator.utils.llm_usage import TokenUsage
 from valuator.utils.logger import close_session_log_file, logger, session_log_file
-from valuator.utils.session_trace import SessionTraceWriter
 
 
 def test_session_trace_writer_records_task_hierarchy_and_diagnostics(
@@ -27,11 +28,11 @@ def test_session_trace_writer_records_task_hierarchy_and_diagnostics(
     writer.append_call(
         method="query_analysis.analyze",
         model="gemini-3-flash-preview",
-        usage={
-            "prompt_tokens": 10,
-            "completion_tokens": 5,
-            "total_tokens": 15,
-        },
+        usage=TokenUsage(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
         latency_seconds=1.25,
         started_at="2026-03-21T02:31:05.582740Z",
     )
@@ -337,8 +338,8 @@ async def test_build_query_analysis_writes_diagnostic_record(
                 ),
             )
 
-    monkeypatch.setattr("server.main.DomainLoader", _DummyDomainLoader)
-    monkeypatch.setattr("server.main.DomainRouter", _DummyDomainRouter)
+    monkeypatch.setattr("server.api_support.DomainLoader", _DummyDomainLoader)
+    monkeypatch.setattr("server.api_support.DomainRouter", _DummyDomainRouter)
 
     writer = SessionTraceWriter(
         session_id="S-analysis",

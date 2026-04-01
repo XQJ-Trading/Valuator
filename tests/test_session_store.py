@@ -114,9 +114,8 @@ def test_build_browse_tree_writes_markdown_first_tree_and_resolves_name_collisio
     assert "- task_id: root.0" in child_readme
     assert "- state: done" in child_readme
     assert "- task_type: leaf" in child_readme
-    assert (child_browse_dir / "task.md").read_text(encoding="utf-8").startswith(
-        "# Child task trace"
-    )
+    assert not (root_browse_dir / "task.md").exists()
+    assert not (child_browse_dir / "task.md").exists()
     child_report = (child_browse_dir / "report.md").read_text(encoding="utf-8")
     assert "시장 반응 결과" in child_report
     assert not (child_browse_dir / "result.md").exists()

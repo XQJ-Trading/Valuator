@@ -4,15 +4,37 @@ import json
 import re
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from valuator.utils.json_ready import json_ready
+from pydantic import BaseModel
+
+from valuator.utils.config import session_files_root
 from valuator.utils.llm_usage import LLMUsageWriter, TokenUsage
 from valuator.utils.time_utils import compact_utc_timestamp, utc_isoformat
 
 from .trace_markdown import timeline_summary, write_task_markdown
+
+
+def json_ready(obj: Any) -> Any:
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, BaseModel):
+        return json_ready(obj.model_dump())
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return json_ready(asdict(obj))
+    if isinstance(obj, dict):
+        return {str(k): json_ready(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_ready(item) for item in obj]
+    return str(obj)
 
 
 def task_rel_path(task_id: str) -> Path:
@@ -33,9 +55,6 @@ def ensure_task_dir(
     input_payload: Any = None,
 ) -> None:
     (task_dir / "llm_calls").mkdir(parents=True, exist_ok=True)
-    steps_path = task_dir / "steps.jsonl"
-    if not steps_path.exists():
-        steps_path.write_text("", encoding="utf-8")
     task_json_path = task_dir / "task.json"
     if task_json_path.exists():
         return
@@ -80,35 +99,36 @@ class SessionTraceWriter:
         query: str,
         model: str,
         created_at: datetime | str,
-        base_dir: str | Path = "logs/gemini_low_level_request",
+        base_dir: str | Path | None = None,
         session_dir_name: str | None = None,
         session_dir: str | Path | None = None,
         tasks_dir: str | Path | None = None,
-        diagnostics_dir: str | Path | None = None,
+        trace_dir: str | Path | None = None,
         session_metadata_callback: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.session_id = session_id
         dir_name = session_dir_name or f"session_{session_id}"
-        self.session_dir = (
-            Path(session_dir).resolve()
-            if session_dir is not None
-            else (Path(base_dir) / dir_name).resolve()
-        )
+        if session_dir is not None:
+            self.session_dir = Path(session_dir).resolve()
+        else:
+            root = Path(base_dir).resolve() if base_dir is not None else session_files_root()
+            self.session_dir = (root / dir_name).resolve()
         self.tasks_dir = (
             Path(tasks_dir).resolve()
             if tasks_dir is not None
             else self.session_dir / "tasks"
         )
-        self.diagnostics_dir = (
-            Path(diagnostics_dir).resolve()
-            if diagnostics_dir is not None
-            else self.session_dir / "diagnostics"
+        self.trace_dir = (
+            Path(trace_dir).resolve()
+            if trace_dir is not None
+            else self.session_dir / "trace"
         )
         self.output_dir = self.session_dir / "output"
         self.timeline_path = self.session_dir / "timeline.jsonl"
-        self.events_path = self.diagnostics_dir / "events.jsonl"
-        self.runtime_log_path = self.diagnostics_dir / "runtime.log"
-        self.diagnostic_llm_calls_dir = self.diagnostics_dir / "llm_calls"
+        self.events_path = self.trace_dir / "events.jsonl"
+        self.runtime_log_path = self.trace_dir / "runtime.log"
+        self.session_llm_calls_dir = self.trace_dir / "llm_calls"
+        self.debug_steps_root = self.session_dir / "debug" / "steps"
         self._lock = threading.RLock()
         self._session_metadata_callback = session_metadata_callback
         self._global_step_index = 0
@@ -120,8 +140,9 @@ class SessionTraceWriter:
         for path in (
             self.session_dir,
             self.tasks_dir,
-            self.diagnostics_dir,
-            self.diagnostic_llm_calls_dir,
+            self.trace_dir,
+            self.session_llm_calls_dir,
+            self.debug_steps_root,
             self.output_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
@@ -130,7 +151,7 @@ class SessionTraceWriter:
         self.runtime_log_path.write_text("", encoding="utf-8")
 
         self._usage_writer = LLMUsageWriter(
-            self.diagnostics_dir / "llm_usage.jsonl",
+            self.trace_dir / "llm_usage.jsonl",
             session_started_at=session_started_at,
         )
         self._session_payload: dict[str, Any] = {
@@ -147,10 +168,13 @@ class SessionTraceWriter:
                 "timeline": self._relative_path(self.timeline_path),
                 "tasks": self._relative_path(self.tasks_dir),
                 "output": self._relative_path(self.output_dir),
-                "diagnostics": self._relative_path(self.diagnostics_dir),
+                "trace": self._relative_path(self.trace_dir),
                 "events": self._relative_path(self.events_path),
-                "llm_usage": self._relative_path(self.diagnostics_dir / "llm_usage.jsonl"),
+                "llm_usage": self._relative_path(
+                    self.trace_dir / "llm_usage.jsonl"
+                ),
                 "runtime_log": self._relative_path(self.runtime_log_path),
+                "debug_steps": self._relative_path(self.debug_steps_root),
             },
         }
         if self._session_metadata_callback is None:
@@ -208,7 +232,9 @@ class SessionTraceWriter:
                 "status": status,
                 "summary": summary,
                 "started_at": utc_isoformat(started_at) if started_at else None,
-                "duration_ms": round(duration_ms, 3) if duration_ms is not None else None,
+                "duration_ms": (
+                    round(duration_ms, 3) if duration_ms is not None else None
+                ),
                 "input": json_ready(input_payload),
                 "result": json_ready(result_payload),
                 "error": error,
@@ -241,7 +267,10 @@ class SessionTraceWriter:
             global_seq = self._global_step_index
             timestamp = utc_isoformat(started_at)
             task_dir = self._task_dir(task_id)
-            steps_path = task_dir / "steps.jsonl"
+            steps_path = self._task_steps_path(task_id)
+            steps_path.parent.mkdir(parents=True, exist_ok=True)
+            if not steps_path.exists():
+                steps_path.write_text("", encoding="utf-8")
 
             ensure_task_dir(
                 task_dir=task_dir,
@@ -256,7 +285,9 @@ class SessionTraceWriter:
                 "phase": phase,
                 "action": action,
                 "status": status,
-                "duration_ms": round(duration_ms, 3) if duration_ms is not None else None,
+                "duration_ms": (
+                    round(duration_ms, 3) if duration_ms is not None else None
+                ),
                 "reason": reason,
                 "summary": summary,
                 "tool_name": tool_name,
@@ -281,7 +312,12 @@ class SessionTraceWriter:
                     "summary": timeline_summary(record),
                 },
             )
-            write_task_markdown(task_dir=task_dir, task_id=task_id, read_json=self._read_json)
+            write_task_markdown(
+                steps_path=steps_path,
+                task_dir=task_dir,
+                task_id=task_id,
+                read_json=self._read_json,
+            )
             self._sync_session(step_count=self._global_step_index)
 
     def log_llm_call(
@@ -320,10 +356,15 @@ class SessionTraceWriter:
                 "error": error,
             }
             if task_id is None:
-                path = self.diagnostic_llm_calls_dir / f"step_{self._llm_call_index:04d}.json"
+                path = (
+                    self.session_llm_calls_dir
+                    / f"step_{self._llm_call_index:04d}.json"
+                )
             else:
                 task_dir = self._task_dir(task_id)
-                ensure_task_dir(task_dir=task_dir, task_id=task_id, write_json=self._write_json)
+                ensure_task_dir(
+                    task_dir=task_dir, task_id=task_id, write_json=self._write_json
+                )
                 task_index = self._task_llm_call_index.get(task_id, 0) + 1
                 self._task_llm_call_index[task_id] = task_index
                 path = task_dir / "llm_calls" / f"step_{task_index:02d}.json"
@@ -400,6 +441,9 @@ class SessionTraceWriter:
             "total_cost_usd": round(w._cost_usd_total, 6),
         }
 
+    def _task_steps_path(self, task_id: str) -> Path:
+        return self.debug_steps_root / task_rel_path(task_id) / "steps.jsonl"
+
     def _task_dir(self, task_id: str) -> Path:
         return self.tasks_dir / task_rel_path(task_id)
 
@@ -450,4 +494,3 @@ class SessionTraceWriter:
     def _safe_file_component(value: str) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
         return cleaned or "call"
-

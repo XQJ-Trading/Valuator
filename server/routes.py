@@ -9,7 +9,7 @@ from typing import Any, AsyncGenerator, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 
-from valuator.utils.config import config
+from valuator.utils.config import ROOT_DIR, config, session_files_root
 from valuator.utils.logger import logger
 
 from . import state
@@ -30,6 +30,7 @@ from .valuator_snapshot import (
 )
 
 router = APIRouter()
+
 
 @router.get("/health")
 async def health():
@@ -746,8 +747,9 @@ async def get_gemini_logs(
         List of log file metadata
     """
     try:
-        logs_dir = Path("logs/gemini_low_level_request")
-        if not logs_dir.exists():
+        session_root = session_files_root()
+        legacy_logs = ROOT_DIR / "logs"
+        if not session_root.exists() and not legacy_logs.exists():
             return {
                 "files": [],
                 "total": 0,
@@ -782,25 +784,27 @@ async def get_gemini_logs(
                 }
             )
 
-        # Session/step logs (new structure)
-        for session_dir in logs_dir.glob("session_*"):
-            if not session_dir.is_dir():
-                continue
-            for step_file in session_dir.glob("step_*.json"):
-                timestamp_str = _extract_step_timestamp(step_file.name)
+        # Session step logs under VALUATOR_SESSION_FILES_ROOT (e.g. logs/local/CLI-*/step_*.json)
+        if session_root.exists():
+            for session_dir in sorted(session_root.iterdir()):
+                if not session_dir.is_dir():
+                    continue
+                for step_file in sorted(session_dir.glob("step_*.json")):
+                    timestamp_str = _extract_step_timestamp(step_file.name)
+                    if not timestamp_str:
+                        continue
+                    display_name = _encode_session_log_filename(
+                        session_dir.name, step_file.name
+                    )
+                    add_metadata(step_file, display_name, timestamp_str)
+
+        # Legacy flat logs at repo logs/ root
+        if legacy_logs.exists():
+            for filepath in sorted(legacy_logs.glob("request_response_*.json")):
+                timestamp_str = _extract_request_response_timestamp(filepath.name)
                 if not timestamp_str:
                     continue
-                display_name = _encode_session_log_filename(
-                    session_dir.name, step_file.name
-                )
-                add_metadata(step_file, display_name, timestamp_str)
-
-        # Legacy flat logs (backward compatibility)
-        for filepath in logs_dir.glob("request_response_*.json"):
-            timestamp_str = _extract_request_response_timestamp(filepath.name)
-            if not timestamp_str:
-                continue
-            add_metadata(filepath, filepath.name, timestamp_str)
+                add_metadata(filepath, filepath.name, timestamp_str)
 
         # Apply filters
         filtered_files = file_metadatas
@@ -863,18 +867,16 @@ async def get_gemini_logs(
         total = len(filtered_files)
         paginated_files = filtered_files[offset : offset + limit]
 
-        # Remove filepath from response (not needed on frontend)
         for f in paginated_files:
-            f.pop("filepath", None)
-            # Load model if not already loaded
-            if f["model"] is None:
+            if f.get("model") is None:
                 try:
-                    filepath = logs_dir / f["filename"]
+                    filepath = Path(f["filepath"])
                     with open(filepath, "r", encoding="utf-8") as file:
                         data = json.load(file)
                         f["model"] = data.get("model")
                 except Exception:
                     f["model"] = "unknown"
+            f.pop("filepath", None)
 
         return {
             "files": paginated_files,
@@ -902,8 +904,12 @@ async def get_gemini_log_detail(filename: str):
         Full log file data with metadata
     """
     try:
-        logs_dir = Path("logs/gemini_low_level_request")
-        filepath = _resolve_gemini_log_path(filename, logs_dir)
+        legacy_logs = ROOT_DIR / "logs"
+        filepath = _resolve_gemini_log_path(
+            filename,
+            legacy_logs_dir=legacy_logs,
+            session_root=session_files_root(),
+        )
 
         if not filepath.exists():
             raise HTTPException(
@@ -958,8 +964,12 @@ async def download_gemini_log(filename: str):
         File download response
     """
     try:
-        logs_dir = Path("logs/gemini_low_level_request")
-        filepath = _resolve_gemini_log_path(filename, logs_dir)
+        legacy_logs = ROOT_DIR / "logs"
+        filepath = _resolve_gemini_log_path(
+            filename,
+            legacy_logs_dir=legacy_logs,
+            session_root=session_files_root(),
+        )
 
         if not filepath.exists():
             raise HTTPException(

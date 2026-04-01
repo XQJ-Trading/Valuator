@@ -11,6 +11,34 @@ if str(ROOT_DIR) not in sys.path:
 config_module = importlib.import_module("valuator.utils.config")
 
 
+def test_session_files_root_defaults_to_logs_local(monkeypatch) -> None:
+    config_module.load_project_env.cache_clear()
+    monkeypatch.setattr(
+        config_module,
+        "load_dotenv",
+        lambda *, dotenv_path: False,
+    )
+    monkeypatch.delenv("VALUATOR_SESSION_FILES_ROOT", raising=False)
+
+    root = config_module.session_files_root()
+
+    assert root == config_module.ROOT_DIR / "logs" / "local"
+
+
+def test_session_files_root_respects_env(monkeypatch) -> None:
+    config_module.load_project_env.cache_clear()
+    monkeypatch.setattr(
+        config_module,
+        "load_dotenv",
+        lambda *, dotenv_path: False,
+    )
+    monkeypatch.setenv("VALUATOR_SESSION_FILES_ROOT", "logs/server_history")
+
+    root = config_module.session_files_root()
+
+    assert root == config_module.ROOT_DIR / "logs" / "server_history"
+
+
 def test_load_project_env_uses_cached_dotenv_load(monkeypatch) -> None:
     calls: list[object] = []
 
@@ -41,6 +69,7 @@ def test_load_config_defaults_to_flash_preview(monkeypatch) -> None:
     monkeypatch.delenv("MONGODB_URI", raising=False)
     monkeypatch.delenv("MONGODB_DATABASE", raising=False)
     monkeypatch.delenv("MONGODB_COLLECTION", raising=False)
+    monkeypatch.delenv("AGENT_CONCURRENCY", raising=False)
 
     loaded = config_module.load_config()
 
@@ -53,7 +82,7 @@ def test_load_config_defaults_to_flash_preview(monkeypatch) -> None:
     assert loaded.agent_step_repair_retries == 2
     assert loaded.agent_max_invalid_decisions_per_task == 5
     assert loaded.agent_max_steps_per_task == 30
-    assert loaded.agent_concurrency == 4
+    assert loaded.agent_concurrency == 8
 
 
 def test_load_config_normalizes_supported_models(monkeypatch) -> None:

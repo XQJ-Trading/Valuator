@@ -11,6 +11,7 @@ from valuator.models.naming import canonical_model_name, is_openrouter_model_nam
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = ROOT_DIR / ".env"
+DEFAULT_SESSION_FILES_ROOT = "logs/local"
 DEFAULT_AGENT_MODEL = "gemini-3-flash-preview"
 DEFAULT_GEMINI_THINKING_LEVEL = "low"
 DEFAULT_LLM_BACKEND = "google_genai"
@@ -109,6 +110,17 @@ def read_env(name: str, default: str | None = None) -> str | None:
     if value is None:
         return default
     return value.strip()
+
+
+def session_files_root() -> Path:
+    # Env selects deploy layout (e.g. logs/server_history); default is logs/local.
+    load_project_env()
+    raw = read_env("VALUATOR_SESSION_FILES_ROOT", DEFAULT_SESSION_FILES_ROOT)
+    text = (raw or DEFAULT_SESSION_FILES_ROOT).strip() or DEFAULT_SESSION_FILES_ROOT
+    path = Path(text)
+    if path.is_absolute():
+        return path.resolve()
+    return (ROOT_DIR / path).resolve()
 
 
 def get_env(name: str, *, required: bool = False) -> str:

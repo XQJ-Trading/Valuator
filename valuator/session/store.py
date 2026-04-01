@@ -146,7 +146,7 @@ class ValuatorSessionStore:
         self.plan_active_dir = self.session_dir / "plan" / "active"
         self.plan_round_dir = self.session_dir / "plan" / self.round_dir
         self.tasks_dir = self.session_dir / "tasks"
-        self.diagnostics_dir = self.session_dir / "diagnostics"
+        self.trace_dir = self.session_dir / "trace"
         self.review_dir = self.session_dir / "review"
         self.review_history_path = self.review_dir / "history" / f"{self.round_dir}.json"
         self.output_dir = self.session_dir / "output"
@@ -163,7 +163,7 @@ class ValuatorSessionStore:
             created_at=created_at,
             session_dir=self.session_dir,
             tasks_dir=self.tasks_dir,
-            diagnostics_dir=self.diagnostics_dir,
+            trace_dir=self.trace_dir,
             session_metadata_callback=self._merge_trace_fields,
         )
         self._session_payload: dict[str, Any] = {
@@ -187,8 +187,9 @@ class ValuatorSessionStore:
                 "tasks": "tasks",
                 "review": "review",
                 "output": "output",
-                "diagnostics": "diagnostics",
-                "llm_usage": "diagnostics/llm_usage.jsonl",
+                "trace": "trace",
+                "llm_usage": "trace/llm_usage.jsonl",
+                "debug_steps": "debug/steps",
             },
         }
 
@@ -197,7 +198,7 @@ class ValuatorSessionStore:
             self.plan_active_dir,
             self.plan_round_dir,
             self.tasks_dir,
-            self.diagnostics_dir,
+            self.trace_dir,
             self.review_dir / "history",
             self.output_dir,
         ):

@@ -8,8 +8,13 @@ from typing import Any, Mapping
 from valuator.utils.time_utils import utc_isoformat
 
 
-def write_task_markdown(*, task_dir: Path, task_id: str, read_json) -> None:
-    steps_path = task_dir / "steps.jsonl"
+def write_task_markdown(
+    *,
+    steps_path: Path,
+    task_dir: Path,
+    task_id: str,
+    read_json,
+) -> None:
     rows = [
         json.loads(line)
         for line in steps_path.read_text(encoding="utf-8").splitlines()

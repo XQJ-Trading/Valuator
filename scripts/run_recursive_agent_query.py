@@ -23,6 +23,7 @@ from valuator.runtime import (
 )  # noqa: E402
 from valuator.models.gemini_direct import GeminiClient  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
+from valuator.utils.config import session_files_root  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
 from valuator.utils.time_utils import Measurement  # noqa: E402
 
@@ -173,17 +174,19 @@ def _write_cli_trace_compat(trace_writer: SessionTraceWriter) -> None:
     output_dir = session_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    events_src = session_dir / "diagnostics" / "events.jsonl"
+    events_src = session_dir / "trace" / "events.jsonl"
     if events_src.exists():
         shutil.copyfile(events_src, output_dir / "events.jsonl")
 
-    runtime_src = session_dir / "diagnostics" / "runtime.log"
+    runtime_src = session_dir / "trace" / "runtime.log"
     if runtime_src.exists():
         shutil.copyfile(runtime_src, output_dir / "runtime.log")
 
     method_rows: list[dict[str, object]] = []
-    for steps_path in sorted(session_dir.glob("tasks/**/steps.jsonl")):
-        task_id = str(steps_path.parent.relative_to(session_dir / "tasks")).replace("/", ".")
+    for steps_path in sorted(session_dir.glob("debug/steps/**/steps.jsonl")):
+        task_id = str(
+            steps_path.parent.relative_to(session_dir / "debug" / "steps")
+        ).replace("/", ".")
         for line in steps_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
@@ -289,7 +292,7 @@ async def run(args: argparse.Namespace) -> int:
         query=raw_query,
         model=model,
         created_at=created_at,
-        root_dir=ROOT / "logs",
+        root_dir=session_files_root(),
     )
     # Agent and task steps use session_store.trace_writer; LLM usage and on_event must use the same writer.
     trace_writer = session_store.trace_writer

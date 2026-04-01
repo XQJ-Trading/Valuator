@@ -21,8 +21,6 @@ def _decode_session_log_filename(filename: str) -> Optional[tuple[str, str]]:
     session_part, step_part = filename.split("__", 1)
     if not session_part or not step_part:
         return None
-    if not session_part.startswith("session_"):
-        return None
     if not step_part.startswith("step_") or not step_part.endswith(".json"):
         return None
     if not _SAFE_NAME_RE.match(session_part):
@@ -32,17 +30,22 @@ def _decode_session_log_filename(filename: str) -> Optional[tuple[str, str]]:
     return session_part, step_part
 
 
-def _resolve_gemini_log_path(filename: str, logs_dir: Path) -> Path:
+def _resolve_gemini_log_path(
+    filename: str,
+    *,
+    legacy_logs_dir: Path,
+    session_root: Path,
+) -> Path:
     if filename.startswith("request_response_") and filename.endswith(".json"):
         safe_name = os.path.basename(filename)
-        return logs_dir / safe_name
+        return legacy_logs_dir / safe_name
 
     decoded = _decode_session_log_filename(filename)
     if decoded is None:
         raise HTTPException(status_code=400, detail="Invalid filename format")
 
     session_part, step_part = decoded
-    return logs_dir / session_part / step_part
+    return session_root / session_part / step_part
 
 
 def _extract_request_response_timestamp(filename: str) -> Optional[str]:

@@ -276,8 +276,8 @@ def simulate(proposals: list[Proposal], profile: GateProfile) -> set[str]:
 
 
 def summarize(session_dir: Path, proposals: list[Proposal], pruned_roots: set[str]) -> dict[str, Any]:
-    llm_usage = load_jsonl(session_dir / "diagnostics" / "llm_usage.jsonl")
-    events = load_jsonl(session_dir / "diagnostics" / "events.jsonl")
+    llm_usage = load_jsonl(session_dir / "trace" / "llm_usage.jsonl")
+    events = load_jsonl(session_dir / "trace" / "events.jsonl")
     decomposition = load_json(session_dir / "plan" / "active" / "decomposition.json")
 
     prompt_tokens = 0
@@ -362,7 +362,7 @@ def main() -> int:
     args = build_parser().parse_args()
     session_dir = args.session_dir.resolve()
 
-    events = load_jsonl(session_dir / "diagnostics" / "events.jsonl")
+    events = load_jsonl(session_dir / "trace" / "events.jsonl")
     proposals = collect_proposals(session_dir, events)
     pruned_roots = simulate(proposals, GateProfile())
     summary = summarize(session_dir, proposals, pruned_roots)

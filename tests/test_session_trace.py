@@ -13,7 +13,7 @@ from valuator.utils.llm_usage import TokenUsage
 from valuator.utils.logger import close_session_log_file, logger, session_log_file
 
 
-def test_session_trace_writer_records_task_hierarchy_and_diagnostics(
+def test_session_trace_writer_records_task_hierarchy_and_trace_artifacts(
     tmp_path: Path,
 ) -> None:
     writer = SessionTraceWriter(
@@ -94,15 +94,15 @@ def test_session_trace_writer_records_task_hierarchy_and_diagnostics(
 
     session_dir = tmp_path / "session_S-test"
     session_data = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-    event_rows = (session_dir / "diagnostics" / "events.jsonl").read_text(
+    event_rows = (session_dir / "trace" / "events.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()
-    usage_rows = (session_dir / "diagnostics" / "llm_usage.jsonl").read_text(
+    usage_rows = (session_dir / "trace" / "llm_usage.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()
     timeline_rows = (session_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
     task_steps = (
-        session_dir / "tasks" / "root" / "steps.jsonl"
+        session_dir / "debug" / "steps" / "root" / "steps.jsonl"
     ).read_text(encoding="utf-8").splitlines()
     task_markdown = (session_dir / "tasks" / "root" / "task.md").read_text(encoding="utf-8")
     llm_call = json.loads(
@@ -117,7 +117,8 @@ def test_session_trace_writer_records_task_hierarchy_and_diagnostics(
     assert session_data["llm_call_count"] == 1
     assert session_data["final_answer"] == "done"
     assert session_data["paths"]["timeline"] == "timeline.jsonl"
-    assert session_data["paths"]["diagnostics"] == "diagnostics"
+    assert session_data["paths"]["trace"] == "trace"
+    assert session_data["paths"]["debug_steps"] == "debug/steps"
     assert len(event_rows) == 1
     assert len(usage_rows) == 2
     assert len(timeline_rows) == 2
@@ -153,7 +154,7 @@ def test_session_trace_writer_routes_diagnostic_records_to_events_log(
 
     session_dir = tmp_path / "session_S-method"
     session_data = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-    rows = (session_dir / "diagnostics" / "events.jsonl").read_text(
+    rows = (session_dir / "trace" / "events.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()
     payload = json.loads(rows[0])
@@ -249,7 +250,7 @@ async def test_gemini_client_writes_llm_call_under_task_dir_and_usage(
     )
 
     session_dir = tmp_path / "session_S-gemini"
-    usage_rows = (session_dir / "diagnostics" / "llm_usage.jsonl").read_text(
+    usage_rows = (session_dir / "trace" / "llm_usage.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()
     step_data = json.loads(
@@ -356,7 +357,7 @@ async def test_build_query_analysis_writes_diagnostic_record(
     )
 
     session_dir = tmp_path / "session_S-analysis"
-    rows = (session_dir / "diagnostics" / "events.jsonl").read_text(
+    rows = (session_dir / "trace" / "events.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()
 

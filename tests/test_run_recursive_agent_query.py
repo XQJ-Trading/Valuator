@@ -119,6 +119,7 @@ async def test_run_writes_cli_trace_files(tmp_path: Path, monkeypatch: pytest.Mo
         del args, kwargs
         return QueryAnalysis(allowed_tools=["dummy_tool"])
 
+    monkeypatch.setattr(module, "session_files_root", lambda: tmp_path)
     monkeypatch.setattr(module, "SessionTraceWriter", _TestTraceWriter)
     monkeypatch.setattr(module, "build_query_analysis", _build_query_analysis)
     monkeypatch.setattr(module, "create_tool_registry", lambda *args, **kwargs: object())
@@ -140,7 +141,7 @@ async def test_run_writes_cli_trace_files(tmp_path: Path, monkeypatch: pytest.Mo
     result = await module.run(args)
 
     assert result == 0
-    session_dirs = list(tmp_path.glob("session_*"))
+    session_dirs = sorted(d for d in tmp_path.iterdir() if d.is_dir())
     assert len(session_dirs) == 1
 
     session_dir = session_dirs[0]

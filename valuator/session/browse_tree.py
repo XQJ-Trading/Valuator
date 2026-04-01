@@ -105,7 +105,9 @@ def _write_browse_node(
         lines.extend(["## Files", ""])
         lines.extend(f"- {filename}" for filename in copied_files)
         lines.append("")
-    (node_dir / "README.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    (node_dir / "README.md").write_text(
+        "\n".join(lines).rstrip() + "\n", encoding="utf-8"
+    )
 
     child_names: set[str] = set()
     children = payload.get("children")
@@ -136,10 +138,6 @@ def _browse_markdown_files(
     task_dir = tasks_dir / task_rel_path(task_id)
     sources: dict[str, Path] = {}
 
-    task_md = task_dir / "task.md"
-    if task_md.exists() and task_md.is_file():
-        sources["task.md"] = task_md
-
     report_source = _browse_report_source(task_dir)
     if report_source is not None:
         sources["report.md"] = report_source
@@ -153,23 +151,36 @@ def _browse_markdown_files(
     if isinstance(artifacts, Mapping):
         relative_path = artifacts.get("final_output_path")
         if isinstance(relative_path, str) and relative_path.strip():
-            source = (task_dir / relative_path).resolve()
-            try:
-                source.relative_to(session_dir)
-            except ValueError:
-                source = None
-            if (
-                source is not None
-                and source.exists()
-                and source.is_file()
-                and source.suffix.lower() == ".md"
-            ):
-                sources["final.md"] = source
+            final_md = _artifact_markdown_under_session(
+                session_dir=session_dir,
+                task_dir=task_dir,
+                relative_path=relative_path.strip(),
+            )
+            if final_md is not None:
+                sources["final.md"] = final_md
 
     for filename, source in sources.items():
         shutil.copy2(source, node_dir / filename)
         copied_files.append(filename)
     return copied_files
+
+
+def _artifact_markdown_under_session(
+    *,
+    session_dir: Path,
+    task_dir: Path,
+    relative_path: str,
+) -> Path | None:
+    """Resolve artifact path only if it stays under the session directory."""
+    root = session_dir.resolve()
+    source = (task_dir / relative_path).resolve()
+    try:
+        source.relative_to(root)
+    except ValueError:
+        return None
+    if source.is_file() and source.suffix.lower() == ".md":
+        return source
+    return None
 
 
 def _browse_report_source(task_dir: Path) -> Path | None:
@@ -184,7 +195,9 @@ def _browse_report_source(task_dir: Path) -> Path | None:
 
 
 def _browse_report_stub(payload: dict[str, Any]) -> str:
-    title = str(payload.get("task_name") or payload.get("task_id") or "task").replace("_", " ")
+    title = str(payload.get("task_name") or payload.get("task_id") or "task").replace(
+        "_", " "
+    )
     state = str(payload.get("state") or "").strip()
     error = str(payload.get("error") or "").strip()
 
@@ -201,7 +214,7 @@ def _browse_report_stub(payload: dict[str, Any]) -> str:
         [
             "Task completed without a report artifact.",
             "",
-            "Check `task.md` for the execution trace and task metadata.",
+            "See the `tasks/` tree in this session for step traces and metadata.",
             "",
         ]
     )

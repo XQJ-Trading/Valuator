@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from valuator.utils.logger import logger
 
+from .chat_api import router as chat_router
 from .session_viewer_api import ensure_viewer_roots, router as session_viewer_router
 
 
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(session_viewer_router)
+    app.include_router(chat_router)
 
     @app.get("/health")
     async def health():

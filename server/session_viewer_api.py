@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
+
+from valuator.session.browse_tree import build_browse_tree
 
 router = APIRouter()
 
@@ -14,22 +19,22 @@ MAX_FILE_SIZE = 2 * 1024 * 1024
 VALID_SOURCES = {"session", "guide"}
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
 def session_data_root() -> Path:
     configured = os.getenv("SESSION_DATA_ROOT")
     if configured:
         return Path(configured).expanduser().resolve()
-    return (
-        Path(__file__).resolve().parents[1] / "Researcher-UI-Demo" / "session-data"
-    ).resolve()
+    return (_repo_root() / "logs" / "local").resolve()
 
 
 def guide_data_root() -> Path:
     configured = os.getenv("GUIDE_DATA_ROOT")
     if configured:
         return Path(configured).expanduser().resolve()
-    return (
-        Path(__file__).resolve().parents[1] / "Researcher-UI-Demo" / "guide-data"
-    ).resolve()
+    return (_repo_root() / "logs" / "session_history").resolve()
 
 
 def ensure_viewer_roots() -> None:
@@ -38,7 +43,9 @@ def ensure_viewer_roots() -> None:
 
 
 def _root_for_source(source: str) -> Path:
-    return session_data_root() if source == "session" else guide_data_root()
+    root = session_data_root() if source == "session" else guide_data_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _safe_path(rel_path: str, base_root: Path) -> Path | None:
@@ -343,6 +350,143 @@ async def get_tree(
             }
         )
     return {"path": path or "/", "children": children}
+
+
+def _latest_session_folder_name(root: Path) -> str | None:
+    if not root.is_dir():
+        return None
+    candidates: list[tuple[float, str]] = []
+    try:
+        for entry in root.iterdir():
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            if entry.name == "_chat":
+                continue
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, entry.name))
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def _read_root_task_id(session_dir: Path) -> str | None:
+    path = session_dir / "session.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    rid = data.get("root_task_id")
+    if isinstance(rid, str) and rid.strip():
+        return rid.strip()
+    return None
+
+
+def _browse_outline_rows(
+    browse_abs: Path,
+    rel_prefix: str,
+    depth: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not browse_abs.is_dir():
+        return rows
+    try:
+        entries = sorted(browse_abs.iterdir(), key=lambda e: e.name.lower())
+    except OSError:
+        return rows
+    for entry in entries:
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        rel_path = f"{rel_prefix}/{entry.name}"
+        rows.append(
+            {
+                "depth": depth,
+                "relPath": rel_path.replace("\\", "/"),
+                "title": entry.name.replace("_", " "),
+            }
+        )
+        rows.extend(_browse_outline_rows(entry, rel_path, depth + 1))
+    return rows
+
+
+@router.get("/api/session/default-explore")
+async def default_session_explore():
+    """Latest session run folder under session data root (by mtime); optional browse/ subpath."""
+    ensure_viewer_roots()
+    root = session_data_root()
+    folder = _latest_session_folder_name(root)
+    if folder is None:
+        return {"sessionFolder": None, "browsePath": None}
+    browse_abs = root / folder / "browse"
+    browse_path = f"{folder}/browse" if browse_abs.is_dir() else None
+    return {"sessionFolder": folder, "browsePath": browse_path}
+
+
+@router.get("/api/session/browse-outline")
+async def browse_outline(
+    source: str | None = Query(default=None),
+    session: str | None = Query(
+        default=None,
+        description="Top-level folder under the data root (omit for latest by mtime)",
+    ),
+):
+    """Ensure browse/ from tasks when possible, then return one browse tree outline (no client tree walk)."""
+    ensure_viewer_roots()
+    resolved_source, base_root = _resolve_source_base_root(source)
+
+    folder: str | None = None
+    if session and session.strip():
+        name = session.strip()
+        if "/" in name or "\\" in name or name in {".", ".."}:
+            raise HTTPException(status_code=400, detail="invalid session folder")
+        abs_dir = _safe_path(name, base_root)
+        if abs_dir is None or not abs_dir.is_dir():
+            raise HTTPException(status_code=404, detail="session not found")
+        folder = name
+    else:
+        folder = _latest_session_folder_name(base_root)
+
+    if folder is None:
+        return {
+            "sessionFolder": None,
+            "browseRootPath": None,
+            "browseBuilt": False,
+            "rows": [],
+        }
+
+    session_dir = base_root / folder
+    tasks_dir = session_dir / "tasks"
+    browse_built = False
+    if tasks_dir.is_dir():
+        root_task_id = _read_root_task_id(session_dir)
+
+        def _build() -> bool:
+            return build_browse_tree(
+                session_dir=session_dir,
+                tasks_dir=tasks_dir,
+                root_task_id=root_task_id,
+            )
+
+        browse_built = await asyncio.to_thread(_build)
+
+    browse_abs = session_dir / "browse"
+    browse_root_path = f"{folder}/browse" if browse_abs.is_dir() else None
+    rows = (
+        _browse_outline_rows(browse_abs, f"{folder}/browse", 0) if browse_abs.is_dir() else []
+    )
+
+    return {
+        "sessionFolder": folder,
+        "browseRootPath": browse_root_path,
+        "browseBuilt": browse_built,
+        "rows": rows,
+    }
 
 
 def _collect_all_entries(root_abs: Path, source: str) -> list[dict[str, str]]:

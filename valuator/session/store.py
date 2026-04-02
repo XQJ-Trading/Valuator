@@ -771,7 +771,12 @@ class ValuatorSessionStore:
         children = task.children()
         kind = f"leaf: {task.tool_hint}" if not children and task.tool_hint.strip() else ""
         suffix = f" ({kind})" if kind else ""
-        line = f"{indent}- **{task.id}** [{task.state.value}] {task.description}{suffix}"
+        name_snippet = (
+            f" `{task.task_name.strip()}`"
+            if str(task.task_name or "").strip()
+            else ""
+        )
+        line = f"{indent}- **{task.id}**{name_snippet} [{task.state.value}] {task.description}{suffix}"
         lines = [line]
         for child in children:
             lines.append(ValuatorSessionStore._render_tree_md(child, depth + 1))

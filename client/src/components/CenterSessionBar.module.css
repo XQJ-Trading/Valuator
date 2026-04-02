@@ -1,0 +1,126 @@
+.centerBar {
+  flex-shrink: 0;
+  min-height: 40px;
+  max-height: 220px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+}
+
+.centerBarInner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  max-width: min(960px, 100%);
+  width: 100%;
+}
+
+.barRow {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.statusArea {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.flowLine {
+  align-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  word-break: break-word;
+}
+
+.progressItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 100%;
+}
+
+.progressSpinner {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-secondary);
+  border-top-color: transparent;
+  animation: centerBarSpin 0.75s linear infinite;
+}
+
+@keyframes centerBarSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progressName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: center;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.runningLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.idle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.stopBtn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stopBtn:hover:not(:disabled) {
+  border-color: var(--text-error, #c53030);
+  color: var(--text-error, #c53030);
+}
+
+.stopBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

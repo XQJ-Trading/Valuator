@@ -21,9 +21,9 @@ npm run dev
 .venv/bin/python -m uvicorn server.main:app --reload --port 8001
 ```
 
-필요하면 루트 `.env` 에 아래 경로를 지정할 수 있습니다.
+기본값은 리포지토리 루트 기준 `logs/local`(세션), `logs/session_history`(서버·히스토리)입니다. 다른 위치를 쓰려면 루트 `.env` 에 지정합니다.
 
 ```bash
 SESSION_DATA_ROOT=/absolute/path/to/session-data
-GUIDE_DATA_ROOT=/absolute/path/to/guide-data
+GUIDE_DATA_ROOT=/absolute/path/to/session_history
 ```

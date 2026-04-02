@@ -38,6 +38,94 @@ export interface SearchResponse {
   results: SearchResultEntry[];
 }
 
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  ts: string;
+}
+
+export interface ChatResetEvent {
+  type: "reset";
+  ts: string;
+}
+
+export async function fetchChatMessages(): Promise<ChatMessage[]> {
+  const res = await fetch("/api/chat/messages");
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  const data = (await res.json()) as { messages: ChatMessage[] };
+  return data.messages;
+}
+
+export async function postChatMessage(text: string): Promise<ChatMessage> {
+  const res = await fetch("/api/chat/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<ChatMessage>;
+}
+
+export async function clearChatMessages(): Promise<void> {
+  const res = await fetch("/api/chat/messages", { method: "DELETE" });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+}
+
+export async function postChatStop(): Promise<{ ok: boolean; stopped: boolean }> {
+  const res = await fetch("/api/chat/stop", { method: "POST" });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<{ ok: boolean; stopped: boolean }>;
+}
+
+export async function fetchAgentRunning(): Promise<boolean> {
+  const res = await fetch("/api/chat/agent-status");
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  const data = (await res.json()) as { running?: boolean };
+  return Boolean(data.running);
+}
+
+export async function fetchSessionDefaultExplore(): Promise<{
+  sessionFolder: string | null;
+  browsePath: string | null;
+}> {
+  const res = await fetch("/api/session/default-explore");
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<{
+    sessionFolder: string | null;
+    browsePath: string | null;
+  }>;
+}
+
+export interface BrowseOutlineRow {
+  depth: number;
+  relPath: string;
+  title: string;
+}
+
+/** Ensures `browse/` from tasks when possible, returns outline in one round-trip. */
+export async function fetchBrowseOutline(
+  source: DataSource,
+  sessionFolder?: string | null,
+): Promise<{
+  sessionFolder: string | null;
+  browseRootPath: string | null;
+  browseBuilt: boolean;
+  rows: BrowseOutlineRow[];
+}> {
+  const q = new URLSearchParams({ source });
+  const s = sessionFolder?.trim();
+  if (s) q.set("session", s);
+  const res = await fetch(`/api/session/browse-outline?${q}`);
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<{
+    sessionFolder: string | null;
+    browseRootPath: string | null;
+    browseBuilt: boolean;
+    rows: BrowseOutlineRow[];
+  }>;
+}
+
 function sourceParam(source: DataSource): string {
   return `source=${encodeURIComponent(source)}`;
 }

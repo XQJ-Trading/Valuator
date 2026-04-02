@@ -168,7 +168,7 @@ def method_task_id(method: str) -> str | None:
 def collect_proposals(session_dir: Path, events: list[dict[str, Any]]) -> list[Proposal]:
     outcomes = step_outcomes(events)
     calls_by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for path in session_dir.glob("tasks/**/llm_calls/step_*.json"):
+    for path in sorted(session_dir.glob("debug/steps/step_*.json")):
         payload = load_json(path)
         task_id = payload.get("task_id")
         if isinstance(task_id, str):

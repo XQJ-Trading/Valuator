@@ -1,1 +1,0 @@
-ticker=PL, year=2025-01-31 00:00:00, market_cap=9397946368, current_price=27.15, trailing_pe=None, price_to_book=48.30961, total_revenue=244352000.0, net_income=-123196000.0, debt_to_equity=0.43624769423911025, current_ratio=2.1271766212925294, gross_margin=0.5718185240963856, interest_coverage=nan, free_cash_flow=40030000.0

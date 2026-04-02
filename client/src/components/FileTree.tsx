@@ -314,10 +314,17 @@ export default function FileTree({
   dataSource,
   activePath,
   onSelect,
+  onSelectDirectory,
+  refreshToken,
+  initialExpandDirectory,
 }: {
   dataSource: DataSource;
   activePath: string | null;
   onSelect: (path: string | null) => void;
+  onSelectDirectory?: (path: string) => void;
+  refreshToken?: number;
+  /** Expand and select this directory once (e.g. latest session / browse). */
+  initialExpandDirectory?: string | null;
 }) {
   const [roots, setRoots] = useState<TreeNodeData[]>([]);
   const rootsRef = useRef<TreeNodeData[]>([]);
@@ -365,6 +372,11 @@ export default function FileTree({
     );
   }, [dataSource]);
 
+  useEffect(() => {
+    if (refreshToken == null) return;
+    void refreshRoots();
+  }, [refreshToken, refreshRoots]);
+
   const toggleNode = useCallback(
     async (target: TreeNodeData) => {
       if (!target.loaded) {
@@ -400,6 +412,33 @@ export default function FileTree({
     },
     [dataSource],
   );
+
+  const autoExpandKeyRef = useRef<string>("");
+  useEffect(() => {
+    const raw = (initialExpandDirectory ?? "").trim();
+    if (!raw) {
+      autoExpandKeyRef.current = "";
+      return;
+    }
+    if (roots.length === 0) return;
+    // Path only (not refreshToken): chat-driven tree reload must not re-select / notify parent again.
+    if (autoExpandKeyRef.current === raw) return;
+    autoExpandKeyRef.current = raw;
+    let cancelled = false;
+    void (async () => {
+      await expandPath(raw);
+      if (cancelled) return;
+      const node = findNode(rootsRef.current, raw);
+      if (node && node.type === "directory") {
+        setSelectedPath(raw);
+        setSelectedType("directory");
+        onSelectDirectory?.(raw);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialExpandDirectory, roots.length, expandPath, onSelectDirectory]);
 
   const defaultParentForCreate = useCallback((): string => {
     if (!selectedPath) return "";
@@ -605,10 +644,16 @@ export default function FileTree({
     [dataSource, activePath, onSelect, refreshRoots],
   );
 
-  const selectNode = useCallback((path: string, type: "file" | "directory") => {
-    setSelectedPath(path);
-    setSelectedType(type);
-  }, []);
+  const selectNode = useCallback(
+    (path: string, type: "file" | "directory") => {
+      setSelectedPath(path);
+      setSelectedType(type);
+      if (type === "directory") {
+        onSelectDirectory?.(path);
+      }
+    },
+    [onSelectDirectory],
+  );
 
   const rootInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {

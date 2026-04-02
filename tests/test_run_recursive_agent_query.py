@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 
 from domain.query import QueryAnalysis
-from valuator.core.types import AgentEvent
+from valuator.core.types import AgentEvent, EventType
 from valuator.session import SessionTraceWriter
 
 
 def _load_script_module():
-    path = Path(__file__).resolve().parents[1] / "scripts" / "run_recursive_agent_query.py"
+    path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "run_recursive_agent_query.py"
+    )
     spec = importlib.util.spec_from_file_location("run_recursive_agent_query", path)
     assert spec is not None
     assert spec.loader is not None
@@ -25,7 +27,7 @@ def _load_script_module():
 def test_render_event_includes_global_and_local_step() -> None:
     module = _load_script_module()
     event = AgentEvent(
-        type="step_start",
+        type=EventType.STEP_STARTED,
         task_id="root.1",
         detail={
             "global_seq": 7,
@@ -39,10 +41,28 @@ def test_render_event_includes_global_and_local_step() -> None:
     assert rendered == "[step] root.1 g7 l2 analyze branch"
 
 
+def test_render_event_includes_task_name_in_step_line() -> None:
+    module = _load_script_module()
+    event = AgentEvent(
+        type=EventType.STEP_STARTED,
+        task_id="root.1",
+        detail={
+            "global_seq": 7,
+            "step": 2,
+            "description": "analyze branch",
+            "task_name": "segment_financial_analysis",
+        },
+    )
+
+    rendered = module.render_event(event, jsonl=False)
+
+    assert rendered == "[step] root.1 segment_financial_analysis g7 l2 analyze branch"
+
+
 def test_render_event_falls_back_to_local_step_only() -> None:
     module = _load_script_module()
     event = AgentEvent(
-        type="step_start",
+        type=EventType.STEP_STARTED,
         task_id="root.1",
         detail={
             "step": 2,
@@ -55,8 +75,28 @@ def test_render_event_falls_back_to_local_step_only() -> None:
     assert rendered == "[step] root.1 l2 analyze branch"
 
 
+def test_render_event_collapses_newlines_in_step_description() -> None:
+    module = _load_script_module()
+    event = AgentEvent(
+        type=EventType.STEP_STARTED,
+        task_id="root",
+        detail={
+            "global_seq": 1,
+            "step": 1,
+            "description": "Analysis: line1\nline2",
+        },
+    )
+
+    rendered = module.render_event(event, jsonl=False)
+
+    assert "\n" not in rendered
+    assert "Analysis: line1 line2" in rendered
+
+
 @pytest.mark.asyncio
-async def test_run_writes_cli_trace_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_writes_cli_trace_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = _load_script_module()
 
     class _TestTraceWriter(SessionTraceWriter):
@@ -122,9 +162,15 @@ async def test_run_writes_cli_trace_files(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(module, "session_files_root", lambda: tmp_path)
     monkeypatch.setattr(module, "SessionTraceWriter", _TestTraceWriter)
     monkeypatch.setattr(module, "build_query_analysis", _build_query_analysis)
-    monkeypatch.setattr(module, "create_tool_registry", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        module, "create_tool_registry", lambda *args, **kwargs: object()
+    )
     monkeypatch.setattr("valuator.core.Agent", _DummyAgent)
-    monkeypatch.setattr("valuator.models.gemini_direct.GeminiClient", _DummyGeminiClient)
+    monkeypatch.setattr(
+        module,
+        "create_llm_client",
+        lambda *args, **kwargs: _DummyGeminiClient(*args, **kwargs),
+    )
 
     args = argparse.Namespace(
         query="alpha query",
@@ -145,15 +191,21 @@ async def test_run_writes_cli_trace_files(tmp_path: Path, monkeypatch: pytest.Mo
     assert len(session_dirs) == 1
 
     session_dir = session_dirs[0]
-    session_data = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-    event_rows = (session_dir / "output" / "events.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
-    method_rows = (session_dir / "output" / "method_calls.jsonl").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    session_data = json.loads(
+        (session_dir / "session.json").read_text(encoding="utf-8")
+    )
+    event_rows = (
+        (session_dir / "output" / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    method_rows = (
+        (session_dir / "output" / "method_calls.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     runtime_log = (session_dir / "output" / "runtime.log").read_text(encoding="utf-8")
-    step_files = sorted(session_dir.glob("step_*.json"))
+    step_files = sorted((session_dir / "debug" / "steps").glob("step_*.json"))
 
     assert session_data["status"] == "completed"
     assert session_data["final_answer"] == "final content"

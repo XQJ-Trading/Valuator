@@ -1,0 +1,186 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-secondary);
+}
+
+.header {
+  flex-shrink: 0;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.headerTitle {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.headerLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.headerSpinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-accent);
+  animation: outlineSpin 0.75s linear infinite;
+}
+
+@keyframes outlineSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.headerSource {
+  display: block;
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--text-accent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 4px 10px;
+}
+
+.empty,
+.error,
+.hint {
+  padding: 12px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.error {
+  color: var(--text-error);
+}
+
+.errorLead,
+.errorHint {
+  margin: 0 0 8px;
+}
+
+.errorLead:last-child,
+.errorHint:last-child {
+  margin-bottom: 0;
+}
+
+.errorHint {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.errorCode {
+  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.errorDetail {
+  margin: 8px 0 0;
+  font-size: 10px;
+  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 4px 8px 6px 0;
+  border-radius: 4px;
+}
+
+.taskId {
+  display: block;
+  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.browseTitle {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.browsePath {
+  display: block;
+  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  font-size: 9px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--text-accent);
+  outline-offset: -1px;
+}
+
+.label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+.statusDone {
+  color: hsl(140 35% 42%);
+}
+
+.statusOther {
+  color: var(--text-secondary);
+}

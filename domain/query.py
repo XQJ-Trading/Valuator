@@ -225,7 +225,7 @@ def fill_routing_defaults(
     analysis.allowed_tools = sorted(
         {
             "code_execute_tool",
-            "domain_tool",
+            # "domain_tool",
             "sec_tool",
             "web_search_tool",
             "yfinance_balance_sheet",

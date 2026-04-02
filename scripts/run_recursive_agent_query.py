@@ -16,16 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from valuator.runtime import (
-    create_tool_registry,
-    final_output_text,
-    finalize_trace,
-)  # noqa: E402
-from valuator.models.gemini_direct import GeminiClient  # noqa: E402
+from valuator.runtime import create_tool_registry, final_output_text, finalize_trace  # noqa: E402
+from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
+from valuator.session.browse_tree import task_description_from_effective_query  # noqa: E402
 from valuator.utils.config import session_files_root  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
 from valuator.utils.time_utils import Measurement  # noqa: E402
+from valuator.core.types import EventType  # noqa: E402
 
 DEFAULT_QUERY_FILE = ROOT / "scripts" / "queries" / "amazon_analysis_ko.txt"
 
@@ -122,8 +120,13 @@ async def build_query_analysis(
     measurement = Measurement.start()
     try:
         domain_index, modules = DomainLoader().load()
+        from domain.boundary import combined_on_miss
+
         router = DomainRouter(
-            analyzer=QueryAnalyzer(client=GeminiClient(model=model)),
+            analyzer=QueryAnalyzer(
+                client=create_llm_client(model=model),
+                on_miss=combined_on_miss,
+            ),
         )
         router.bind_usage_writer(usage_writer)
         _, analysis = await router.analyze(
@@ -209,13 +212,6 @@ def _write_cli_trace_compat(trace_writer: SessionTraceWriter) -> None:
         for row in method_rows:
             file_obj.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    for index, llm_path in enumerate(
-        sorted(session_dir.glob("tasks/**/llm_calls/step_*.json")),
-        start=1,
-    ):
-        shutil.copyfile(llm_path, session_dir / f"step_{index:02d}.json")
-
-
 def render_event(event, *, jsonl: bool) -> str:
     if jsonl:
         return json.dumps(asdict(event), ensure_ascii=False)
@@ -224,18 +220,22 @@ def render_event(event, *, jsonl: bool) -> str:
     task_id = event.task_id
     detail = event.detail
 
-    if event_type == "step_start":
+    def _task_name() -> str:
+        return str(detail.get("task_name") or "").strip()
+
+    if event_type == EventType.STEP_STARTED:
         global_seq = detail.get("global_seq")
         step = detail.get("step", "?")
         if global_seq is None:
             step_text = f"l{step}"
         else:
             step_text = f"g{global_seq} l{step}"
-        return f"[step] {task_id} {step_text} {detail.get('description', '')}".strip()
-    if event_type == "decision":
-        action = str(detail.get("action") or "").upper()
-        return f"[decision] {task_id} {action}".strip()
-    if event_type == "tool_execute":
+        tn = _task_name()
+        name_part = f"{tn} " if tn else ""
+        desc = str(detail.get("description", "") or "").replace("\n", " ").strip()
+        return (f"[step] {task_id} {name_part}{step_text} {desc}").strip()
+
+    if event_type == EventType.TOOL_EXECUTED:
         tool = str(detail.get("tool") or "").strip()
         duration_ms = detail.get("duration_ms")
         duration_text = (
@@ -243,25 +243,45 @@ def render_event(event, *, jsonl: bool) -> str:
             if isinstance(duration_ms, (int, float))
             else ""
         )
+        tn = _task_name()
+        name_part = f"{tn} " if tn else ""
         return (
-            f"[tool] {task_id} {tool}{duration_text} "
+            f"[tool] {task_id} {name_part}{tool}{duration_text} "
             f"{json.dumps(detail.get('args') or {}, ensure_ascii=False)}"
         )
-    if event_type == "step_invalid":
-        return (
-            f"[step_invalid] {task_id} "
-            f"#{detail.get('invalid_decision_count', '?')} {detail.get('error', '')}"
-        ).strip()
-    if event_type == "task_done":
-        return f"[done] {task_id}"
-    if event_type == "task_failed":
-        return f"[failed] {task_id} {detail.get('error', '')}".strip()
-    if event_type == "conflict":
-        return (
-            f"[conflict] {task_id} {detail.get('key')}: "
-            f"{json.dumps(detail.get('existing'), ensure_ascii=False)} vs "
-            f"{json.dumps(detail.get('incoming'), ensure_ascii=False)}"
-        )
+
+    if event_type == EventType.STEP_COMPLETED:
+        if detail.get("kind") == "conflict":
+            return (
+                f"[conflict] {task_id} {detail.get('key')}: "
+                f"{json.dumps(detail.get('existing'), ensure_ascii=False)} vs "
+                f"{json.dumps(detail.get('incoming'), ensure_ascii=False)}"
+            )
+        action = detail.get("action")
+        if action:
+            return f"[decision] {task_id} {str(action).upper()}".strip()
+
+    if event_type == EventType.FAILED:
+        if detail.get("kind") == "step_invalid":
+            return (
+                f"[step_invalid] {task_id} "
+                f"#{detail.get('invalid_decision_count', '?')} {detail.get('error', '')}"
+            ).strip()
+        tn = _task_name()
+        name_part = f" {tn}" if tn else ""
+        return f"[failed] {task_id}{name_part} {detail.get('error', '')}".strip()
+
+    if event_type in (EventType.AGGREGATED, EventType.FINALIZED):
+        tn = _task_name()
+        name_part = f" {tn}" if tn else ""
+        return f"[done] {task_id}{name_part}".strip()
+
+    if event_type == EventType.DECOMPOSED:
+        tn = _task_name()
+        name_part = f" {tn}" if tn else ""
+        cc = detail.get("child_count", "?")
+        return f"[decomposed] {task_id}{name_part} {cc}".strip()
+
     return f"[{event_type}] {task_id} {json.dumps(detail, ensure_ascii=False, default=str)}"
 
 
@@ -309,7 +329,7 @@ async def run(args: argparse.Namespace) -> int:
             )
             root_task = ComplexTask(
                 id="root",
-                description=f"Analysis: {effective_query}",
+                description=task_description_from_effective_query(effective_query),
             )
             await asyncio.to_thread(session_store.update_trace_query, effective_query)
             await asyncio.to_thread(session_store.sync_task_tree, root_task)
@@ -345,7 +365,7 @@ async def run(args: argparse.Namespace) -> int:
                     model,
                     usage_writer=trace_writer,
                 ),
-                llm_client=GeminiClient(
+                llm_client=create_llm_client(
                     model=model,
                     usage_writer=trace_writer,
                 ),
@@ -356,7 +376,9 @@ async def run(args: argparse.Namespace) -> int:
             )
             output = await agent.run(effective_query, root_task)
             final_text = final_output_text(output)
-            final_text = await asyncio.to_thread(session_store.final_output_markdown, output)
+            final_text = await asyncio.to_thread(
+                session_store.final_output_markdown, output
+            )
             await asyncio.to_thread(
                 session_store.write_final_output,
                 final_text,

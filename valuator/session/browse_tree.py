@@ -257,6 +257,12 @@ def _root_browse_source(description: str) -> str:
     return " ".join(lines)
 
 
+def task_description_from_effective_query(effective_query: str) -> str:
+    """Single-line task label: strips THINKING_LEVEL / [QUERY] transport (same as browse slug)."""
+    body = _root_browse_source(f"Analysis: {effective_query.strip()}")
+    return f"Analysis: {body}" if body else "Analysis"
+
+
 def _to_slug(value: str, max_length: int = 30) -> str:
     chars: list[str] = []
     last_was_separator = False

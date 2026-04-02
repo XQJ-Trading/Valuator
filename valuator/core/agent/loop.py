@@ -125,6 +125,7 @@ class Agent:
                     "global_seq": self._global_step_sequence,
                     "step": task_seq,
                     "description": task.description,
+                    "task_name": task.task_name,
                 },
             )
         )
@@ -331,6 +332,7 @@ class Agent:
                         "args": effective_decision.tool_request.args,
                         "duration_ms": round(duration_ms, 3),
                         "tool_result": result.model_dump(),
+                        "task_name": task.task_name,
                     },
                 )
             )
@@ -358,11 +360,26 @@ class Agent:
             )
 
         if effective_decision.action is Action.DECOMPOSE:
+            parent = self._scheduler.get_task(task.id) or task
+            n = len(effective_decision.children)
+            new_children = parent.children()[-n:] if n else []
+            children_detail = [
+                {
+                    "id": c.id,
+                    "task_name": c.task_name,
+                    "description": c.description,
+                }
+                for c in new_children
+            ]
             await self._emit(
                 AgentEvent(
                     type=EventType.DECOMPOSED,
                     task_id=task.id,
-                    detail={"child_count": len(effective_decision.children)},
+                    detail={
+                        "child_count": len(effective_decision.children),
+                        "children": children_detail,
+                        "task_name": parent.task_name,
+                    },
                 )
             )
         elif effective_decision.action not in (
@@ -396,7 +413,10 @@ class Agent:
                         else EventType.FINALIZED
                     ),
                     task_id=task.id,
-                    detail={"output": completion_payload},
+                    detail={
+                        "output": completion_payload,
+                        "task_name": task.task_name,
+                    },
                 )
             )
         elif effective_decision.action is Action.FAIL:
@@ -421,7 +441,7 @@ class Agent:
                 AgentEvent(
                     type=EventType.FAILED,
                     task_id=task.id,
-                    detail={"error": error},
+                    detail={"error": error, "task_name": task.task_name},
                 )
             )
 
@@ -453,6 +473,7 @@ class Agent:
                     "error": error,
                     "invalid_decision_count": task.invalid_decision_count,
                     "step_count": task.step_count,
+                    "task_name": task.task_name,
                 },
             )
         )
@@ -503,7 +524,7 @@ class Agent:
             AgentEvent(
                 type=EventType.FAILED,
                 task_id=task.id,
-                detail={"error": error},
+                detail={"error": error, "task_name": task.task_name},
             )
         )
 
@@ -511,6 +532,7 @@ class Agent:
         if self._session_store is None or self._root_task is None:
             return
         self._session_store.sync_task_tree(self._root_task)
+        self._session_store.build_browse_tree()
 
     def _save_decomposition_snapshot(self, task: Task) -> None:
         if self._session_store is None:

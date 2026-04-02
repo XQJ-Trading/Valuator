@@ -37,6 +37,11 @@
   flex-direction: column;
 }
 
+.main-content > .panels {
+  flex: 1;
+  min-height: 0;
+}
+
 /* activity bar (data source) */
 .activity-bar {
   display: flex;
@@ -105,6 +110,16 @@
   content: "";
   position: absolute;
   inset: 0 -3px;
+}
+
+/* Horizontal split (stacked panels): thin bar, row-resize cursor */
+.resize-handle-row {
+  width: 100% !important;
+  height: 1px;
+  cursor: row-resize;
+}
+.resize-handle-row::after {
+  inset: -3px 0;
 }
 
 /* sidebar */
@@ -198,6 +213,11 @@
   flex: 1;
   min-height: 0;
   min-width: 0;
+}
+
+.reserved-panels {
+  height: 100%;
+  width: 100%;
 }
 
 /* markdown rendering */

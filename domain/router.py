@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from .boundary import combined_on_miss
 from .company import merge_subjects
 from .query import QueryAnalysis, QueryIntent, QueryRequirement, fill_routing_defaults
 from .query_analysis import QueryAnalyzer
@@ -18,7 +19,7 @@ async def analyze_query(
     *,
     as_of_utc: str = "",
 ) -> tuple[QueryIntent, QueryAnalysis]:
-    _analyzer = analyzer or QueryAnalyzer()
+    _analyzer = analyzer or QueryAnalyzer(on_miss=combined_on_miss)
     analysis = await _analyzer.analyze(
         query=intent.query or "",
         as_of_utc=as_of_utc,
@@ -50,7 +51,7 @@ class DomainRouter:
     """Routes a user query to domain modules via Query Analysis."""
 
     def __init__(self, analyzer: QueryAnalyzer | None = None) -> None:
-        self._analyzer = analyzer or QueryAnalyzer()
+        self._analyzer = analyzer or QueryAnalyzer(on_miss=combined_on_miss)
 
     def bind_usage_writer(self, usage_writer: object | None) -> None:
         self._analyzer.bind_usage_writer(usage_writer)

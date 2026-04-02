@@ -116,9 +116,7 @@ def test_session_trace_writer_records_task_hierarchy_and_trace_artifacts(
         encoding="utf-8"
     )
     llm_call = json.loads(
-        (session_dir / "tasks" / "root" / "llm_calls" / "step_01.json").read_text(
-            encoding="utf-8"
-        )
+        (session_dir / "debug" / "steps" / "step_0001.json").read_text(encoding="utf-8")
     )
 
     assert session_data["status"] == "completed"
@@ -274,9 +272,7 @@ async def test_gemini_client_writes_llm_call_under_task_dir_and_usage(
         .splitlines()
     )
     step_data = json.loads(
-        (session_dir / "tasks" / "root" / "llm_calls" / "step_01.json").read_text(
-            encoding="utf-8"
-        )
+        (session_dir / "debug" / "steps" / "step_0001.json").read_text(encoding="utf-8")
     )
 
     assert payload == {"answer": "ok"}

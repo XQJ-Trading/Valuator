@@ -88,8 +88,8 @@ def build_system_prompt(
     if Action.FINALIZE in allowed:
         lines.extend(
             [
-                f"FINALIZE: produce the final investment report (root_task={root_only} only). Must include output.",
-                "  - Detailed report-writing guidance appears in [FINALIZE_GUIDANCE] when child outputs are available.",
+                f"FINALIZE: produce the final report (root_task={root_only} only). Must include output.",
+                "  - Trading/investment decision framing comes first; full structure is in [FINALIZE_GUIDANCE] when child outputs are available.",
             ]
         )
     if Action.FAIL in allowed:
@@ -102,8 +102,8 @@ def build_system_prompt(
             "Use web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
             "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
-            "Use domain_tool with grounding_mode='grounded_required' for current/historical/mixed tasks.",
-            "Use domain_tool with grounding_mode='synthesis_only' only for future-only scenario synthesis.",
+            # "Use domain_tool with grounding_mode='grounded_required' for current/historical/mixed tasks.",
+            # "Use domain_tool with grounding_mode='synthesis_only' only for future-only scenario synthesis.",
             "Prefer WAIT over inventing missing facts.",
             "",
             "[REQUIREMENTS]는 분석이 충족해야 할 조건이다.",
@@ -287,14 +287,20 @@ def build_step_prompt(
 def finalize_guidance_text() -> str:
     return "\n".join(
         [
-            "Child outputs are your structured data layer. FINALIZE adds the analytical layer on top.",
+            "Child outputs are your structured data layer. FINALIZE must deliver a trading- and investment-actionable conclusion first, then layered evidence.",
+            "",
+            "[PRIORITY — TRADING / INVESTMENT DECISION FIRST]",
+            "- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_utc, only when child outputs support it; otherwise state uncertainty explicitly.",
+            "- Near the top, include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
+            "- Do not lead with DCF alone or end on intrinsic value only. DCF/fair value is supporting evidence, not the sole headline.",
             "",
             "[DATA PRESERVATION]",
             "- Every number, ratio, and factual finding from child outputs MUST appear in the report.",
             "- Do NOT summarize away detail. The final report must be MORE comprehensive than any single child.",
             "",
-            "[QUANTITATIVE ANALYSIS — your analytical value-add]",
-            "- Valuation context: implied multiples (EV/EBITDA, P/E, P/FCF), how they compare to sector and history.",
+            "[EVIDENCE — MULTIPLES, INTRINSIC, AND SCENARIOS]",
+            "- Multiples: implied EV/EBITDA, P/E, P/FCF (or sector-appropriate), vs peers and vs own history where child data allows.",
+            "- Intrinsic / DCF: fair value or range when computed; tie it to multiples and scenarios (consistency or tension).",
             "- Margin trajectory: segment-level margin trends, inflection points, structural vs cyclical drivers.",
             "- Growth decomposition: organic vs inorganic, volume vs price, sustainable vs one-off.",
             "- Capital efficiency: ROIC vs WACC, incremental returns on capex, FCF conversion rate.",
@@ -316,12 +322,13 @@ def finalize_guidance_text() -> str:
             "- Use absolute dates: historical claims should stay inside the target period, and current claims should be anchored to as_of_utc.",
             "- grounded=false or unverified information must remain uncertainty, not present-tense fact.",
             "",
-            "[SCENARIOS]",
+            "[SCENARIOS — BULL / BASE / BEAR + TRADING HOOKS]",
             "- Bull / Base / Bear with quantified reasoning (target metrics, not just narratives).",
             "- Key assumptions that differentiate each scenario.",
             "- Rank uncertainties by magnitude of impact on valuation.",
-            "- 각 시나리오에 정량적 진입/이탈 조건을 명시하라: 목표가, 멀티플 임계값, 성장률 trigger.",
+            "- 각 시나리오에 정량적 진입/이탈 조건: 목표가 구간, 멀티플 상·하단, 실적·성장률 trigger, 관찰 가능한 촉매/리스크 이벤트.",
             "- 어떤 관찰 가능 지표가 변하면 시나리오 간 전환이 일어나는지 명시하라.",
+            "- Where child outputs lack price data, say so and still give multiple- and scenario-based hooks.",
             "",
             "[COVERAGE]",
             "- [REQUIREMENTS]의 모든 항목이 보고서 어딘가에서 충족되어야 한다.",

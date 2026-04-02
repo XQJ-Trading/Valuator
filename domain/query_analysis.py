@@ -36,6 +36,8 @@ _QUERY_ANALYSIS_RULES = (
     "- Preserve the user's response intent and constraints, such as recommendation, screening, comparison, requested market, count, style lens, and actionability, instead of rewriting the query into a generic valuation essay.",
     "- If the query does not name a concrete company/security, do not invent placeholder company entities such as 'investment candidates'.",
     "- If the query is valuation/investment-related, prefer selecting all relevant modules rather than omitting needed domains.",
+    "- For valuation or investment-related queries, shape requirements so the downstream report can be trading- and investment-first: include acceptance criteria that imply decision framing, market price vs thesis where data allows, relative multiples (vs peers or history), bull/base/bear (or equivalent) scenarios, and quantitative entry/exit or re-evaluation triggers. Do not emit a DCF-only or intrinsic-value-only requirement set unless the user explicitly restricts the task to DCF or intrinsic value alone.",
+    "- When a requirement calls for intrinsic value or DCF, add complementary requirements for relative multiples and scenario differentiation unless the user explicitly forbids one of them.",
 )
 
 
@@ -80,9 +82,7 @@ def _build_query_intent(
     raw_entities: list[QueryEntityPayload],
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
 ) -> QueryIntent:
-    company_names = _dedupe_strings(
-        [*raw_intent.tickers, *raw_intent.company_names]
-    )
+    company_names = _dedupe_strings([*raw_intent.tickers, *raw_intent.company_names])
     return QueryIntent(
         query=query,
         subjects=resolve_subjects(
@@ -249,7 +249,8 @@ def _analysis_prompt(
     )
     rules = "\n".join(_QUERY_ANALYSIS_RULES)
     return (
-        "Analyze the user query into a canonical valuation query specification.\n\n"
+        "Analyze the user query into a canonical specification for downstream agent steps "
+        "(evidence gathering, valuation, and trading/investment synthesis).\n\n"
         "[VALUATION_SCOPE]\n"
         f"{scope}\n\n"
         "[EXCLUSION_SIGNALS]\n"
@@ -426,7 +427,9 @@ class QueryUnitPayload(BaseModel):
         self.target_start = normalize_target_date_token(
             self.target_start, as_of_utc=as_of_s
         )
-        self.target_end = normalize_target_date_token(self.target_end, as_of_utc=as_of_s)
+        self.target_end = normalize_target_date_token(
+            self.target_end, as_of_utc=as_of_s
+        )
         return self
 
 

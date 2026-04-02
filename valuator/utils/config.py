@@ -204,7 +204,7 @@ def load_config() -> Config:
         event_layer_enabled=_as_bool(
             read_env("VALUATOR_EVENT_LAYER_ENABLED"), default=False
         ),
-        code_execution_timeout=_as_int(read_env("CODE_EXECUTION_TIMEOUT"), default=10),
+        code_execution_timeout=_as_int(read_env("CODE_EXECUTION_TIMEOUT"), default=3),
         code_execution_allowed_imports=_split_csv(
             read_env("CODE_EXECUTION_ALLOWED_IMPORTS")
         )

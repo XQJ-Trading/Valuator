@@ -110,7 +110,9 @@ class ExecuteCodeTool(ReActBaseTool):
     ) -> ToolResult:
         timeout_value = self._resolve_timeout(timeout)
         if language and language.lower() != "python":
-            return ToolResult(success=False, result=None, error="Only Python is supported")
+            return ToolResult(
+                success=False, result=None, error="Only Python is supported"
+            )
 
         normalized_code = self._normalize_code(code)
         if not normalized_code:
@@ -195,7 +197,7 @@ class ExecuteCodeTool(ReActBaseTool):
     @staticmethod
     def _resolve_timeout(timeout: int | None) -> int:
         if timeout is None:
-            timeout = int(getattr(config, "code_execution_timeout", 10) or 10)
+            timeout = int(getattr(config, "code_execution_timeout", 3) or 3)
         return max(int(timeout), 1)
 
     @staticmethod
@@ -240,7 +242,9 @@ class ExecuteCodeTool(ReActBaseTool):
         return {"output": "", "code": code, "execution_type": "failed"}
 
     @staticmethod
-    def _base_metadata(*, timeout: int, allowed_imports: list[str]) -> dict[str, object]:
+    def _base_metadata(
+        *, timeout: int, allowed_imports: list[str]
+    ) -> dict[str, object]:
         return {
             "timeout": timeout,
             "safe_mode": True,
@@ -255,7 +259,9 @@ class _SubprocessOutput:
     stderr: str
 
     @classmethod
-    def from_completed(cls, completed: subprocess.CompletedProcess[str]) -> "_SubprocessOutput":
+    def from_completed(
+        cls, completed: subprocess.CompletedProcess[str]
+    ) -> "_SubprocessOutput":
         return cls(
             stdout=(completed.stdout or "").strip(),
             stderr=(completed.stderr or "").strip(),

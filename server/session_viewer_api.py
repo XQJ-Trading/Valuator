@@ -435,8 +435,12 @@ async def browse_outline(
         default=None,
         description="Top-level folder under the data root (omit for latest by mtime)",
     ),
+    ensure_browse: bool = Query(
+        default=False,
+        description="When true, rebuild browse/ from tasks when possible. When false, only read existing browse/.",
+    ),
 ):
-    """Ensure browse/ from tasks when possible, then return one browse tree outline (no client tree walk)."""
+    """Return browse tree outline (no client tree walk). Optional rebuild from tasks when ensure_browse is true."""
     ensure_viewer_roots()
     resolved_source, base_root = _resolve_source_base_root(source)
 
@@ -463,7 +467,7 @@ async def browse_outline(
     session_dir = base_root / folder
     tasks_dir = session_dir / "tasks"
     browse_built = False
-    if tasks_dir.is_dir():
+    if ensure_browse and tasks_dir.is_dir():
         root_task_id = _read_root_task_id(session_dir)
 
         def _build() -> bool:

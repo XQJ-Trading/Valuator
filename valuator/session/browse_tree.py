@@ -9,6 +9,21 @@ from typing import Any
 from .trace import task_rel_path
 
 
+def _remove_browse_dir(path: Path) -> None:
+    """Remove browse cache; tolerate races when another build deletes the same tree."""
+
+    def _onerror(_func, _path, exc_info) -> None:
+        err = exc_info[1]
+        if isinstance(err, FileNotFoundError):
+            return
+        raise err
+
+    try:
+        shutil.rmtree(path, onerror=_onerror)
+    except FileNotFoundError:
+        pass
+
+
 def build_browse_tree(
     *,
     session_dir: Path,
@@ -36,7 +51,7 @@ def build_browse_tree(
 
     browse_dir = session_dir / "browse"
     if browse_dir.exists():
-        shutil.rmtree(browse_dir)
+        _remove_browse_dir(browse_dir)
     browse_dir.mkdir(parents=True, exist_ok=True)
     _write_browse_node(
         task_id=resolved_root_task_id,

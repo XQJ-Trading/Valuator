@@ -17,7 +17,7 @@ from .types import (
 
 def depth_cost(depth: int, max_depth: int) -> float:
     d = min(depth, max_depth)
-    return (d / max_depth) ** 2
+    return (d / max_depth) ** max_depth
 
 
 def breadth_cost(child_count: int, max_children: int) -> float:
@@ -75,6 +75,28 @@ def pre_filter(
         breakdown=breakdown,
         reason=reason,
     )
+
+
+def static_rejects_minimal_decomposition(
+    *,
+    task_depth: int,
+    max_steps_per_task: int,
+    config: GateConfig,
+) -> bool:
+    """True if static pre_filter would REJECT a single-child decomposition.
+
+    At fixed depth, breadth_cost is 0 and token_pressure is minimal for one child;
+    adding children only increases breadth and token terms. If the minimal case
+    is rejected, static rejects any non-empty decomposition, so DECOMPOSE can be
+    omitted from the schema without changing gate outcomes.
+    """
+    result = pre_filter(
+        task_depth=task_depth,
+        children=[TaskSpec(description="x", task_name="x")],
+        max_steps_per_task=max_steps_per_task,
+        config=config,
+    )
+    return result.verdict is FilterVerdict.REJECT
 
 
 def critic_to_score(

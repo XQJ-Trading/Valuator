@@ -103,10 +103,11 @@ export interface BrowseOutlineRow {
   title: string;
 }
 
-/** Ensures `browse/` from tasks when possible, returns outline in one round-trip. */
+/** Returns browse outline; optional rebuild from tasks when ensureBrowse is true (can be slow). */
 export async function fetchBrowseOutline(
   source: DataSource,
   sessionFolder?: string | null,
+  options?: { ensureBrowse?: boolean },
 ): Promise<{
   sessionFolder: string | null;
   browseRootPath: string | null;
@@ -116,6 +117,7 @@ export async function fetchBrowseOutline(
   const q = new URLSearchParams({ source });
   const s = sessionFolder?.trim();
   if (s) q.set("session", s);
+  if (options?.ensureBrowse) q.set("ensure_browse", "true");
   const res = await fetch(`/api/session/browse-outline?${q}`);
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<{

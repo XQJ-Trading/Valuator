@@ -82,7 +82,7 @@ def test_load_config_defaults_to_flash_preview(monkeypatch) -> None:
     assert loaded.agent_step_repair_retries == 2
     assert loaded.agent_max_invalid_decisions_per_task == 5
     assert loaded.agent_max_steps_per_task == 30
-    assert loaded.agent_concurrency == 8
+    assert loaded.agent_concurrency == 10
 
 
 def test_load_config_normalizes_supported_models(monkeypatch) -> None:

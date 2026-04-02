@@ -17,6 +17,7 @@ __all__ = [
     "combine",
     "pre_filter",
     "validate_gate_config",
+    "static_rejects_minimal_decomposition",
 ]
 
 _LAZY_EXPORTS = {
@@ -34,6 +35,10 @@ _LAZY_EXPORTS = {
     "combine": (".gate", "combine"),
     "pre_filter": (".gate", "pre_filter"),
     "validate_gate_config": (".gate_config", "validate_gate_config"),
+    "static_rejects_minimal_decomposition": (
+        ".gate",
+        "static_rejects_minimal_decomposition",
+    ),
 }
 
 

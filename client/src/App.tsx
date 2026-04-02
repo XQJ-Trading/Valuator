@@ -16,6 +16,8 @@ export default function App() {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [selectedDirectoryPath, setSelectedDirectoryPath] = useState<string | null>(null);
   const [chatSyncVersion, setChatSyncVersion] = useState(0);
+  const [outlineChatTick, setOutlineChatTick] = useState(0);
+  const [outlineFolderEnsureTick, setOutlineFolderEnsureTick] = useState(0);
   const [sessionExploreTarget, setSessionExploreTarget] = useState<string | null>(null);
 
   /** Latest session browse path for the tree — only when switching to Session view, not on every chat tick. */
@@ -49,7 +51,10 @@ export default function App() {
   };
 
   return (
-    <ChatSessionProvider onMessagesUpdated={() => setChatSyncVersion((v) => v + 1)}>
+    <ChatSessionProvider
+      onMessagesUpdated={() => setChatSyncVersion((v) => v + 1)}
+      onBrowseOutlineRefresh={() => setOutlineChatTick((v) => v + 1)}
+    >
       <div className="app">
         <div className="titlebar">
           <span className="titlebar-label">Research UI</span>
@@ -72,6 +77,9 @@ export default function App() {
                       activePath={activePath}
                       onSelect={setActivePath}
                       onSelectDirectory={setSelectedDirectoryPath}
+                      onUserSelectDirectory={() =>
+                        setOutlineFolderEnsureTick((v) => v + 1)
+                      }
                       refreshToken={chatSyncVersion}
                       initialExpandDirectory={
                         activityView === "session" ? sessionExploreTarget : null
@@ -96,7 +104,8 @@ export default function App() {
                   dataSource={activityView === "config" ? "session" : activityView}
                   enabled={activityView !== "config"}
                   selectedDirectoryPath={selectedDirectoryPath}
-                  refreshToken={chatSyncVersion}
+                  outlineChatTick={outlineChatTick}
+                  outlineFolderEnsureTick={outlineFolderEnsureTick}
                   onOpenTaskFile={(path) => {
                     if (activityView === "config") return;
                     setActivePath(path);

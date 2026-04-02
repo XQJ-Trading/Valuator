@@ -9,6 +9,7 @@ from valuator.core.decomposition.gate import (
     critic_to_score,
     depth_cost,
     pre_filter,
+    static_rejects_minimal_decomposition,
     token_pressure,
 )
 from valuator.core.decomposition.gate_config import GateConfig
@@ -23,9 +24,9 @@ from valuator.core.types import TaskSpec, TaskState
 
 def test_depth_cost_matches_spec_curve() -> None:
     assert depth_cost(0, 4) == pytest.approx(0.0)
-    assert depth_cost(1, 4) == pytest.approx(0.0625)
-    assert depth_cost(2, 4) == pytest.approx(0.25)
-    assert depth_cost(3, 4) == pytest.approx(0.5625)
+    assert depth_cost(1, 4) == pytest.approx(0.00390625)
+    assert depth_cost(2, 4) == pytest.approx(0.0625)
+    assert depth_cost(3, 4) == pytest.approx(0.31640625)
     assert depth_cost(4, 4) == pytest.approx(1.0)
     assert depth_cost(5, 4) == pytest.approx(1.0)
 
@@ -68,6 +69,29 @@ def test_pre_filter_returns_reject_with_unresolvable_children() -> None:
 
     assert result.verdict is FilterVerdict.REJECT
     assert result.static_score == pytest.approx(-0.16666666666666666)
+
+
+def test_static_rejects_minimal_decomposition_aligns_with_one_child_pre_filter() -> None:
+    cfg = GateConfig()
+    one = [TaskSpec(description="x", task_name="x")]
+    for depth in (0, 2, 4):
+        expected = (
+            pre_filter(
+                task_depth=depth,
+                children=one,
+                max_steps_per_task=30,
+                config=cfg,
+            ).verdict
+            is FilterVerdict.REJECT
+        )
+        assert (
+            static_rejects_minimal_decomposition(
+                task_depth=depth,
+                max_steps_per_task=30,
+                config=cfg,
+            )
+            is expected
+        )
 
 
 def test_pre_filter_returns_uncertain_in_gray_zone() -> None:

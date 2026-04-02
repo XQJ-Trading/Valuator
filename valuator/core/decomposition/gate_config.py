@@ -21,7 +21,7 @@ class GateConfig:
     max_depth: int = 4
     max_children: int = 8
     accept_bound: float = -0.01
-    reject_bound: float = -0.3
+    reject_bound: float = -0.4
     static_weight: float = 0.4
     critic_weight: float = 0.6
 

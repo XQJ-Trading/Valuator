@@ -115,7 +115,9 @@ def render_report_markdown(value: Any) -> str:
             for index, item in enumerate(current, start=1):
                 rendered = render(item, min(heading_level + 1, 6)).strip()
                 if rendered:
-                    lines.extend([f"{'#' * heading_level} Item {index}", "", rendered, ""])
+                    lines.extend(
+                        [f"{'#' * heading_level} Item {index}", "", rendered, ""]
+                    )
             return "\n".join(lines).strip()
         return str(current).strip()
 
@@ -148,7 +150,9 @@ class ValuatorSessionStore:
         self.tasks_dir = self.session_dir / "tasks"
         self.trace_dir = self.session_dir / "trace"
         self.review_dir = self.session_dir / "review"
-        self.review_history_path = self.review_dir / "history" / f"{self.round_dir}.json"
+        self.review_history_path = (
+            self.review_dir / "history" / f"{self.round_dir}.json"
+        )
         self.output_dir = self.session_dir / "output"
         self._lock = threading.RLock()
         self._analysis_payload: dict[str, Any] | None = None
@@ -216,7 +220,9 @@ class ValuatorSessionStore:
             self._session_payload["updated_at"] = utc_isoformat()
             self._write_session()
 
-    def write_plan(self, *, effective_query: str, analysis: Any, root_task: Task) -> None:
+    def write_plan(
+        self, *, effective_query: str, analysis: Any, root_task: Task
+    ) -> None:
         with self._lock:
             self.effective_query = effective_query
             self._analysis_payload = asdict(analysis)
@@ -261,8 +267,12 @@ class ValuatorSessionStore:
                     "tasks": list(self._plan_tasks.values()),
                     "root_task_id": self._root_task_id,
                 }
-                self._write_json(self.plan_active_dir / "decomposition.json", decomposition)
-                self._write_json(self.plan_round_dir / "decomposition.json", decomposition)
+                self._write_json(
+                    self.plan_active_dir / "decomposition.json", decomposition
+                )
+                self._write_json(
+                    self.plan_round_dir / "decomposition.json", decomposition
+                )
 
             self._session_payload["updated_at"] = utc_isoformat()
             self._write_session()
@@ -295,7 +305,13 @@ class ValuatorSessionStore:
 
             domain_summary = ""
             if isinstance(result.result, dict):
-                for key in ("domain_summary", "summary", "findings", "result", "content"):
+                for key in (
+                    "domain_summary",
+                    "summary",
+                    "findings",
+                    "result",
+                    "content",
+                ):
                     candidate = result.result.get(key)
                     if isinstance(candidate, str) and candidate.strip():
                         domain_summary = candidate.strip()
@@ -303,7 +319,9 @@ class ValuatorSessionStore:
             elif isinstance(result.result, str) and result.result.strip():
                 domain_summary = result.result.strip()
 
-            self._write_text(result_path, self._artifact_text(result.result, result.error))
+            self._write_text(
+                result_path, self._artifact_text(result.result, result.error)
+            )
             self._write_json(
                 result_json_path,
                 {
@@ -345,8 +363,13 @@ class ValuatorSessionStore:
             os.makedirs(task_dir, exist_ok=True)
             report_path = task_dir / "report.md"
             raw_results_path = task_dir / "raw_results.json"
-            source_reports = list(plan_task["deps"]) if plan_task["task_type"] == "merge" else []
-            child_sources = [self._load_report_source(child_task_id) for child_task_id in source_reports]
+            source_reports = (
+                list(plan_task["deps"]) if plan_task["task_type"] == "merge" else []
+            )
+            child_sources = [
+                self._load_report_source(child_task_id)
+                for child_task_id in source_reports
+            ]
             current_source = self._load_report_source(task_id)
 
             title = str(plan_task.get("task_name") or task_id).replace("_", " ")
@@ -361,7 +384,9 @@ class ValuatorSessionStore:
 
             evidence_started = False
             for child in child_sources:
-                body = child["markdown"] or render_report_markdown(child["report_input"])
+                body = child["markdown"] or render_report_markdown(
+                    child["report_input"]
+                )
                 if not body:
                     continue
                 if summary and not evidence_started:
@@ -386,7 +411,11 @@ class ValuatorSessionStore:
             elif isinstance(output, str) and output.strip():
                 facts = {"summary": output.strip()}
             else:
-                facts = current_source["raw_result"] if current_source["raw_result"] is not None else {}
+                facts = (
+                    current_source["raw_result"]
+                    if current_source["raw_result"] is not None
+                    else {}
+                )
 
             domain_ids: list[str] = []
             if self._analysis_payload is not None:
@@ -420,7 +449,9 @@ class ValuatorSessionStore:
 
             artifacts = self._artifacts_for(task_id)
             artifacts["aggregation_report_path"] = self._task_rel(task_id, report_path)
-            artifacts["aggregation_raw_results_path"] = self._task_rel(task_id, raw_results_path)
+            artifacts["aggregation_raw_results_path"] = self._task_rel(
+                task_id, raw_results_path
+            )
             self._session_payload["updated_at"] = utc_isoformat()
             self._write_session()
 
@@ -432,9 +463,13 @@ class ValuatorSessionStore:
         with self._lock:
             report_body = ""
             if self._root_task_id is not None:
-                report_path = self._task_dir(self._root_task_id) / "aggregation" / "report.md"
+                report_path = (
+                    self._task_dir(self._root_task_id) / "aggregation" / "report.md"
+                )
                 if report_path.exists():
-                    report_body = strip_markdown_title(report_path.read_text(encoding="utf-8"))
+                    report_body = strip_markdown_title(
+                        report_path.read_text(encoding="utf-8")
+                    )
 
         if report_body:
             return markdown_document("Final", report_body)
@@ -476,7 +511,9 @@ class ValuatorSessionStore:
                 {
                     "root_task_id": self._root_task_id,
                     "source_reports": source_reports,
-                    "source_materials": [f"report:{task_id}" for task_id in source_reports],
+                    "source_materials": [
+                        f"report:{task_id}" for task_id in source_reports
+                    ],
                     "covered_requirement_ids": [item["id"] for item in requirements],
                     "missing_requirement_ids": [],
                     "domain_coverage": {
@@ -487,9 +524,11 @@ class ValuatorSessionStore:
                 },
             )
 
-            self._artifacts_for(self._root_task_id)["final_output_path"] = self._task_rel(
-                self._root_task_id,
-                final_path,
+            self._artifacts_for(self._root_task_id)["final_output_path"] = (
+                self._task_rel(
+                    self._root_task_id,
+                    final_path,
+                )
             )
             if root_task is not None:
                 self._write_text(
@@ -626,9 +665,7 @@ class ValuatorSessionStore:
 
     def _collect_all_task_ids(self) -> list[str]:
         return [
-            task_id
-            for task_id in self._plan_tasks
-            if task_id != self._root_task_id
+            task_id for task_id in self._plan_tasks if task_id != self._root_task_id
         ]
 
     def _artifacts_for(self, task_id: str) -> dict[str, str | None]:
@@ -679,14 +716,26 @@ class ValuatorSessionStore:
                     return candidate.strip() + "\n"
         if error:
             return error.strip() + "\n"
-        return json.dumps(value, ensure_ascii=False, indent=2, default=str).strip() + "\n"
+        return (
+            json.dumps(value, ensure_ascii=False, indent=2, default=str).strip() + "\n"
+        )
 
     def _load_report_source(self, task_id: str) -> dict[str, Any]:
         task_dir = self._task_dir(task_id)
-        task_name = str(self._plan_tasks.get(task_id, {}).get("task_name") or task_id).replace("_", " ")
+        task_name = str(
+            self._plan_tasks.get(task_id, {}).get("task_name") or task_id
+        ).replace("_", " ")
         candidates = [
-            ("aggregation", task_dir / "aggregation" / "report.md", task_dir / "aggregation" / "raw_results.json"),
-            ("execution", task_dir / "execution" / "result.md", task_dir / "execution" / "result.json"),
+            (
+                "aggregation",
+                task_dir / "aggregation" / "report.md",
+                task_dir / "aggregation" / "raw_results.json",
+            ),
+            (
+                "execution",
+                task_dir / "execution" / "result.md",
+                task_dir / "execution" / "result.json",
+            ),
         ]
 
         for source_type, markdown_path, raw_path in candidates:
@@ -709,11 +758,15 @@ class ValuatorSessionStore:
                     "task_id": task_id,
                     "title": task_name,
                     "source_type": source_type,
-                    "markdown": strip_markdown_title(markdown_path.read_text(encoding="utf-8")),
+                    "markdown": strip_markdown_title(
+                        markdown_path.read_text(encoding="utf-8")
+                    ),
                     "report_input": report_input,
                     "raw_result": raw_result,
                     "report_path": self._rel(markdown_path),
-                    "raw_path": self._rel(raw_path) if raw_payload is not None else None,
+                    "raw_path": (
+                        self._rel(raw_path) if raw_payload is not None else None
+                    ),
                 }
             if raw_payload is not None:
                 return {
@@ -769,12 +822,12 @@ class ValuatorSessionStore:
     def _render_tree_md(task: Task, depth: int = 0) -> str:
         indent = "  " * depth
         children = task.children()
-        kind = f"leaf: {task.tool_hint}" if not children and task.tool_hint.strip() else ""
+        kind = (
+            f"leaf: {task.tool_hint}" if not children and task.tool_hint.strip() else ""
+        )
         suffix = f" ({kind})" if kind else ""
         name_snippet = (
-            f" `{task.task_name.strip()}`"
-            if str(task.task_name or "").strip()
-            else ""
+            f" `{task.task_name.strip()}`" if str(task.task_name or "").strip() else ""
         )
         line = f"{indent}- **{task.id}**{name_snippet} [{task.state.value}] {task.description}{suffix}"
         lines = [line]

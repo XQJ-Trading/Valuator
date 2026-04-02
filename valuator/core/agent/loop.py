@@ -14,7 +14,7 @@ from ..decomposition import DecompositionCritic, GateConfig, GateController
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
-from ..task import Task
+from ..task import AtomicTask, Task
 from ..types import Action, AgentEvent, EventType, TaskDecision, TaskState
 from . import context_builder, trace as agent_trace
 
@@ -46,9 +46,15 @@ class Agent:
         self._tools = tool_registry
         self._analysis = query_analysis
         self._on_event = on_event
-        self._step_planner = step_planner or StepPlanner(llm_client)
+        self._step_planner = step_planner or StepPlanner(
+            llm_client,
+            gate_config=gate_config,
+            max_steps_per_task=scheduler.max_steps_per_task,
+        )
         self._session_store = session_store
-        self._trace_writer = session_store.trace_writer if session_store is not None else trace_writer
+        self._trace_writer = (
+            session_store.trace_writer if session_store is not None else trace_writer
+        )
         self._gate = GateController(
             llm_client=llm_client,
             scheduler=self._scheduler,
@@ -75,9 +81,13 @@ class Agent:
             while not self._scheduler.is_complete() or in_flight:
                 available_slots = self._scheduler.concurrency - len(in_flight)
                 if available_slots > 0:
-                    for ready_task in self._scheduler.ready_tasks(limit=available_slots):
+                    for ready_task in self._scheduler.ready_tasks(
+                        limit=available_slots
+                    ):
                         ready_task.state = TaskState.RUNNING
-                        in_flight.add(asyncio.create_task(self._step_one(ready_task, query)))
+                        in_flight.add(
+                            asyncio.create_task(self._step_one(ready_task, query))
+                        )
 
                 if self._scheduler.is_complete() and not in_flight:
                     break
@@ -85,7 +95,9 @@ class Agent:
                     if self._scheduler.has_deadlock():
                         woken = self._scheduler.break_deadlock(self._shared)
                         if not woken and self._scheduler.has_deadlock():
-                            raise RuntimeError("deadlock: no tasks ready, not all complete")
+                            raise RuntimeError(
+                                "deadlock: no tasks ready, not all complete"
+                            )
                     continue
 
                 completed, pending = await asyncio.wait(
@@ -108,11 +120,7 @@ class Agent:
 
     async def _step_one(self, task: Task, query: str) -> None:
         if task.step_count >= self._scheduler._max_steps:
-            await self._fail_task(
-                task,
-                task_seq=task.step_count + 1,
-                reason="max steps exceeded",
-            )
+            await self._force_finalize(task)
             return
 
         self._global_step_sequence += 1
@@ -139,34 +147,48 @@ class Agent:
             tools=self._tools,
         )
         decision_measurement = Measurement.start()
-        try:
-            decision = await task.step(ctx)
-            if decision.action is Action.DECOMPOSE:
-                decision = await self._gate.gate(task, decision, ctx)
-        except ValueError as exc:
-            await self._reject_step(
-                task=task,
-                task_seq=task_seq,
-                ctx=ctx,
-                started_at=decision_measurement.started_at,
-                duration_ms=decision_measurement.latency_seconds() * 1000.0,
-                error=str(exc),
+        if (
+            isinstance(task, AtomicTask)
+            and task.last_tool_success is True
+            and task.tool_results
+        ):
+            decision = TaskDecision(
+                action=Action.AGGREGATE,
+                output=task.tool_results[-1].result,
+                facts={},
+                children=[],
             )
-            return
-        except Exception as exc:
-            agent_trace.log_step_decision(
-                self._trace_writer,
-                task=task,
-                task_seq=task_seq,
-                ctx=ctx,
-                decision=None,
-                status="failed",
-                started_at=decision_measurement.started_at,
-                duration_ms=decision_measurement.latency_seconds() * 1000.0,
-                error=str(exc),
-            )
-            await self._fail_task(task, task_seq=task_seq, reason=f"step failed: {exc}")
-            return
+        else:
+            try:
+                decision = await task.step(ctx)
+                if decision.action is Action.DECOMPOSE:
+                    decision = await self._gate.gate(task, decision, ctx)
+            except ValueError as exc:
+                await self._reject_step(
+                    task=task,
+                    task_seq=task_seq,
+                    ctx=ctx,
+                    started_at=decision_measurement.started_at,
+                    duration_ms=decision_measurement.latency_seconds() * 1000.0,
+                    error=str(exc),
+                )
+                return
+            except Exception as exc:
+                agent_trace.log_step_decision(
+                    self._trace_writer,
+                    task=task,
+                    task_seq=task_seq,
+                    ctx=ctx,
+                    decision=None,
+                    status="failed",
+                    started_at=decision_measurement.started_at,
+                    duration_ms=decision_measurement.latency_seconds() * 1000.0,
+                    error=str(exc),
+                )
+                await self._fail_task(
+                    task, task_seq=task_seq, reason=f"step failed: {exc}"
+                )
+                return
 
         decision_duration_ms = decision_measurement.latency_seconds() * 1000.0
         if decision.action is Action.EXECUTE and decision.tool_request is None:
@@ -181,7 +203,11 @@ class Agent:
             )
             return
 
-        if decision.tool_request is not None and ctx.available_tools and decision.tool_request.tool_name not in ctx.available_tools:
+        if (
+            decision.tool_request is not None
+            and ctx.available_tools
+            and decision.tool_request.tool_name not in ctx.available_tools
+        ):
             error = f"tool not allowed: {decision.tool_request.tool_name}"
             agent_trace.log_step_decision(
                 self._trace_writer,
@@ -286,9 +312,14 @@ class Agent:
         )
         conflict_count = len(self._shared.view().conflicts)
 
-        if effective_decision.action is Action.EXECUTE and effective_decision.tool_request is not None:
+        if (
+            effective_decision.action is Action.EXECUTE
+            and effective_decision.tool_request is not None
+        ):
             task.last_tool_request = effective_decision.tool_request
-            self._scheduler.apply_decision(task, effective_decision, self._shared, ctx=ctx)
+            self._scheduler.apply_decision(
+                task, effective_decision, self._shared, ctx=ctx
+            )
             tool_started_at = utc_isoformat()
             started = perf_counter()
             result = await self._tools.execute_tool(
@@ -343,7 +374,9 @@ class Agent:
         self._sync_session_tree()
         if effective_decision.action is Action.DECOMPOSE:
             self._save_decomposition_snapshot(task)
-        if effective_decision.action is Action.AGGREGATE and self._gate.has_prediction(task.id):
+        if effective_decision.action is Action.AGGREGATE and self._gate.has_prediction(
+            task.id
+        ):
             self._gate.observe_outcome(task.id, task.children())
         for conflict in self._shared.view().conflicts[conflict_count:]:
             await self._emit(
@@ -501,6 +534,50 @@ class Agent:
             error=error,
         )
         await self._handle_invalid_step(task, error)
+
+    async def _force_finalize(self, task: Task) -> None:
+        """Max steps reached — finalize subtree bottom-up, then this task."""
+        for child in task.children():
+            if child.state in (TaskState.DONE, TaskState.FAILED):
+                continue
+            await self._force_finalize(child)
+
+        for child in task.children():
+            if child.state == TaskState.DONE and child.id not in task.child_outputs:
+                task.child_outputs[child.id] = child.completion_payload()
+
+        output, facts = task.implicit_aggregate_payload()
+        if facts:
+            for key, value in facts.items():
+                self._shared.publish(key, value, source_task_id=task.id)
+        decision = TaskDecision(
+            action=Action.FINALIZE,
+            output=output,
+            facts=facts,
+            children=[],
+        )
+        self._scheduler.apply_decision(task, decision, self._shared)
+        self._write_task_report(task, decision)
+        self._sync_session_tree()
+        agent_trace.log_task_result(
+            self._trace_writer,
+            task,
+            task_seq=task.step_count,
+            action=Action.FINALIZE.value,
+            status="success",
+            output=task.completion_payload(),
+        )
+        await self._emit(
+            AgentEvent(
+                type=EventType.FINALIZED,
+                task_id=task.id,
+                detail={
+                    "output": task.completion_payload(),
+                    "task_name": task.task_name,
+                    "reason": "max_steps_reached",
+                },
+            )
+        )
 
     async def _fail_task(
         self,

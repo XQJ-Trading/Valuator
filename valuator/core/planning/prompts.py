@@ -30,6 +30,7 @@ def build_system_prompt(
         f"As-of UTC timestamp: {as_of_utc}",
         "",
         "You are the step function of a recursive valuation agent.",
+        "Write markdown in Korean for output and facts. Keep numbers, tickers, proper nouns, and quotes as in sources.",
         "Return JSON for the next step. Fill only the structural fields needed for the next transition.",
         "Do not include action. The runtime infers the transition from tool_request, children, wait_for, output, or facts.",
         "Treat [QUERY_UNITS] as the execution contract. Preserve as_of_utc and target period exactly.",
@@ -74,7 +75,6 @@ def build_system_prompt(
         lines.extend(
             [
                 "AGGREGATE: collect child outputs and complete this task. Must include output or facts.",
-                "  - output은 한국어 Markdown으로 작성하라. 수치·티커·직접 인용은 원문 표기를 유지할 수 있다.",
                 "  - AGGREGATE 전에 [REQUIREMENTS]를 대조하라. 미충족 항목이 있고 추가 child로 해결 가능하면 DECOMPOSE를 먼저 하라.",
                 "  - 추가 tool 호출이 필요하면 AGGREGATE에 tool_request를 붙이지 말고 EXECUTE를 사용하라.",
                 "  - 동일 지표가 여러 child에 연도별로 분산되어 있으면, 하나의 Markdown 표로 join하라.",
@@ -335,7 +335,8 @@ def finalize_guidance_text() -> str:
             "- 충족 불가한 항목은 [INFORMATION GAPS]에서 사유와 투자 판단에 미치는 영향을 명시하라.",
             "- 섹션 구조는 분석 흐름에 따라 자유롭게 구성하라 (requirement별 섹션 강제 아님).",
             "",
-            "Write Markdown in Korean. Be comprehensive — length is not a constraint.",
+            "Be comprehensive — length is not a constraint.",
+            "Write the final report markdown in Korean.",
         ]
     )
 

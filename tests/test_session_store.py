@@ -47,7 +47,9 @@ def test_build_browse_tree_writes_markdown_first_tree_and_resolves_name_collisio
     root.add_child(child_three)
 
     store.sync_task_tree(root)
-    store._write_text(store.session_dir / "tasks" / "root" / "task.md", "# Root task trace\n")
+    store._write_text(
+        store.session_dir / "tasks" / "root" / "task.md", "# Root task trace\n"
+    )
     store._write_text(
         store.session_dir / "tasks" / "root" / "root.0" / "task.md",
         "# Child task trace\n",
@@ -92,7 +94,9 @@ def test_build_browse_tree_writes_markdown_first_tree_and_resolves_name_collisio
     assert "THINKING" not in root_browse_dir.name
     assert "이란" in root_browse_dir.name
 
-    child_dirs = sorted(path.name for path in root_browse_dir.iterdir() if path.is_dir())
+    child_dirs = sorted(
+        path.name for path in root_browse_dir.iterdir() if path.is_dir()
+    )
     assert child_dirs == ["supply_chain_delay_estimate", "시장_반응", "시장_반응_2"]
 
     root_readme = (root_browse_dir / "README.md").read_text(encoding="utf-8")
@@ -107,7 +111,9 @@ def test_build_browse_tree_writes_markdown_first_tree_and_resolves_name_collisio
 
     root_report = (root_browse_dir / "report.md").read_text(encoding="utf-8")
     assert "루트 요약" in root_report
-    assert (root_browse_dir / "final.md").read_text(encoding="utf-8").startswith("# Final")
+    assert (
+        (root_browse_dir / "final.md").read_text(encoding="utf-8").startswith("# Final")
+    )
 
     child_browse_dir = root_browse_dir / "시장_반응"
     child_readme = (child_browse_dir / "README.md").read_text(encoding="utf-8")
@@ -150,9 +156,9 @@ def test_write_aggregation_report_preserves_facts_only_output(tmp_path: Path) ->
     )
 
     ledger = json.loads(
-        (store.session_dir / "tasks" / "root" / "aggregation" / "raw_results.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            store.session_dir / "tasks" / "root" / "aggregation" / "raw_results.json"
+        ).read_text(encoding="utf-8")
     )
 
     assert ledger["facts"] == {"price_uplift": "could not verify"}
@@ -177,7 +183,9 @@ def test_leaf_aggregation_report_preserves_execution_markdown(tmp_path: Path) ->
         task_id="root.0",
         tool_name="web_search_tool",
         args={"query": "시장 반응"},
-        result=ToolResult(success=True, result={"markdown": "시장 반응 결과"}, metadata={}),
+        result=ToolResult(
+            success=True, result={"markdown": "시장 반응 결과"}, metadata={}
+        ),
         started_at="2026-03-29T00:01:00Z",
         duration_ms=8.0,
     )
@@ -202,7 +210,9 @@ def test_leaf_aggregation_report_preserves_execution_markdown(tmp_path: Path) ->
     assert raw_results["facts"] == {"markdown": "시장 반응 결과"}
 
 
-def test_parent_aggregation_report_prefers_child_aggregation_report(tmp_path: Path) -> None:
+def test_parent_aggregation_report_prefers_child_aggregation_report(
+    tmp_path: Path,
+) -> None:
     store = ValuatorSessionStore(
         session_id="S-parent-report",
         query="parent report",
@@ -221,7 +231,9 @@ def test_parent_aggregation_report_prefers_child_aggregation_report(tmp_path: Pa
         task_id="root.0",
         tool_name="web_search_tool",
         args={"query": "시장 반응"},
-        result=ToolResult(success=True, result={"markdown": "execution result"}, metadata={}),
+        result=ToolResult(
+            success=True, result={"markdown": "execution result"}, metadata={}
+        ),
         started_at="2026-03-29T00:01:00Z",
         duration_ms=8.0,
     )
@@ -243,7 +255,9 @@ def test_parent_aggregation_report_prefers_child_aggregation_report(tmp_path: Pa
     assert raw_results["child_results"][0]["source_type"] == "aggregation"
 
 
-def test_aggregation_report_renders_structured_output_without_json_dump(tmp_path: Path) -> None:
+def test_aggregation_report_renders_structured_output_without_json_dump(
+    tmp_path: Path,
+) -> None:
     store = ValuatorSessionStore(
         session_id="S-structured-report",
         query="structured report",
@@ -272,7 +286,9 @@ def test_aggregation_report_renders_structured_output_without_json_dump(tmp_path
     assert '"market_impact_summary"' not in report
 
 
-def test_write_final_output_renders_structured_output_as_markdown(tmp_path: Path) -> None:
+def test_write_final_output_renders_structured_output_as_markdown(
+    tmp_path: Path,
+) -> None:
     store = ValuatorSessionStore(
         session_id="S-final-structured",
         query="structured final",
@@ -293,7 +309,9 @@ def test_write_final_output_renders_structured_output_as_markdown(tmp_path: Path
         root_task=root,
     )
 
-    final_markdown = (store.session_dir / "output" / "final.md").read_text(encoding="utf-8")
+    final_markdown = (store.session_dir / "output" / "final.md").read_text(
+        encoding="utf-8"
+    )
 
     assert final_markdown.startswith("# Final")
     assert "price uplift" in final_markdown
@@ -301,7 +319,9 @@ def test_write_final_output_renders_structured_output_as_markdown(tmp_path: Path
     assert '"price_uplift"' not in final_markdown
 
 
-def test_write_final_output_prefers_root_report_when_output_is_structured(tmp_path: Path) -> None:
+def test_write_final_output_prefers_root_report_when_output_is_structured(
+    tmp_path: Path,
+) -> None:
     store = ValuatorSessionStore(
         session_id="S-final-prefers-root-report",
         query="final report",
@@ -323,14 +343,18 @@ def test_write_final_output_prefers_root_report_when_output_is_structured(tmp_pa
         root_task=root,
     )
 
-    final_markdown = (store.session_dir / "output" / "final.md").read_text(encoding="utf-8")
+    final_markdown = (store.session_dir / "output" / "final.md").read_text(
+        encoding="utf-8"
+    )
 
     assert final_markdown.startswith("# Final")
     assert "루트 요약" in final_markdown
     assert "price uplift" not in final_markdown
 
 
-def test_build_browse_tree_uses_execution_fallback_and_failure_stub(tmp_path: Path) -> None:
+def test_build_browse_tree_uses_execution_fallback_and_failure_stub(
+    tmp_path: Path,
+) -> None:
     store = ValuatorSessionStore(
         session_id="S-browse-fallbacks",
         query="browse fallback",
@@ -339,8 +363,12 @@ def test_build_browse_tree_uses_execution_fallback_and_failure_stub(tmp_path: Pa
         root_dir=tmp_path,
     )
     root = ComplexTask(id="root", description="root task")
-    exec_child = AtomicTask(id="root.0", description="execution only", task_name="execution_only")
-    failed_child = AtomicTask(id="root.1", description="failed child", task_name="failed_child")
+    exec_child = AtomicTask(
+        id="root.0", description="execution only", task_name="execution_only"
+    )
+    failed_child = AtomicTask(
+        id="root.1", description="failed child", task_name="failed_child"
+    )
     failed_child.error = "planner rejected invalid aggregate payload"
     root.add_child(exec_child)
     root.add_child(failed_child)
@@ -353,7 +381,9 @@ def test_build_browse_tree_uses_execution_fallback_and_failure_stub(tmp_path: Pa
         task_id="root.0",
         tool_name="web_search_tool",
         args={"query": "execution only"},
-        result=ToolResult(success=True, result={"markdown": "execution only markdown"}, metadata={}),
+        result=ToolResult(
+            success=True, result={"markdown": "execution only markdown"}, metadata={}
+        ),
         started_at="2026-03-29T00:01:00Z",
         duration_ms=8.0,
     )
@@ -365,12 +395,12 @@ def test_build_browse_tree_uses_execution_fallback_and_failure_stub(tmp_path: Pa
     ]
     root_browse_dir = browse_root_entries[0]
 
-    execution_report = (
-        root_browse_dir / "execution_only" / "report.md"
-    ).read_text(encoding="utf-8")
-    failed_report = (
-        root_browse_dir / "failed_child" / "report.md"
-    ).read_text(encoding="utf-8")
+    execution_report = (root_browse_dir / "execution_only" / "report.md").read_text(
+        encoding="utf-8"
+    )
+    failed_report = (root_browse_dir / "failed_child" / "report.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "execution only markdown" in execution_report
     assert "Task failed before producing a report artifact." in failed_report

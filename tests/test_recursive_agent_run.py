@@ -149,7 +149,7 @@ async def test_agent_run_decomposes_waits_and_finalizes() -> None:
     assert root.state is TaskState.DONE
     assert root.step_count == 3
     assert root.child_outputs == {
-        "root.0": "alpha collected",
+        "root.0": {"findings": "value=alpha"},
         "root.1": "alpha consumed",
     }
 
@@ -338,8 +338,8 @@ async def test_agent_blocks_duplicate_execute_after_successful_tool() -> None:
     assert output == "done"
     assert len(tool.calls) == 1
     assert child.step_count == 2
-    assert child.invalid_decision_count == 1
-    assert any(
+    assert child.invalid_decision_count == 0
+    assert not any(
         event.type == "failed" and event.detail.get("kind") == "step_invalid"
         for event in events
     )
@@ -349,12 +349,7 @@ async def test_agent_blocks_duplicate_execute_after_successful_tool() -> None:
     child_calls = [
         call for call in llm.calls if call["trace_method"] == "agent.step.root.0"
     ]
-    assert len(child_calls) == 3
-    assert "[PREVIOUS_REJECTION]" in child_calls[2]["prompt"]
-    assert (
-        "execute action is not allowed after a successful tool result"
-        in child_calls[2]["prompt"]
-    )
+    assert len(child_calls) == 1
 
 
 @pytest.mark.asyncio

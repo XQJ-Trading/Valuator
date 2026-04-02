@@ -315,6 +315,7 @@ export default function FileTree({
   activePath,
   onSelect,
   onSelectDirectory,
+  onUserSelectDirectory,
   refreshToken,
   initialExpandDirectory,
 }: {
@@ -322,6 +323,8 @@ export default function FileTree({
   activePath: string | null;
   onSelect: (path: string | null) => void;
   onSelectDirectory?: (path: string) => void;
+  /** Only when the user selects a directory in the tree (not auto-expand). */
+  onUserSelectDirectory?: (path: string) => void;
   refreshToken?: number;
   /** Expand and select this directory once (e.g. latest session / browse). */
   initialExpandDirectory?: string | null;
@@ -650,9 +653,10 @@ export default function FileTree({
       setSelectedType(type);
       if (type === "directory") {
         onSelectDirectory?.(path);
+        onUserSelectDirectory?.(path);
       }
     },
-    [onSelectDirectory],
+    [onSelectDirectory, onUserSelectDirectory],
   );
 
   const rootInputRef = useRef<HTMLInputElement>(null);

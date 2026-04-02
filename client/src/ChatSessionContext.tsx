@@ -54,12 +54,17 @@ const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
 export function ChatSessionProvider({
   children,
   onMessagesUpdated,
+  onBrowseOutlineRefresh,
 }: {
   children: ReactNode;
   onMessagesUpdated?: () => void;
+  /** When browse/ may have changed (agent finished or chat reset); not every message tick. */
+  onBrowseOutlineRefresh?: () => void;
 }) {
   const onMessagesUpdatedRef = useRef(onMessagesUpdated);
   onMessagesUpdatedRef.current = onMessagesUpdated;
+  const onBrowseOutlineRefreshRef = useRef(onBrowseOutlineRefresh);
+  onBrowseOutlineRefreshRef.current = onBrowseOutlineRefresh;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftText, setDraftText] = useState("");
@@ -115,6 +120,7 @@ export function ChatSessionProvider({
           setAgentRunning(false);
           setLastStepFlow(null);
           onMessagesUpdatedRef.current?.();
+          onBrowseOutlineRefreshRef.current?.();
           return;
         }
         const typed = payload as { type?: string };
@@ -126,6 +132,7 @@ export function ChatSessionProvider({
         if (typed.type === "agent_finished") {
           setAgentRunning(false);
           setLastStepFlow(null);
+          onBrowseOutlineRefreshRef.current?.();
           return;
         }
         if (typed.type === "task_progress") {

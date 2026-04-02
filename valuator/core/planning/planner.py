@@ -4,6 +4,8 @@ from copy import deepcopy
 from typing import Any
 
 from ..context import TaskContext
+from ..decomposition.gate import static_rejects_minimal_decomposition
+from ..decomposition.gate_config import GateConfig
 from ..task import Task
 from ..types import Action, TaskDecision
 from . import prompts
@@ -22,7 +24,14 @@ class StepPlanner:
     _prompt_child_output_budget_chars = 50_000
     _max_prompt_chars = 150_000
 
-    def __init__(self, llm_client: Any, repair_retries: int | None = None) -> None:
+    def __init__(
+        self,
+        llm_client: Any,
+        repair_retries: int | None = None,
+        *,
+        gate_config: GateConfig | None = None,
+        max_steps_per_task: int | None = None,
+    ) -> None:
         from ...utils.config import config
 
         self._llm = llm_client
@@ -32,9 +41,24 @@ class StepPlanner:
             else repair_retries
         )
         self._repair_retries = max(int(configured_retries), 0)
+        self._gate_config = gate_config
+        self._max_steps_per_task = (
+            int(max_steps_per_task)
+            if max_steps_per_task is not None
+            else int(config.agent_max_steps_per_task)
+        )
 
     async def decide(self, task: Task, ctx: TaskContext) -> TaskDecision:
-        allowed = self._allowed_actions(task)
+        gate_cfg = self._gate_config or GateConfig()
+        allow_decompose = True
+        if gate_cfg.enabled and static_rejects_minimal_decomposition(
+            task_depth=len(ctx.ancestry),
+            max_steps_per_task=self._max_steps_per_task,
+            config=gate_cfg,
+        ):
+            allow_decompose = False
+
+        allowed = self._allowed_actions(task, allow_decompose=allow_decompose)
         base_prompt = prompts.build_step_prompt(
             task=task,
             ctx=ctx,
@@ -50,12 +74,12 @@ class StepPlanner:
             system_prompt=prompts.build_system_prompt(
                 task=task,
                 ctx=ctx,
-                allow_decompose=True,
+                allow_decompose=allow_decompose,
                 task_name_max_chars=TASK_NAME_MAX_CHARS,
                 allowed_actions=allowed,
             ),
-            schema=self._decision_schema(task),
-            allow_decompose=True,
+            schema=self._decision_schema(task, allow_decompose=allow_decompose),
+            allow_decompose=allow_decompose,
         )
 
     async def requery_without_decompose(

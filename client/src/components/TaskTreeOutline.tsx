@@ -38,13 +38,17 @@ export default function TaskTreeOutline({
   enabled,
   onOpenTaskFile,
   selectedDirectoryPath,
-  refreshToken,
+  outlineChatTick,
+  outlineFolderEnsureTick,
 }: {
   dataSource: DataSource;
   enabled: boolean;
   onOpenTaskFile: (relPath: string) => void;
   selectedDirectoryPath: string | null;
-  refreshToken?: number;
+  /** Bumps on chat `agent_finished` or reset — reload outline from disk (fast, no browse rebuild). */
+  outlineChatTick: number;
+  /** Bumps when the user selects a folder in Explorer — may rebuild browse/ from tasks (can be slow). */
+  outlineFolderEnsureTick: number;
 }) {
   const [browseRows, setBrowseRows] = useState<BrowseOutlineRow[] | null>(null);
   const [browseRootUsed, setBrowseRootUsed] = useState<string | null>(null);
@@ -52,6 +56,7 @@ export default function TaskTreeOutline({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
+  const prevFolderEnsureTickRef = useRef(0);
 
   const dataSourceLabel = dataSource === "guide" ? "Guide" : "Session";
 
@@ -67,7 +72,14 @@ export default function TaskTreeOutline({
     void (async () => {
       try {
         const sessionFolder = sessionFolderFromSelection(selectedDirectoryPath);
-        const out = await fetchBrowseOutline(dataSource, sessionFolder);
+        const folderTickAdvanced = outlineFolderEnsureTick > prevFolderEnsureTickRef.current;
+        if (folderTickAdvanced) {
+          prevFolderEnsureTickRef.current = outlineFolderEnsureTick;
+        }
+        const ensureBrowse = folderTickAdvanced;
+        const out = await fetchBrowseOutline(dataSource, sessionFolder, {
+          ensureBrowse,
+        });
         if (loadGenerationRef.current !== myGeneration) return;
         if (out.rows.length > 0) {
           setBrowseRows(out.rows);
@@ -94,7 +106,13 @@ export default function TaskTreeOutline({
         }
       }
     })();
-  }, [dataSource, enabled, refreshToken, selectedDirectoryPath]);
+  }, [
+    dataSource,
+    enabled,
+    selectedDirectoryPath,
+    outlineChatTick,
+    outlineFolderEnsureTick,
+  ]);
 
   const useBrowse = (browseRows?.length ?? 0) > 0;
   const displayRows = useBrowse ? browseRows! : taskRows;

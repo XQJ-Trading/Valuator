@@ -218,7 +218,7 @@ def load_config() -> Config:
         agent_max_steps_per_task=_as_int(
             read_env("AGENT_MAX_STEPS_PER_TASK"), default=30
         ),
-        agent_concurrency=_as_int(read_env("AGENT_CONCURRENCY"), default=8),
+        agent_concurrency=_as_int(read_env("AGENT_CONCURRENCY"), default=10),
         agent_llm_retry_count=_as_int(read_env("AGENT_LLM_RETRY_COUNT"), default=2),
         agent_llm_retry_base_delay=_as_float(
             read_env("AGENT_LLM_RETRY_BASE_DELAY"), default=2.0

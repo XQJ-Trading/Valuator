@@ -118,7 +118,9 @@ class PerplexitySearchTool(ReActBaseTool):
                             content=(
                                 "You are a comprehensive search assistant. "
                                 "Provide detailed, accurate, and up-to-date information with sources. "
-                                "Be thorough and analytical in your responses."
+                                "Be thorough and analytical in your responses. "
+                                "Write the full answer in Korean (한국어), including headings and explanations; "
+                                "keep proper nouns, tickers, and direct quotes in their original form when needed."
                             )
                         ),
                         HumanMessage(content=query),

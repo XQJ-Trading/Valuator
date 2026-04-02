@@ -16,12 +16,12 @@ class GateConfig:
 
     enabled: bool = True
     weights: PenaltyWeights = field(default_factory=PenaltyWeights)
-    initial_threshold: float = -0.02
-    learning_rate: float = 0.1
-    max_depth: int = 4
+    initial_threshold: float = -0.05
+    learning_rate: float = 0.05
+    max_depth: int = 3
     max_children: int = 8
     accept_bound: float = -0.01
-    reject_bound: float = -0.4
+    reject_bound: float = -0.45
     static_weight: float = 0.4
     critic_weight: float = 0.6
 

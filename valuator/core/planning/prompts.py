@@ -147,6 +147,13 @@ def build_system_prompt(
         lines.append("FINALIZE is only allowed for the root task.")
     if not allow_decompose:
         lines.append("Do not return DECOMPOSE on this retry.")
+    if task.blocked_tools and Action.EXECUTE in allowed:
+        lines.append(
+            "The following tools are blocked for this task after repeated consecutive "
+            "failures: "
+            + ", ".join(sorted(task.blocked_tools))
+            + ". Use a different tool or DECOMPOSE."
+        )
     if task.tool_hint:
         lines.append(f"Prefer tool_hint={task.tool_hint} when EXECUTE is appropriate.")
     return "\n".join(lines)
@@ -179,6 +186,10 @@ def build_step_prompt(
         sections.append("[QUERY_UNITS]\n" + query_units_text(task, ctx))
     if task.tool_hint:
         sections.append(f"[TOOL_HINT]\n{task.tool_hint}")
+    if task.blocked_tools:
+        sections.append(
+            "[BLOCKED_TOOLS]\n" + ", ".join(sorted(task.blocked_tools))
+        )
     if task.last_invalid_error:
         sections.append(
             "[PREVIOUS_REJECTION]\n"

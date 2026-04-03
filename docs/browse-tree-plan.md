@@ -110,7 +110,7 @@ def build_browse_tree(self) -> None:
 
 ## root task의 task_name
 
-root task는 LLM decomposition이 아닌 직접 생성(`server/main.py:452`)이므로, `build_browse_tree()`에서 root의 description을 기반으로 slug를 생성한다. 별도의 `_to_slug()` fallback 함수가 필요하다 (task_name이 비어있는 경우 사용).
+root task는 LLM decomposition이 아닌 직접 생성(`server/main.py:452`)이므로, `build_browse_tree()`에서 root의 description을 기반으로 slug를 생성한다. 별도의 `to_slug()` fallback 함수가 필요하다 (task_name이 비어있는 경우 사용).
 
 ## 수정 대상 파일
 

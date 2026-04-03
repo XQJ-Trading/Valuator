@@ -67,6 +67,10 @@ class Agent:
             int(config.agent_max_invalid_decisions_per_task),
             1,
         )
+        self._max_consecutive_tool_failures = max(
+            int(config.agent_max_consecutive_tool_failures),
+            1,
+        )
         self._global_step_sequence = 0
         self._root_task: Task | None = None
 
@@ -280,6 +284,22 @@ class Agent:
                 output=decision.output,
                 facts=dict(decision.facts),
             )
+            if effective_request.tool_name in task.blocked_tools:
+                await self._reject_step(
+                    task=task,
+                    task_seq=task_seq,
+                    ctx=ctx,
+                    decision=effective_decision,
+                    started_at=decision_measurement.started_at,
+                    duration_ms=decision_duration_ms,
+                    error=(
+                        "execute action uses a tool blocked after repeated consecutive "
+                        f"failures: {effective_request.tool_name}; "
+                        "choose another tool or decompose"
+                    ),
+                )
+                return
+
             request_signature = _tool_request_signature(
                 tool_name=effective_request.tool_name,
                 args=effective_request.args,
@@ -327,13 +347,24 @@ class Agent:
                 **effective_decision.tool_request.args,
             )
             duration_ms = (perf_counter() - started) * 1000.0
-            if not result.success:
+            tool_name = effective_decision.tool_request.tool_name
+            if result.success:
+                task.tool_failure_counts.pop(tool_name, None)
+            else:
                 task.failed_tool_request_signatures.add(
                     _tool_request_signature(
-                        tool_name=effective_decision.tool_request.tool_name,
+                        tool_name=tool_name,
                         args=effective_decision.tool_request.args,
                     )
                 )
+                task.tool_failure_counts[tool_name] = (
+                    task.tool_failure_counts.get(tool_name, 0) + 1
+                )
+                if (
+                    task.tool_failure_counts[tool_name]
+                    >= self._max_consecutive_tool_failures
+                ):
+                    task.blocked_tools.add(tool_name)
             self._scheduler.mark_tool_complete(task, result)
             self._write_execution_result(
                 task_id=task.id,

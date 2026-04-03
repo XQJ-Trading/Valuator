@@ -19,7 +19,10 @@ if str(ROOT) not in sys.path:
 from valuator.runtime import create_tool_registry, final_output_text, finalize_trace  # noqa: E402
 from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
-from valuator.session.browse_tree import task_description_from_effective_query  # noqa: E402
+from valuator.session.browse_tree import (  # noqa: E402
+    task_description_from_effective_query,
+    to_slug,
+)
 from valuator.utils.config import session_files_root  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
 from valuator.utils.time_utils import Measurement  # noqa: E402
@@ -212,6 +215,7 @@ def _write_cli_trace_compat(trace_writer: SessionTraceWriter) -> None:
         for row in method_rows:
             file_obj.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+
 def render_event(event, *, jsonl: bool) -> str:
     if jsonl:
         return json.dumps(asdict(event), ensure_ascii=False)
@@ -306,7 +310,9 @@ async def run(args: argparse.Namespace) -> int:
         args.concurrency if args.concurrency is not None else config.agent_concurrency
     )
     created_at = datetime.now(timezone.utc)
-    session_id = f"CLI-{created_at.strftime('%Y%m%d-%H%M%S%fZ')}"
+    timestamp = created_at.strftime("%Y%m%d-%H%M%S")
+    slug = to_slug(raw_query, max_length=40)
+    session_id = f"{timestamp}-{slug}" if slug else timestamp
     session_store = ValuatorSessionStore(
         session_id=session_id,
         query=raw_query,

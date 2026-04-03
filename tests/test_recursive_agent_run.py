@@ -700,7 +700,8 @@ async def test_agent_allows_uncertain_decomposition_with_critic_and_updates_thre
 
     assert output == "root complete"
     assert len(tool.calls) == 1
-    assert agent._gate._tracker.current_threshold() == pytest.approx(-0.053)
+    # Backprop: initial -0.05, lr 0.05, predicted≈0.17, actual_efficiency=1 → signal delta ≈ -0.0165
+    assert agent._gate._tracker.current_threshold() == pytest.approx(-0.0665)
 
 
 @pytest.mark.asyncio
@@ -759,7 +760,7 @@ async def test_agent_requeries_when_critic_rejects_uncertain_decomposition() -> 
     assert gated[0].detail["used_critic"] is True
     assert gated[0].detail["static_score"] == pytest.approx(-0.025)
     assert gated[0].detail["net_score"] == pytest.approx(-0.55)
-    assert gated[0].detail["threshold"] == pytest.approx(-0.02)
+    assert gated[0].detail["threshold"] == pytest.approx(-0.05)
     assert gated[0].detail["reason"] == "single tool is enough"
     assert agent._gate._tracker.has_prediction("root") is False
 
@@ -827,7 +828,8 @@ async def test_agent_falls_back_to_static_score_when_critic_fails() -> None:
 
     assert output == "root complete"
     assert len(tool.calls) == 1
-    assert agent._gate._tracker.current_threshold() == pytest.approx(-0.0825)
+    # initial_threshold=-0.03; critic fails → net_score static -0.025; efficiency=1 → ≈ -0.05625
+    assert agent._gate._tracker.current_threshold() == pytest.approx(-0.05625)
     assert not any(event.type == "decomposition_gated" for event in events)
 
 

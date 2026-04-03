@@ -85,6 +85,7 @@ class Config:
     code_execution_allowed_imports: tuple[str, ...]
     agent_step_repair_retries: int
     agent_max_invalid_decisions_per_task: int
+    agent_max_consecutive_tool_failures: int
     agent_max_steps_per_task: int
     agent_concurrency: int
     agent_llm_retry_count: int
@@ -214,6 +215,9 @@ def load_config() -> Config:
         ),
         agent_max_invalid_decisions_per_task=_as_int(
             read_env("AGENT_MAX_INVALID_DECISIONS_PER_TASK"), default=5
+        ),
+        agent_max_consecutive_tool_failures=_as_int(
+            read_env("AGENT_MAX_CONSECUTIVE_TOOL_FAILURES"), default=3
         ),
         agent_max_steps_per_task=_as_int(
             read_env("AGENT_MAX_STEPS_PER_TASK"), default=30

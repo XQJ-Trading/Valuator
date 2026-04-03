@@ -37,6 +37,8 @@ class Task(ABC):
         self.last_tool_request: ToolRequest | None = None
         self.last_tool_success: bool | None = None
         self.failed_tool_request_signatures: set[str] = set()
+        self.tool_failure_counts: dict[str, int] = {}
+        self.blocked_tools: set[str] = set()
         self.last_invalid_error: str | None = None
         self._decide = decide
 
@@ -69,6 +71,8 @@ class Task(ABC):
         target.failed_tool_request_signatures = set(
             self.failed_tool_request_signatures
         )
+        target.tool_failure_counts = dict(self.tool_failure_counts)
+        target.blocked_tools = set(self.blocked_tools)
         target.last_invalid_error = self.last_invalid_error
         return target
 

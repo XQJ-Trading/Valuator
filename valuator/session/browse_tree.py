@@ -241,7 +241,7 @@ def _browse_dir_name(payload: dict[str, Any], sibling_names: set[str]) -> str:
     if not raw_name:
         raw_name = _browse_fallback_name(payload)
 
-    base_name = _to_slug(raw_name) or "task"
+    base_name = to_slug(raw_name) or "task"
     candidate = base_name
     index = 2
     while candidate in sibling_names:
@@ -278,7 +278,7 @@ def task_description_from_effective_query(effective_query: str) -> str:
     return f"Analysis: {body}" if body else "Analysis"
 
 
-def _to_slug(value: str, max_length: int = 30) -> str:
+def to_slug(value: str, max_length: int = 30) -> str:
     chars: list[str] = []
     last_was_separator = False
     for char in value.strip():

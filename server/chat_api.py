@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
@@ -18,15 +18,16 @@ from .session_viewer_api import session_data_root
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-CHAT_REL = Path("_chat") / "messages.json"
+CHAT_REL = Path("_chat")
 AGENT_ENTRYPOINT = (
     Path(__file__).resolve().parents[1] / "scripts" / "run_recursive_agent_query.py"
 )
 MAX_TEXT_LEN = 100_000
 
 _lock = asyncio.Lock()
-_subscribers: list[asyncio.Queue[dict]] = []
-_agent_process: asyncio.subprocess.Process | None = None
+_subscribers_by_session: dict[str, list[asyncio.Queue[dict]]] = {}
+_agent_processes: dict[str, asyncio.subprocess.Process] = {}
+_agent_tasks: dict[str, asyncio.Task[None]] = {}
 _agent_lock = asyncio.Lock()
 
 
@@ -34,12 +35,12 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _chat_file() -> Path:
-    return session_data_root() / CHAT_REL
+def _chat_file(session_id: str) -> Path:
+    return session_data_root() / CHAT_REL / session_id / "messages.json"
 
 
-def _load_messages() -> list[dict]:
-    path = _chat_file()
+def _load_messages(session_id: str) -> list[dict]:
+    path = _chat_file(session_id)
     if not path.exists():
         return []
     raw = path.read_text(encoding="utf-8")
@@ -49,8 +50,8 @@ def _load_messages() -> list[dict]:
     return data
 
 
-def _save_messages(messages: list[dict]) -> None:
-    path = _chat_file()
+def _save_messages(session_id: str, messages: list[dict]) -> None:
+    path = _chat_file(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(messages, ensure_ascii=False, indent=2),
@@ -58,8 +59,8 @@ def _save_messages(messages: list[dict]) -> None:
     )
 
 
-async def _broadcast(msg: dict) -> None:
-    for q in list(_subscribers):
+async def _broadcast(session_id: str, msg: dict) -> None:
+    for q in list(_subscribers_by_session.get(session_id, [])):
         q.put_nowait(msg)
 
 
@@ -103,7 +104,7 @@ def _extract_error_text(stderr_text: str) -> str:
     return lines[-1]
 
 
-async def _append_and_broadcast_message(*, role: str, text: str) -> dict:
+async def _append_and_broadcast_message(*, session_id: str, role: str, text: str) -> dict:
     msg = {
         "id": str(uuid.uuid4()),
         "role": role,
@@ -111,23 +112,23 @@ async def _append_and_broadcast_message(*, role: str, text: str) -> dict:
         "ts": _utc_now_iso(),
     }
     async with _lock:
-        messages = _load_messages()
+        messages = _load_messages(session_id)
         messages.append(msg)
-        _save_messages(messages)
-    await _broadcast(msg)
+        _save_messages(session_id, messages)
+    await _broadcast(session_id, msg)
     return msg
 
 
-async def _clear_and_broadcast_reset() -> dict:
+async def _clear_and_broadcast_reset(session_id: str) -> dict:
     event = {"type": "reset", "ts": _utc_now_iso()}
     async with _lock:
-        _save_messages([])
-    await _broadcast(event)
+        _save_messages(session_id, [])
+    await _broadcast(session_id, event)
     return event
 
 
-async def _run_agent_for_message(text: str) -> None:
-    global _agent_process
+async def _run_agent_for_message(session_id: str, text: str) -> None:
+    process: asyncio.subprocess.Process | None = None
 
     _PROGRESS_PREFIXES = (
         "[step]",
@@ -143,9 +144,9 @@ async def _run_agent_for_message(text: str) -> None:
     async def _on_stdout_line(line: str) -> None:
         stripped = line.rstrip("\n")
         if stripped.startswith(_PROGRESS_PREFIXES):
-            await _broadcast({"type": "task_progress", "line": stripped})
+            await _broadcast(session_id, {"type": "task_progress", "line": stripped})
 
-    await _broadcast({"type": "agent_started", "ts": _utc_now_iso()})
+    await _broadcast(session_id, {"type": "agent_started", "ts": _utc_now_iso()})
     try:
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -156,7 +157,7 @@ async def _run_agent_for_message(text: str) -> None:
             stderr=asyncio.subprocess.PIPE,
         )
         async with _agent_lock:
-            _agent_process = process
+            _agent_processes[session_id] = process
         stdout_task = asyncio.create_task(
             _pipe_process_stream(
                 process.stdout,
@@ -178,6 +179,7 @@ async def _run_agent_for_message(text: str) -> None:
                 sig = -rc
                 if sig in (signal.SIGTERM, signal.SIGINT, signal.SIGKILL):
                     await _append_and_broadcast_message(
+                        session_id=session_id,
                         role="assistant",
                         text="세션이 중지되었습니다.",
                     )
@@ -185,26 +187,48 @@ async def _run_agent_for_message(text: str) -> None:
             error_text = _extract_error_text(stderr_text)
             if "QueryAnalysisPayload" in error_text:
                 error_text = "질문 분석에 실패했습니다. 티커/기업명과 분석 목적을 조금 더 구체적으로 적어주세요."
-            await _append_and_broadcast_message(role="assistant", text=error_text)
+            await _append_and_broadcast_message(
+                session_id=session_id,
+                role="assistant",
+                text=error_text,
+            )
             return
 
         final_text = _extract_final_text(stdout_text)
         if not final_text:
             await _append_and_broadcast_message(
+                session_id=session_id,
                 role="assistant",
                 text="Agent run completed, but no final output was produced.",
             )
             return
-        await _append_and_broadcast_message(role="assistant", text=final_text)
+        await _append_and_broadcast_message(
+            session_id=session_id,
+            role="assistant",
+            text=final_text,
+        )
+    except asyncio.CancelledError:
+        if process is None:
+            await _append_and_broadcast_message(
+                session_id=session_id,
+                role="assistant",
+                text="세션이 중지되었습니다.",
+            )
+        raise
     except Exception as exc:
         await _append_and_broadcast_message(
+            session_id=session_id,
             role="assistant",
             text=f"에이전트 실행 중 오류가 발생했습니다: {exc}",
         )
     finally:
+        current_task = asyncio.current_task()
         async with _agent_lock:
-            _agent_process = None
-        await _broadcast({"type": "agent_finished", "ts": _utc_now_iso()})
+            if _agent_processes.get(session_id) is process:
+                _agent_processes.pop(session_id, None)
+            if current_task is not None and _agent_tasks.get(session_id) is current_task:
+                _agent_tasks.pop(session_id, None)
+        await _broadcast(session_id, {"type": "agent_finished", "ts": _utc_now_iso()})
 
 
 class PostChatMessageRequest(BaseModel):
@@ -222,64 +246,89 @@ class PostChatMessageRequest(BaseModel):
 
 
 @router.get("/messages")
-async def get_messages():
+async def get_messages(session_id: uuid.UUID):
+    session_key = str(session_id)
     async with _lock:
-        messages = _load_messages()
+        messages = _load_messages(session_key)
     return {"messages": messages}
 
 
 @router.post("/messages")
-async def post_message(body: PostChatMessageRequest):
-    msg = await _append_and_broadcast_message(role="user", text=body.text)
-    asyncio.create_task(_run_agent_for_message(body.text))
+async def post_message(body: PostChatMessageRequest, session_id: uuid.UUID):
+    session_key = str(session_id)
+    async with _agent_lock:
+        if session_key in _agent_tasks and not _agent_tasks[session_key].done():
+            raise HTTPException(status_code=409, detail="agent already running")
+        msg = await _append_and_broadcast_message(
+            session_id=session_key,
+            role="user",
+            text=body.text,
+        )
+        _agent_tasks[session_key] = asyncio.create_task(
+            _run_agent_for_message(session_key, body.text)
+        )
     return msg
 
 
-async def _stop_running_agent() -> bool:
+async def _stop_running_agent(session_id: str) -> bool:
     async with _agent_lock:
-        proc = _agent_process
-    if proc is None or proc.returncode is not None:
+        task = _agent_tasks.get(session_id)
+        proc = _agent_processes.get(session_id)
+    if task is None or task.done():
+        return False
+    if proc is None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return True
+    if proc.returncode is not None:
         return False
     proc.terminate()
     try:
-        await asyncio.wait_for(proc.wait(), timeout=8.0)
+        await asyncio.wait_for(task, timeout=8.0)
     except TimeoutError:
         proc.kill()
         try:
-            await asyncio.wait_for(proc.wait(), timeout=4.0)
-        except (TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(task, timeout=4.0)
+        except (TimeoutError, ProcessLookupError, asyncio.CancelledError):
             pass
-    except ProcessLookupError:
+    except (ProcessLookupError, asyncio.CancelledError):
         pass
     return True
 
 
 @router.delete("/messages")
-async def clear_messages():
-    await _stop_running_agent()
-    event = await _clear_and_broadcast_reset()
+async def clear_messages(session_id: uuid.UUID):
+    session_key = str(session_id)
+    await _stop_running_agent(session_key)
+    event = await _clear_and_broadcast_reset(session_key)
     return {"ok": True, **event}
 
 
 @router.get("/agent-status")
-async def agent_status():
+async def agent_status(session_id: uuid.UUID):
+    session_key = str(session_id)
     async with _agent_lock:
-        proc = _agent_process
-    running = proc is not None and proc.returncode is None
+        task = _agent_tasks.get(session_key)
+    running = task is not None and not task.done()
     return {"running": running}
 
 
 @router.post("/stop")
-async def stop_agent():
-    stopped = await _stop_running_agent()
+async def stop_agent(session_id: uuid.UUID):
+    stopped = await _stop_running_agent(str(session_id))
     return {"ok": True, "stopped": stopped}
 
 
 @router.get("/stream")
-async def stream():
+async def stream(session_id: uuid.UUID):
+    session_key = str(session_id)
+
     async def event_gen():
         queue: asyncio.Queue[dict] = asyncio.Queue()
-        _subscribers.append(queue)
+        _subscribers_by_session.setdefault(session_key, []).append(queue)
         try:
             yield ": connected\n\n"
             while True:
@@ -288,7 +337,11 @@ async def stream():
                 yield f"data: {data}\n\n"
         finally:
             try:
-                _subscribers.remove(queue)
+                subscribers = _subscribers_by_session.get(session_key)
+                if subscribers is not None:
+                    subscribers.remove(queue)
+                    if not subscribers:
+                        _subscribers_by_session.pop(session_key, None)
             except ValueError:
                 pass
 

@@ -9,9 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import {
+  chatStreamPath,
   clearChatMessages,
   fetchAgentRunning,
   fetchChatMessages,
+  getOrCreateChatSessionId,
   postChatMessage,
   postChatStop,
   type ChatMessage,
@@ -77,6 +79,7 @@ export function ChatSessionProvider({
   const [loadingList, setLoadingList] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const messageIdsRef = useRef<Set<string>>(new Set());
+  const chatSessionIdRef = useRef<string>(getOrCreateChatSessionId());
 
   useEffect(() => {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
@@ -84,8 +87,9 @@ export function ChatSessionProvider({
 
   useEffect(() => {
     let cancelled = false;
+    const chatSessionId = chatSessionIdRef.current;
     setLoadingList(true);
-    fetchChatMessages()
+    fetchChatMessages(chatSessionId)
       .then((msgs) => {
         if (cancelled) return;
         setMessages(msgs);
@@ -99,7 +103,7 @@ export function ChatSessionProvider({
         if (!cancelled) setLoadingList(false);
       });
 
-    void fetchAgentRunning()
+    void fetchAgentRunning(chatSessionId)
       .then((running) => {
         if (!cancelled) setAgentRunning(running);
       })
@@ -107,7 +111,7 @@ export function ChatSessionProvider({
         /* ignore */
       });
 
-    const es = new EventSource("/api/chat/stream");
+    const es = new EventSource(chatStreamPath(chatSessionId));
     es.onmessage = (ev) => {
       try {
         const payload = JSON.parse(ev.data) as ChatMessage | ChatResetEvent | Record<string, unknown>;
@@ -186,12 +190,13 @@ export function ChatSessionProvider({
 
   const sendMessage = useCallback(
     async (textOverride?: string) => {
+      const chatSessionId = chatSessionIdRef.current;
       const text = (textOverride ?? draftText).trim();
       if (!text || pending) return;
 
       setPending(true);
       try {
-        const msg = await postChatMessage(text);
+        const msg = await postChatMessage(chatSessionId, text);
         if (!messageIdsRef.current.has(msg.id)) {
           messageIdsRef.current.add(msg.id);
           setMessages((prev) => [...prev, msg]);
@@ -213,7 +218,7 @@ export function ChatSessionProvider({
     const confirmed = window.confirm("채팅 세션을 초기화할까요? 기존 메시지는 삭제됩니다.");
     if (!confirmed) return;
     try {
-      await clearChatMessages();
+      await clearChatMessages(chatSessionIdRef.current);
       messageIdsRef.current = new Set();
       setMessages([]);
       onMessagesUpdatedRef.current?.();
@@ -226,7 +231,7 @@ export function ChatSessionProvider({
   const stopAgent = useCallback(async () => {
     if (!agentRunning) return;
     try {
-      await postChatStop();
+      await postChatStop(chatSessionIdRef.current);
     } catch (e) {
       console.error(e);
       alert(e instanceof Error ? e.message : "Stop failed");

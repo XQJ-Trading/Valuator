@@ -50,15 +50,37 @@ export interface ChatResetEvent {
   ts: string;
 }
 
-export async function fetchChatMessages(): Promise<ChatMessage[]> {
-  const res = await fetch("/api/chat/messages");
+const CHAT_SESSION_STORAGE_KEY = "chat_session_id";
+
+export function getOrCreateChatSessionId(): string {
+  const existing = window.sessionStorage.getItem(CHAT_SESSION_STORAGE_KEY)?.trim();
+  if (existing) return existing;
+  const sessionId = window.crypto.randomUUID();
+  window.sessionStorage.setItem(CHAT_SESSION_STORAGE_KEY, sessionId);
+  return sessionId;
+}
+
+function chatApiPath(path: string, sessionId: string): string {
+  const q = new URLSearchParams({ session_id: sessionId });
+  return `${path}?${q.toString()}`;
+}
+
+export function chatStreamPath(sessionId: string): string {
+  return chatApiPath("/api/chat/stream", sessionId);
+}
+
+export async function fetchChatMessages(sessionId: string): Promise<ChatMessage[]> {
+  const res = await fetch(chatApiPath("/api/chat/messages", sessionId));
   if (!res.ok) throw new Error(await parseErrorBody(res));
   const data = (await res.json()) as { messages: ChatMessage[] };
   return data.messages;
 }
 
-export async function postChatMessage(text: string): Promise<ChatMessage> {
-  const res = await fetch("/api/chat/messages", {
+export async function postChatMessage(
+  sessionId: string,
+  text: string,
+): Promise<ChatMessage> {
+  const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
@@ -67,19 +89,25 @@ export async function postChatMessage(text: string): Promise<ChatMessage> {
   return res.json() as Promise<ChatMessage>;
 }
 
-export async function clearChatMessages(): Promise<void> {
-  const res = await fetch("/api/chat/messages", { method: "DELETE" });
+export async function clearChatMessages(sessionId: string): Promise<void> {
+  const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
 }
 
-export async function postChatStop(): Promise<{ ok: boolean; stopped: boolean }> {
-  const res = await fetch("/api/chat/stop", { method: "POST" });
+export async function postChatStop(
+  sessionId: string,
+): Promise<{ ok: boolean; stopped: boolean }> {
+  const res = await fetch(chatApiPath("/api/chat/stop", sessionId), {
+    method: "POST",
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<{ ok: boolean; stopped: boolean }>;
 }
 
-export async function fetchAgentRunning(): Promise<boolean> {
-  const res = await fetch("/api/chat/agent-status");
+export async function fetchAgentRunning(sessionId: string): Promise<boolean> {
+  const res = await fetch(chatApiPath("/api/chat/agent-status", sessionId));
   if (!res.ok) throw new Error(await parseErrorBody(res));
   const data = (await res.json()) as { running?: boolean };
   return Boolean(data.running);

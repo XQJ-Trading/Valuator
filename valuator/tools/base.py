@@ -47,6 +47,9 @@ class BaseTool(ABC):
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         _ = usage_writer
 
+    def close(self) -> None:
+        pass
+
 
 class ReActBaseTool(BaseTool, ABC):
     def __init__(self, name: str, description: str):
@@ -95,6 +98,10 @@ class ToolRegistry:
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         for tool in self.tools.values():
             tool.bind_usage_writer(usage_writer)
+
+    def close(self) -> None:
+        for tool in self.tools.values():
+            tool.close()
 
     async def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
         """Execute a tool"""

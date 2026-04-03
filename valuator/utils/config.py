@@ -16,7 +16,6 @@ DEFAULT_AGENT_MODEL = "gemini-3-flash-preview"
 DEFAULT_GEMINI_THINKING_LEVEL = "low"
 DEFAULT_LLM_BACKEND = "google_genai"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_CODE_EXECUTION_ALLOWED_IMPORTS = ("json",)
 DEFAULT_OPENROUTER_AUTO_ALLOWED_MODELS = (
     "xiaomi/mimo-v2-pro",
     "minimax/minimax-m2.7",
@@ -82,7 +81,6 @@ class Config:
     domain_arch_enabled: bool
     event_layer_enabled: bool
     code_execution_timeout: int
-    code_execution_allowed_imports: tuple[str, ...]
     agent_step_repair_retries: int
     agent_max_invalid_decisions_per_task: int
     agent_max_consecutive_tool_failures: int
@@ -206,10 +204,6 @@ def load_config() -> Config:
             read_env("VALUATOR_EVENT_LAYER_ENABLED"), default=False
         ),
         code_execution_timeout=_as_int(read_env("CODE_EXECUTION_TIMEOUT"), default=3),
-        code_execution_allowed_imports=_split_csv(
-            read_env("CODE_EXECUTION_ALLOWED_IMPORTS")
-        )
-        or DEFAULT_CODE_EXECUTION_ALLOWED_IMPORTS,
         agent_step_repair_retries=_as_int(
             read_env("AGENT_STEP_REPAIR_RETRIES"), default=2
         ),

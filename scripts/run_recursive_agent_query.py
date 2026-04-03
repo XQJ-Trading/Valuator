@@ -325,6 +325,7 @@ async def run(args: argparse.Namespace) -> int:
     runtime_log_path = trace_writer.runtime_log_path
 
     with session_log_file(runtime_log_path):
+        tool_registry = None
         try:
             trace_writer.append_event(
                 {
@@ -361,16 +362,18 @@ async def run(args: argparse.Namespace) -> int:
                 await asyncio.to_thread(trace_writer.append_event, asdict(event))
                 print(render_event(event, jsonl=args.jsonl_events), flush=True)
 
+            tool_registry = create_tool_registry(
+                model,
+                usage_writer=trace_writer,
+            )
+
             agent = Agent(
                 scheduler=Scheduler(
                     max_steps_per_task=max_steps,
                     concurrency=concurrency,
                 ),
                 shared_state=SharedState(),
-                tool_registry=create_tool_registry(
-                    model,
-                    usage_writer=trace_writer,
-                ),
+                tool_registry=tool_registry,
                 llm_client=create_llm_client(
                     model=model,
                     usage_writer=trace_writer,
@@ -445,6 +448,8 @@ async def run(args: argparse.Namespace) -> int:
             await asyncio.to_thread(_write_cli_trace_compat, trace_writer)
             raise
         finally:
+            if tool_registry is not None:
+                tool_registry.close()
             close_session_log_file(runtime_log_path)
 
 

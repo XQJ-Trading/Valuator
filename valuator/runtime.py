@@ -17,9 +17,11 @@ def create_tool_registry(model: str, usage_writer: Any | None = None):
     from .tools.yfinance_tool import YFinanceBalanceSheetTool
 
     registry = ToolRegistry()
+    code_tool = ExecuteCodeTool()
+    code_tool.warm_up()
     for tool in (
         PerplexitySearchTool(),
-        ExecuteCodeTool(),
+        code_tool,
         YFinanceBalanceSheetTool(),
         SECTool(model=model),
         # DomainTool(model=model),

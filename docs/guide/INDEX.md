@@ -22,6 +22,13 @@ LLM 기반 기업 가치 분석 플랫폼. 도메인 질의를 분해하여 다�
 - [LLM 모델 (Models)](05-Models.md)
 - [서버 API](06-Server-API.md)
 
+### 클라이언트
+- [클라이언트 상세](07-Client/index.md)
+  - [통합 개요](07-Client/01-Integration-Overview.md)
+  - [클라이언트 아키텍처](07-Client/02-Client-Architecture.md)
+  - [통신 프로토콜](07-Client/03-Communication-Protocol.md)
+  - [세션 관리](07-Client/04-Session-Management.md)
+
 ## 🎯 빠른 시작
 
 ### 핵심 개념 3가지
@@ -73,4 +80,5 @@ server/
 | Core Pipeline | 엔지니어 | 각 단계의 구현 상세 (가장 중요) |
 | Tools | 확장 개발자 | 새 도구 추가 방법 |
 | Models | 모델 담당자 | LLM 통합 방법 |
-| Server API | 프론트엔드 | API 엔드포인트, 데이터 형식 |
+| Server API | 백엔드 | 서버 엔드포인트, 세션 관리 |
+| Client | 프론트엔드 | React 클라이언트, REST+SSE 통신, 세션 관리 |

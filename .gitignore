@@ -59,8 +59,8 @@ Thumbs.db
 
 # Logs
 logs/react_sessions/*.json
+logs/local/
 logs/server_history/*.json
-logs/gemini_low_level_request/*.json
 logs/task_rewrite/*.json
 *.log
 

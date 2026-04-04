@@ -1,0 +1,57 @@
+.wrap {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.editor {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.editor:focus-within {
+  outline: none;
+  border-color: var(--text-accent);
+}
+
+.editor :global(.ProseMirror) {
+  outline: none;
+  min-height: 20px;
+}
+
+.editor :global(.ProseMirror p) {
+  margin: 0;
+}
+
+.editor :global(.ProseMirror p + p) {
+  margin-top: 0.25em;
+}
+
+.editor :global(.chat-mention) {
+  color: var(--text-accent);
+  font-weight: 500;
+  border-radius: 3px;
+  padding: 0 1px;
+  background: color-mix(in srgb, var(--text-accent) 10%, transparent);
+}
+
+.editor :global(.ProseMirror p.is-editor-empty.is-empty::before) {
+  color: var(--text-secondary);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

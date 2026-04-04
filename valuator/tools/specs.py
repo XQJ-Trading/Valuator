@@ -1,111 +1,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Iterable, Mapping
-
-from ..domain.company import Company, Listing, Subject, representative_listing
-from ..domain.query import QueryIntent
+from typing import Any, Mapping
 
 
-class SubjectIdentityLevel(str, Enum):
-    COMPANY = "company"
-    LISTING = "listing"
-
-
-@dataclass(frozen=True)
-class SubjectRequirement:
-    identity_level: SubjectIdentityLevel | None = None
-    market: str = ""
-
-    def accepts(self, intent: QueryIntent) -> bool:
-        return (
-            project_subject_for_tool(
-                subjects=intent.subjects,
-                requirement=self,
+def _select_choice(value: Any, choices: tuple[str, ...]) -> str | None:
+    if isinstance(value, str):
+        selected = value.strip().lower()
+        if selected in choices:
+            return selected
+        tokens = [
+            token.strip().lower()
+            for token in (
+                value.replace(",", " ").replace("|", " ").replace("/", " ").split()
             )
-            is not None
-        )
-
-
-@dataclass(frozen=True)
-class SubjectProjection:
-    company: Company | None = None
-    listing: Listing | None = None
-
-    @property
-    def company_name(self) -> str:
-        if self.company is None:
-            return ""
-        return self.company.company_name
-
-    @property
-    def security_code(self) -> str:
-        if self.listing is None:
-            return ""
-        return self.listing.security_code
-
-    @property
-    def ticker(self) -> str:
-        if self.listing is None:
-            return ""
-        return self.listing.yahoo_symbol
-
-    @property
-    def market(self) -> str:
-        if self.listing is None:
-            return ""
-        return self.listing.legacy_market
-
-
-def project_subject_for_tool(
-    *,
-    subjects: tuple[Subject, ...],
-    requirement: SubjectRequirement,
-) -> SubjectProjection | None:
-    if not subjects:
-        if requirement.identity_level is None:
-            return SubjectProjection()
+            if token.strip()
+        ]
+    elif isinstance(value, (list, tuple, set)):
+        tokens = [str(item).strip().lower() for item in value if str(item).strip()]
+    else:
         return None
-
-    if len(subjects) != 1:
-        if requirement.identity_level is None:
-            return SubjectProjection()
+    if len(tokens) < 2:
         return None
-
-    subject = subjects[0]
-    projection = SubjectProjection(
-        company=subject.company,
-        listing=representative_listing(subject),
-    )
-    if requirement.market and projection.market != requirement.market:
+    valid_tokens = [token for token in tokens if token in choices]
+    if not valid_tokens:
         return None
-    if requirement.identity_level is SubjectIdentityLevel.LISTING and projection.listing is None:
-        return None
-    return projection
-
-
-@dataclass(frozen=True)
-class ToolExecutionContext:
-    intent: QueryIntent
-    reference_year: int
-    query: str
-    unit_query: str
-
-    def values(self, projection: SubjectProjection) -> dict[str, Any]:
-        query_text = self.unit_query.strip() or self.query.strip()
-        company_name = projection.company_name
-        return {
-            "ticker": projection.ticker,
-            "security_code": projection.security_code,
-            "company_name": company_name,
-            "corp": company_name,
-            "year": self.reference_year,
-            "query": query_text,
-            "context": query_text,
-            "summary": query_text,
-            "code": "# placeholder",
-        }
+    if "web" in valid_tokens and "web" in choices:
+        return "web"
+    return valid_tokens[0]
 
 
 @dataclass(frozen=True)
@@ -114,96 +36,198 @@ class ToolSpec:
     required: tuple[str, ...] = ()
     optional: tuple[str, ...] = ()
     capability: str = ""
-    arg_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    subject_requirement: SubjectRequirement = field(default_factory=SubjectRequirement)
+    arg_choices: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    param_descriptions: Mapping[str, str] = field(default_factory=dict)
+    param_properties: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    schema_extra_keys: tuple[str, ...] = ()
+    llm_required: tuple[str, ...] | None = None
 
     def args_text(self) -> str:
-        required = ", ".join(self.required)
-        optional = ", ".join(f"{key}?" for key in self.optional)
+        required = ", ".join(self._arg_label(key) for key in self.required)
+        optional = ", ".join(
+            self._arg_label(key, optional=True) for key in self.optional
+        )
         if required and optional:
             return f"{required}, {optional}"
         return required or optional or "-"
 
-    def accepts(self, intent: QueryIntent) -> bool:
-        return self.subject_requirement.accepts(intent)
+    def _arg_label(self, key: str, *, optional: bool = False) -> str:
+        label = f"{key}?" if optional else key
+        choices = self.arg_choices.get(key)
+        if choices:
+            label += "{" + "|".join(choices) + "}"
+        return label
 
-    def build_args(self, context: ToolExecutionContext) -> dict[str, Any]:
-        projection = project_subject_for_tool(
-            subjects=context.intent.subjects,
-            requirement=self.subject_requirement,
-        )
-        if projection is None:
-            raise ValueError(f"subject requirement not satisfied for {self.name}")
-        values = context.values(projection)
-        args: dict[str, Any] = {}
-        for key in (*self.required, *self.optional):
-            sources = self.arg_sources.get(key, (key,))
-            for source in sources:
-                value = values.get(source)
-                if not _present(value):
-                    continue
-                args[key] = value
-                break
-        missing = [key for key in self.required if key not in args]
+    def to_llm_schema(self, description: str) -> dict[str, Any]:
+        required = self.llm_required if self.llm_required is not None else self.required
+        seen: set[str] = set()
+        keys: list[str] = []
+        for key in (*self.required, *self.optional, *self.schema_extra_keys):
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+        properties: dict[str, Any] = {}
+        for key in keys:
+            prop: dict[str, Any] = dict(
+                self.param_properties.get(key) or {"type": "string"}
+            )
+            desc = self.param_descriptions.get(key)
+            if desc and "description" not in prop:
+                prop["description"] = desc
+            properties[key] = prop
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(required),
+                },
+            },
+        }
+
+    def validate_args(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = dict(args)
+        missing = [key for key in self.required if key not in normalized]
         if missing:
             raise ValueError(f"missing required args for {self.name}: {missing}")
-        return args
-
-
-def _present(value: Any) -> bool:
-    if value is None:
-        return False
-    return value != ""
+        for key, choices in self.arg_choices.items():
+            if key not in normalized:
+                continue
+            value = normalized[key]
+            selected = _select_choice(value, choices)
+            if (
+                selected is None
+                and self.name == "web_search_tool"
+                and key == "search_mode"
+            ):
+                selected = "web"
+            if selected is None and isinstance(value, str):
+                selected = value.strip().lower()
+            if selected not in choices:
+                allowed = ", ".join(choices)
+                raise ValueError(
+                    f"invalid arg for {self.name}: {key} must be one of: {allowed}; "
+                    f"received={value!r}"
+                )
+            normalized[key] = selected
+        return normalized
 
 
 TOOL_SPECS: dict[str, ToolSpec] = {
     "web_search_tool": ToolSpec(
         name="web_search_tool",
         required=("query",),
-        capability="current news/facts/sources",
+        optional=("search_mode",),
+        arg_choices={"search_mode": ("web", "academic", "sec")},
+        capability="web/academic/sec grounded search",
+        llm_required=(),
+        schema_extra_keys=("queries",),
+        param_descriptions={
+            "query": "Search query for current web information",
+            "search_mode": "Perplexity search corpus to query",
+            "queries": "Parallel search queries",
+        },
+        param_properties={
+            "search_mode": {"type": "string", "enum": ["web", "academic", "sec"]},
+            "queries": {"type": "array", "items": {"type": "string"}},
+        },
     ),
     "sec_tool": ToolSpec(
         name="sec_tool",
         required=("ticker", "year", "query"),
-        capability="10-K filings and disclosures",
-        subject_requirement=SubjectRequirement(
-            identity_level=SubjectIdentityLevel.LISTING,
-            market="USA",
-        ),
+        capability="year-specific 10-K extraction",
+        param_descriptions={
+            "query": "Focused retrieval query for 10-K content",
+            "ticker": "Ticker symbol (e.g., AMZN, TSLA)",
+            "year": "Target filing year",
+        },
+        param_properties={
+            "year": {"type": "integer"},
+        },
     ),
     "yfinance_balance_sheet": ToolSpec(
         name="yfinance_balance_sheet",
         required=("ticker",),
-        optional=("year",),
+        optional=("year", "min_year"),
         capability=(
-            "financial statements plus valuation/pricing coordinates "
-            "(market_cap, price, PE, PBR)"
+            "Single-year financial statements plus valuation/pricing. "
+            "Call once per year for multi-year trend analysis. "
+            "Returns: balance sheet, income, cashflow, derived ratios, market data."
         ),
-        subject_requirement=SubjectRequirement(
-            identity_level=SubjectIdentityLevel.LISTING
-        ),
+        param_descriptions={
+            "ticker": "Ticker symbol (e.g., 'AAPL' or '005930')",
+            "year": "Year (e.g., '2025') or 'latest' for the most recent available",
+            "min_year": "Minimum acceptable year when using 'latest'",
+        },
+        param_properties={
+            "min_year": {"type": "integer"},
+        },
     ),
     "code_execute_tool": ToolSpec(
         name="code_execute_tool",
         required=("code",),
+        optional=("timeout",),
         capability="deterministic calculations",
+        param_descriptions={
+            "code": "Python code to execute",
+            "timeout": "Execution timeout in seconds",
+        },
+        param_properties={
+            "timeout": {"type": "integer"},
+        },
     ),
-    "domain_tool": ToolSpec(
-        name="domain_tool",
-        optional=(
-            "corp",
-            "company_name",
-            "ticker",
-            "query",
-            "context",
-            "domain_guide",
-            "domain_persona",
-            "domain_rubric",
-            "domain_format",
-            "domain_id",
-        ),
-        capability="aspect-guided domain analysis via persona/rubric/format",
-    ),
+    # "domain_tool": ToolSpec(
+    #     name="domain_tool",
+    #     optional=(
+    #         "corp",
+    #         "company_name",
+    #         "ticker",
+    #         "query",
+    #         "context",
+    #         "grounding_mode",
+    #         "as_of_utc",
+    #         "time_scope",
+    #         "target_start",
+    #         "target_end",
+    #         "domain_guide",
+    #         "domain_persona",
+    #         "domain_rubric",
+    #         "domain_format",
+    #         "domain_id",
+    #     ),
+    #     capability="aspect-guided domain analysis via persona/rubric/format",
+    #     llm_required=(),
+    #     param_descriptions={
+    #         "corp": "Company identifier",
+    #         "company_name": "Company legal name",
+    #         "ticker": "Listing ticker",
+    #         "query": "Task-specific query",
+    #         "context": "Contextual background",
+    #         "grounding_mode": "Grounded evidence vs synthesis-only",
+    #         "as_of_utc": "As-of timestamp (UTC)",
+    #         "time_scope": "Time horizon for the analysis",
+    #         "target_start": "Range start",
+    #         "target_end": "Range end",
+    #         "domain_id": "Domain preset identifier",
+    #         "domain_guide": "Domain guidance",
+    #         "domain_persona": "Analyst persona",
+    #         "domain_rubric": "Evaluation rubric",
+    #         "domain_format": "Output format",
+    #     },
+    #     param_properties={
+    #         "grounding_mode": {
+    #             "type": "string",
+    #             "enum": ["grounded_required", "synthesis_only"],
+    #         },
+    #         "time_scope": {
+    #             "type": "string",
+    #             "enum": ["current", "historical", "future", "mixed"],
+    #         },
+    #     },
+    # ),
 }
 
 
@@ -212,19 +236,3 @@ def get_tool_spec(tool_name: str) -> ToolSpec:
         return TOOL_SPECS[tool_name]
     except KeyError as exc:
         raise RuntimeError(f"unknown tool spec: {tool_name}") from exc
-
-
-def filter_tool_names(
-    tool_names: Iterable[str],
-    *,
-    intent: QueryIntent,
-) -> list[str]:
-    return sorted(
-        name
-        for name in tool_names
-        if name in TOOL_SPECS and TOOL_SPECS[name].accepts(intent)
-    )
-
-
-def registered_tool_names() -> list[str]:
-    return sorted(TOOL_SPECS)

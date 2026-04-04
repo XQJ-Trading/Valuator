@@ -5,16 +5,13 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import requests
 
 from ..utils.config import config
 from ..utils.logger import logger
 from .base import BaseTool, ToolResult
-
-if TYPE_CHECKING:
-    from ..models.gemini_direct import GeminiClient
 
 try:
     import pandas as pd
@@ -196,14 +193,17 @@ def fetch_reader_lines(ticker: str, filing_url: str) -> list[str]:
 
 
 class SECTool(BaseTool):
-    def __init__(self, usage_writer: Any | None = None):
+    def __init__(self, usage_writer: Any | None = None, model: str | None = None):
         super().__init__(
             "sec_tool",
             "Retrieve relevant 10-K details from SEC EDGAR for a ticker/year/query.",
         )
         from ..models.gemini_direct import GeminiClient as RuntimeGeminiClient
 
-        self.client = RuntimeGeminiClient(config.agent_model, usage_writer=usage_writer)
+        self.client = RuntimeGeminiClient(
+            model or config.agent_model,
+            usage_writer=usage_writer,
+        )
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.client.bind_usage_writer(usage_writer)
@@ -289,29 +289,3 @@ class SECTool(BaseTool):
                 metadata={"error_code": "other"},
             )
 
-    def get_schema(self) -> dict[str, object]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Focused retrieval query for 10-K content",
-                        },
-                        "ticker": {
-                            "type": "string",
-                            "description": "Ticker symbol (e.g., AMZN, TSLA)",
-                        },
-                        "year": {
-                            "type": "integer",
-                            "description": "Target filing year",
-                        },
-                    },
-                    "required": ["ticker", "query", "year"],
-                },
-            },
-        }

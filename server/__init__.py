@@ -1,1 +1,1 @@
-# Makes server a package
+"""FastAPI server package."""

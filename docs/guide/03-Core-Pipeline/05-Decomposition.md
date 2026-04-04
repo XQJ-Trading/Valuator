@@ -1,1 +1,88 @@
-# 분해 및 검증 (Decomposition & Gate)\n\n과도한 분해를 방지하고 분해 품질을 평가하는 단계.\n\n## GateController\n\n```python\nclass GateController:\n    async def gate(\n        self,\n        task: Task,\n        decision: TaskDecision,\n        ctx: TaskContext,\n    ) -> TaskDecision:\n        if not self._config.enabled:\n            return decision  # 게이트 비활성화\n        \n        if decision.action != Action.DECOMPOSE:\n            return decision  # DECOMPOSE만 검증\n        \n        # 1. Pre-filter (규칙 기반, 빠름)\n        filter_result = pre_filter(...)\n        if filter_result.verdict == FilterVerdict.REJECT:\n            return self._create_rejection_decision(filter_result.reason)\n        \n        # 2. LLM Critic (깊은 평가)\n        critique = await self._critic.evaluate_decomposition(...)\n        \n        # 3. 임계값 조정 (학습)\n        threshold = self._tracker.current_threshold()\n        if critique.quality_score >= threshold:\n            self._tracker.accept_decomposition()\n        else:\n            self._tracker.reject_decomposition()\n        \n        if critique.quality_score >= threshold:\n            return decision  # 통과\n        else:\n            return self._create_rejection_decision(critique.reason)\n```\n\n## 3단계 검증\n\n### 1단계: Pre-filter (규칙)\n\n```python\ndef pre_filter(task, decision, gate_config) -> FilterResult:\n    \"\"\"\n    빠르고 결정적인 규칙 기반 검증\n    \"\"\"\n    # 깊이 확인\n    task_depth = len(ancestry)\n    max_depth = gate_config.max_depth\n    if task_depth >= max_depth:\n        return FilterResult(\n            verdict=FilterVerdict.REJECT,\n            reason=f\"max depth reached: {task_depth}\",\n        )\n    \n    # 단계 수 확인\n    task_steps = task.step_count\n    max_steps = gate_config.max_steps_per_task\n    if task_steps >= max_steps:\n        return FilterResult(\n            verdict=FilterVerdict.REJECT,\n            reason=f\"max steps per task reached: {task_steps}\",\n        )\n    \n    # 자식 수 확인\n    child_count = len(decision.children)\n    max_children = gate_config.max_children_per_decomposition\n    if child_count > max_children:\n        return FilterResult(\n            verdict=FilterVerdict.REJECT,\n            reason=f\"too many children: {child_count}\",\n        )\n    \n    return FilterResult(verdict=FilterVerdict.ACCEPT)\n```\n\n**GateConfig**:\n```python\n@dataclass\nclass GateConfig:\n    enabled: bool = True\n    \n    max_depth: int = 10                        # 최대 깊이\n    max_steps_per_task: int = 20               # 단계 제한\n    max_children_per_decomposition: int = 10   # 자식 최대\n    \n    initial_threshold: float = 0.7             # 초기 임계값\n    learning_rate: float = 0.05                # 조정 속도\n    \n    # Critic 활성화\n    critic_enabled: bool = True\n```\n\n### 2단계: Critic (LLM 평가)\n\n```python\nclass DecompositionCritic:\n    async def evaluate_decomposition(\n        self,\n        task: Task,\n        decision: TaskDecision,\n        ctx: TaskContext,\n    ) -> CritiqueResult:\n        # LLM에게 분해 품질 평가 요청\n        prompt = f\"\"\"\n        작업: {task.description}\n        제안된 자식들:\n        {format_children(decision.children)}\n        \n        지금까지의 결과:\n        {format_context(ctx)}\n        \n        이 분해가 합리적인가? (0.0~1.0)\n        - 0.0: 완전히 부적절\n        - 1.0: 완벽함\n        \n        또한 개선 사항을 제안해주세요.\n        \"\"\"\n        \n        response = await llm.evaluate(prompt)\n        score = float(response[\"score\"])\n        reason = response[\"reason\"]\n        \n        return CritiqueResult(\n            quality_score=score,\n            reason=reason,\n            recommendation=response.get(\"recommendation\"),\n        )\n```\n\n### 3단계: 임계값 조정 (학습)\n\n```python\nclass BackpropagationTracker:\n    def __init__(self, initial_threshold=0.7, learning_rate=0.05):\n        self._threshold = initial_threshold\n        self._learning_rate = learning_rate\n        self._accept_count = 0\n        self._reject_count = 0\n    \n    def accept_decomposition(self) -> None:\n        \"\"\"좋은 분해였을 때\"\"\"\n        self._accept_count += 1\n        # 임계값을 조금 높임 (더 엄격하게)\n        self._threshold = min(1.0, self._threshold + self._learning_rate)\n    \n    def reject_decomposition(self) -> None:\n        \"\"\"나쁜 분해였을 때\"\"\"\n        self._reject_count += 1\n        # 임계값을 조금 낮춤 (더 관대하게)\n        self._threshold = max(0.0, self._threshold - self._learning_rate)\n    \n    def current_threshold(self) -> float:\n        return self._threshold\n```\n\n## 거절 처리\n\n분해가 거절되면:\n\n```python\n# Agent Loop에서\nif decision.action == Action.DECOMPOSE:\n    decision = await self._gate.gate(task, decision, ctx)\n\n# 게이트가 거절했다면\nerror = self._validate_decision(task, decision)\nif decision.action != Action.DECOMPOSE:\n    # DECOMPOSE가 아니면 = 거절됨\n    decision = await self._step_planner.requery_without_decompose(\n        task, ctx,\n        rejection_reason=error,  # 게이트의 이유\n    )\n    # → StepPlanner가 allow_decompose=False로 다시 계획\n    # → 다른 행동 결정 (EXECUTE, AGGREGATE 등)\n```\n\n**requery_without_decompose**:\n```python\nasync def requery_without_decompose(self, task, ctx, rejection_reason):\n    \"\"\"\n    DECOMPOSE 금지 후 다시 계획\n    \"\"\"\n    allowed = self._allowed_actions(task, allow_decompose=False)\n    # → DECOMPOSE 제외\n    \n    prompt = f\"\"\"\n    이전 분해 시도가 거절되었습니다:\n    {rejection_reason}\n    \n    다른 접근을 시도하세요.\n    허용된 행동: {allowed}\n    \"\"\"\n    \n    return await self._generate_decision(...)\n```\n\n## 정적 검사 (별도)\n\nPlanner에서 Gate 호출 전에 수행:\n\n```python\ndef static_rejects_minimal_decomposition(\n    task_depth: int,\n    max_steps_per_task: int,\n    config: GateConfig,\n) -> bool:\n    \"\"\"\n    Gate를 호출하기 전에 빠르게 거절 판단\n    \"\"\"\n    if not config.enabled:\n        return False\n    \n    if task_depth >= config.max_depth:\n        return True\n    \n    # task.step_count는 ctx에서 가져옴\n    # (이 함수는 ctx 없이 작동 가능하도록 설계)\n    return False\n```\n\n## 설정 예\n\n```python\n# 게이트 활성화\ngate_config = GateConfig(\n    enabled=True,\n    max_depth=10,\n    max_steps_per_task=20,\n    max_children_per_decomposition=10,\n    initial_threshold=0.7,\n    learning_rate=0.05,\n    critic_enabled=True,\n)\n\n# Agent 생성 시\nagent = Agent(\n    ...,\n    gate_config=gate_config,\n)\n```\n\n## 이벤트\n\n```python\nAgentEvent(\n    type=EventType.DECOMPOSITION_GATED,\n    task_id=task.id,\n    detail={\n        \"verdict\": \"rejected\",\n        \"reason\": \"max depth reached\",\n        \"threshold\": 0.72,\n        \"quality_score\": 0.65,\n    },\n)\n```\n\n## 흐름 예시\n\n```\n사용자: \"Apple의 가치 분석\"\n  ↓\nroot (step_count=0, depth=0)\n  ↓\n[Plan] → DECOMPOSE (child1, child2, child3)\n  ↓\n[Gate] Pre-filter\n  - depth=0, OK\n  - steps=0, OK\n  - children=3, OK (max=10)\n  ↓\n[Gate] Critic\n  - \"자식들이 적절히 분해됐는가?\"\n  - score=0.75, reason=\"좋음\"\n  ↓\n[Threshold] 0.7 < 0.75?\n  - Yes → accept\n  - threshold 올림 (0.7 → 0.705)\n  ↓\n[Decision 적용]\n  - root 승격 (Atomic→Complex)\n  - child1, child2, child3 생성\n  - root 상태 WAITING\n  ↓\n(자식들 처리...)\n```\n\n## 게이트 비활성화\n\n```python\ngate_config = GateConfig(enabled=False)\n\n# 또는\nagent = Agent(..., gate_config=None)\n# → 기본값 GateConfig(enabled=False)\n```\n"
+# 분해 및 검증 (Decomposition & Gate)
+
+에이전트가 제안한 작업 분해(Decomposition)의 품질을 평가하고, 불필요하거나 과도한 분해를 차단하여 시스템의 안정성을 확보하는 단계입니다.
+
+
+
+## 1. GateController: 시스템의 수문장
+
+`GateController`는 모든 `DECOMPOSE` 결정에 대해 3단계 검증을 수행합니다. 검증에 실패하면 에이전트는 분해 대신 다른 전략(직접 실행 등)을 세워야 합니다.
+
+```python
+class GateController:
+    async def gate(self, task: Task, decision: TaskDecision, ctx: TaskContext) -> TaskDecision:
+        if not self._config.enabled or decision.action != Action.DECOMPOSE:
+            return decision 
+        
+        # 1단계: Pre-filter (규칙 기반 검사)
+        filter_result = pre_filter(task, decision, self._config)
+        if filter_result.verdict == FilterVerdict.REJECT:
+            return self._create_rejection_decision(filter_result.reason)
+        
+        # 2단계: LLM Critic (의미론적 품질 평가)
+        critique = await self._critic.evaluate_decomposition(task, decision, ctx)
+        
+        # 3단계: Dynamic Threshold (동적 임계값 적용 및 학습)
+        threshold = self._tracker.current_threshold()
+        if critique.quality_score >= threshold:
+            self._tracker.record_success() # 통과 시 임계값 미세 조정 (더 엄격하게)
+            return decision
+        else:
+            self._tracker.record_failure() # 거절 시 임계값 미세 조정 (더 관대하게)
+            return self._create_rejection_decision(critique.reason)
+```
+
+---
+
+## 2. 3단계 검증 프로세스
+
+### **Step 1. Pre-filter (하드웨어 규칙)**
+비용이 들지 않는 빠른 검사입니다. 시스템 리소스 보호를 위한 '하드 리미트'를 체크합니다.
+
+* **최대 깊이(Max Depth):** 작업이 너무 깊게 계층화되는 것 방지 (예: 10단계 이상 금지).
+* **단계 제한(Max Steps):** 한 작업이 너무 많은 시도를 하는 것 방지.
+* **자식 수 제한(Max Children):** 한 번에 너무 많은 하위 작업으로 쪼개는 것 방지.
+
+### **Step 2. LLM Critic (소프트웨어 지능)**
+LLM이 제안된 분해안이 원래의 목적에 부합하는지, 논리적 비약은 없는지 평가합니다.
+* **평가 항목:** "이 분해가 목표 달성에 필수적인가?", "하위 작업 간의 중복은 없는가?"
+* **출력:** 0.0 ~ 1.0 사이의 품질 점수 및 개선 권고안.
+
+### **Step 3. Threshold Adjustment (적응형 학습)**
+시스템의 '깐깐함'을 실시간으로 조정합니다.
+* **성공 시:** 임계값을 높여(`+learning_rate`) 더 고품질의 분해만 허용하도록 유도합니다.
+* **거절 시:** 임계값을 낮춰(`-learning_rate`) 작업 진행이 막히지 않도록 유연성을 부여합니다.
+
+---
+
+## 3. 거절 및 회복 로직 (Recovery)
+
+게이트에 의해 분해가 거절되면 에이전트는 **"분해 금지"** 상태로 다시 계획을 세웁니다.
+
+1.  **거절 통보:** `Gate`가 `REJECT`와 함께 이유(Reason)를 반환합니다.
+2.  **재쿼리(Re-query):** `StepPlanner`가 해당 작업에 대해 `allow_decompose=False` 옵션을 받아 다시 생각합니다.
+3.  **대안 선택:** 에이전트는 분해하지 않고 도구를 직접 실행(`EXECUTE`)하거나, 지금까지의 정보로 결과를 요약(`AGGREGATE`)하는 방향으로 선회합니다.
+
+---
+
+## 4. 주요 설정 (GateConfig)
+
+시스템 환경에 따라 게이트의 엄격도를 조절할 수 있습니다.
+
+| 설정 항목 | 기본값 | 설명 |
+| :--- | :--- | :--- |
+| `max_depth` | 10 | 작업 계층의 최대 허용 깊이 |
+| `max_steps_per_task` | 20 | 단일 작업 내 최대 허용 시도 횟수 |
+| `initial_threshold` | 0.7 | Critic 점수의 초기 통과 기준 |
+| `learning_rate` | 0.05 | 결과에 따른 임계값 조정 폭 |
+| `critic_enabled` | True | LLM을 이용한 정밀 평가 사용 여부 |
+
+---
+
+## 5. 실행 예시 흐름
+
+1.  **계획:** 에이전트가 "삼성전자 주가 분석" 작업을 5개로 쪼개겠다고 결정합니다.
+2.  **필터:** 자식 수가 5개이므로 통과합니다.
+3.  **비판:** Critic이 분석하니 "3번과 4번 작업이 중복됨"이라며 **0.5점**을 줍니다.
+4.  **판단:** 현재 임계값이 **0.7**이므로 **거절(Reject)** 됩니다.
+5.  **수정:** 에이전트는 "중복된 분석을 합쳐서 직접 도구를 호출해 처리하자"고 계획을 변경합니다.

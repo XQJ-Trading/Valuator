@@ -1,1 +1,99 @@
-# 에이전트 루프 (Agent Loop)\n\n메인 루프. 작업 선택 → 계획 → 실행 → 상태 업데이트 반복.\n\n## Agent 클래스\n\n```python\nclass Agent:\n    def __init__(self, *, scheduler, shared_state, tool_registry, llm_client, ...):\n        self._scheduler = scheduler\n        self._shared = shared_state\n        self._tools = tool_registry\n        self._step_planner = StepPlanner(llm_client, ...)\n        self._gate = GateController(...)  # 분해 검증\n```\n\n## 메인 루프\n\n```python\nasync def run(self, query: str, root_task: Task) -> Any:\n    self._root_task = root_task\n    root_task.bind_step(self._step_planner.decide)\n    self._scheduler.register(root_task)  # READY\n    \n    while not self._scheduler.is_complete():\n        # 1. 다음 실행할 작업 선택\n        ready_tasks = self._scheduler.ready_tasks()\n        \n        if not ready_tasks and self._scheduler.has_deadlock():\n            self._scheduler.break_deadlock(self._shared)\n            continue\n        \n        # 2. 작업 처리 (병렬 가능, 실제는 순차)\n        for task in ready_tasks:\n            await self._process_task(task)\n    \n    # 최종 반환\n    return self._finalize_output()\n```\n\n## _process_task() 상세\n\n```python\nasync def _process_task(self, task: Task) -> None:\n    ctx = context_builder.build(task, self._shared, ...)\n    \n    try:\n        # Step 1: 의사 결정 (계획)\n        decision = await task.step(ctx)  # StepPlanner.decide() 호출\n        \n        # Step 2: 분해 검증 (검토)\n        if decision.action == Action.DECOMPOSE:\n            decision = await self._gate.gate(task, decision, ctx)\n        \n        # 검증 실패 시 (분해 거절)\n        if not decision.action == Action.DECOMPOSE:\n            decision = await self._step_planner.requery_without_decompose(...)\n        \n        # Step 3: 의사 결정 유효성 검증\n        error = self._validate_decision(task, decision)\n        if error:\n            task.last_invalid_error = error\n            task.invalid_decision_count += 1\n            if task.invalid_decision_count > max_invalid:\n                self._scheduler.mark_failed(task, error)\n                return\n            # 다시 계획\n            return\n        \n        # Step 4: 실행 (도구 또는 상태 업데이트)\n        if decision.action == Action.EXECUTE:\n            await self._execute_tool(task, decision.tool_request, ctx)\n        else:\n            # 상태 업데이트\n            newly_ready = self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)\n        \n        # Step 5: 이벤트 발행\n        await self._emit(event)  # session 저장 등\n    \n    except Exception as e:\n        self._scheduler.mark_failed(task, str(e))\n```\n\n## _execute_tool() 상세\n\n```python\nasync def _execute_tool(self, task: Task, tool_request: ToolRequest, ctx: TaskContext) -> None:\n    task.last_tool_request = tool_request\n    \n    # 도구 실행 기록\n    signature = _tool_request_signature(tool_name=tool_request.tool_name, args=tool_request.args)\n    \n    # 동일한 요청이 실패했던 적이 있나?\n    if signature in task.failed_tool_request_signatures:\n        # 실패한 도구는 다시 호출하지 않음\n        self._scheduler.mark_tool_complete(task, failed_result)\n        return\n    \n    try:\n        # Tool Registry에서 도구 실행\n        result = await self._tools.execute(\n            tool_request.tool_name,\n            tool_request.args,\n            timeout=...,\n        )\n        \n        # 성공\n        self._scheduler.mark_tool_complete(task, ToolResult(success=True, result=result))\n    \n    except Exception as e:\n        # 실패\n        task.tool_failure_counts[tool_request.tool_name] = \\\n            task.tool_failure_counts.get(tool_request.tool_name, 0) + 1\n        \n        # 연속 실패 횟수 초과?\n        if task.tool_failure_counts[tool_request.tool_name] > max_consecutive_failures:\n            task.blocked_tools.add(tool_request.tool_name)\n            self._scheduler.mark_failed(task, f\"tool {tool_request.tool_name} blocked\")\n        else:\n            self._scheduler.mark_tool_complete(task, ToolResult(success=False, error=str(e)))\n```\n\n## TaskContext 구성\n\n```python\nfrom . import context_builder\n\nctx = context_builder.build(\n    task,\n    shared_state,\n    query=self._analysis.original,\n    query_analysis=self._analysis,\n)\n\n# context_builder가 수행하는 작업:\n# 1. task의 상태 스냅샷\n# 2. 부모/자식/형제 관계 정리\n# 3. shared_state의 팩트들 필터링 (관련된 것만)\n# 4. 사용 가능한 도구 결정\n```\n\n## 의사 결정 유효성 검증\n\n```python\ndef _validate_decision(self, task: Task, decision: TaskDecision) -> str | None:\n    match decision.action:\n        case Action.DECOMPOSE:\n            # 1. 자식 스펙 검증\n            error = self._scheduler.validate_decomposition(task, decision.children)\n            if error:\n                return error\n            # 2. Gate의 pre_filter 다시 확인\n            if static_rejects_minimal_decomposition(...):\n                return \"decomposition gated by depth/step limit\"\n        \n        case Action.WAIT:\n            # 기다릴 작업들이 유효한가?\n            error = self._scheduler.validate_wait(task.id, list(decision.wait_for))\n            if error:\n                return error\n        \n        case Action.EXECUTE:\n            if decision.tool_request is None:\n                return \"EXECUTE action requires tool_request\"\n            if decision.tool_request.tool_name not in ctx.available_tools:\n                return f\"tool not available: {decision.tool_request.tool_name}\"\n        \n        case Action.AGGREGATE | Action.FINALIZE:\n            # 특별한 검증 없음\n            pass\n    \n    return None\n```\n\n## 이벤트 발행\n\n```python\nasync def _emit(self, event: AgentEvent) -> None:\n    if self._on_event:\n        await self._on_event(event)\n    # on_event는 보통 session trace writer에 등록됨\n```\n\n**이벤트 종류**:\n```python\nevent = AgentEvent(\n    type=EventType.STEP_STARTED,\n    task_id=task.id,\n    detail={\"step_count\": task.step_count},\n)\n\nevent = AgentEvent(\n    type=EventType.TOOL_EXECUTED,\n    task_id=task.id,\n    detail={\"tool_name\": \"web_search\", \"success\": True},\n)\n\nevent = AgentEvent(\n    type=EventType.DECOMPOSED,\n    task_id=task.id,\n    detail={\"child_count\": 3},\n)\n```\n\n## 특수 케이스 처리\n\n### 도구 실패 회복\n\n```python\n# 도구가 한 번 실패했다면\nif signature in task.failed_tool_request_signatures:\n    # 다시 호출하지 않음\n    # RUNNING → READY로 전환\n    # LLM이 다른 행동 결정\n```\n\n### 교착 상태\n\n```python\nwhile not scheduler.is_complete():\n    ready_tasks = scheduler.ready_tasks()\n    \n    if not ready_tasks:  # 실행할 작업이 없다?\n        if scheduler.has_deadlock():\n            # WAITING 작업들의 의존성 정리 시도\n            if scheduler.break_deadlock(shared_state):\n                continue  # 다시 시도\n        else:\n            # 교착 상태 아님 (진짜 완료)\n            break\n```\n\n### 최대 단계 도달\n\n```python\n# Gate의 static_rejects_minimal_decomposition()에서\nif task.step_count >= max_steps_per_task:\n    allow_decompose = False\n    # Planner에 전달\n    # → DECOMPOSE 비허가\n```\n\n## 최종화 및 출력\n\n```python\nasync def run(self, query: str, root_task: Task) -> Any:\n    # ...\n    while not scheduler.is_complete():\n        # ...\n    \n    # 완료 후\n    final_output = root_task.output or root_task.completion_payload()\n    \n    # 세션 저장\n    await finalize_trace(\n        self._trace_writer,\n        status=\"completed\",\n        completed_at=utc_isoformat(datetime.now()),\n        final_answer=final_output_text(final_output),\n        duration=elapsed_time,\n    )\n    \n    return final_output\n```\n\n## 호출 측\n\n```python\n# server/chat_api.py에서\nroot = ComplexTask(\n    id=f\"{session_id}.root\",\n    description=\"분석 요청 처리\",\n)\n\nagent = Agent(\n    scheduler=Scheduler(),\n    shared_state=SharedState(),\n    tool_registry=create_tool_registry(model),\n    llm_client=get_llm_client(model),\n    query_analysis=analyze_query(query),\n)\n\nfinal_output = await agent.run(query, root)\n\n# 최종 응답\nreturn {\"status\": \"completed\", \"output\": final_output}\n```\n"
+# 에이전트 루프 (Agent Loop)
+
+에이전트 루프는 전체 시스템을 구동하는 메인 프로세스로, **작업 선택 → 계획 → 실행 → 상태 업데이트**의 과정을 반복하며 최종 해답을 도출합니다.
+
+
+
+## 1. Agent 클래스 구조
+에이전트는 스케줄러, 상태 저장소, 도구 레지스트리 및 플래너를 하나로 묶어 관리합니다.
+
+```python
+class Agent:
+    def __init__(self, *, scheduler, shared_state, tool_registry, llm_client, ...):
+        self._scheduler = scheduler      # 작업 우선순위 및 상태 관리
+        self._shared = shared_state      # 모든 작업이 공유하는 사실(Facts) 저장소
+        self._tools = tool_registry      # 사용 가능한 도구 집합
+        self._step_planner = StepPlanner(llm_client, ...) # LLM 기반 의사결정기
+        self._gate = GateController(...) # 분해(Decomposition) 결과 검증 및 필터링
+```
+
+---
+
+## 2. 메인 루프 (Main Loop)
+스케줄러에 실행 가능한 작업이 없을 때까지 지속적으로 루프를 돕니다.
+
+```python
+async def run(self, query: str, root_task: Task) -> Any:
+    self._root_task = root_task
+    # 루트 작업에 LLM 플래너 바인딩
+    root_task.bind_step(self._step_planner.decide)
+    self._scheduler.register(root_task)  # 초기 상태: READY
+    
+    while not self._scheduler.is_complete():
+        # 1. 실행 가능한 작업 추출 (의존성이 해결된 작업들)
+        ready_tasks = self._scheduler.ready_tasks()
+        
+        # 교착 상태(Deadlock) 해결
+        if not ready_tasks and self._scheduler.has_deadlock():
+            self._scheduler.break_deadlock(self._shared)
+            continue
+        
+        # 2. 작업 처리 (동시성 제어가 가능하지만 기본적으로 순차 처리)
+        for task in ready_tasks:
+            await self._process_task(task)
+    
+    return self._finalize_output()
+```
+
+---
+
+## 3. 작업 처리 상세 (`_process_task`)
+개별 작업이 LLM에 의해 계획되고 실제 동작으로 이어지는 5단계 프로세스입니다.
+
+1.  **Context Builder:** 작업 상태, 부모/자식 관계, 공유 상태의 핵심 팩트 등을 모아 LLM에 전달할 컨텍스트를 구성합니다.
+2.  **Decision (계획):** `StepPlanner`를 호출하여 다음 행동(실행, 분해, 대기 등)을 결정합니다.
+3.  **Gate (검토):** 복잡한 작업 분해가 제안될 경우, 깊이 제한이나 정책에 맞는지 검증합니다.
+4.  **Validation:** 결정된 행동이 논리적으로 유효한지(예: 없는 도구 호출 등) 확인합니다.
+5.  **Execution:** 실제 도구를 실행하거나 스케줄러 상태를 업데이트합니다.
+
+---
+
+## 4. 도구 실행 및 실패 관리 (`_execute_tool`)
+도구 실행 시 발생할 수 있는 예외와 반복적인 실패를 방지하는 로직을 포함합니다.
+
+* **Signature Check:** 동일한 인자로 실패했던 기록이 있다면 중복 실행을 차단합니다.
+* **Consecutive Failures:** 특정 도구가 연속해서 실패하면 해당 도구를 `blocked_tools`에 추가하여 더 이상 사용하지 못하게 격리합니다.
+* **State Transition:** 성공 여부에 관계없이 결과를 스케줄러에 보고하여 `RUNNING → READY/COMPLETE` 상태 전이를 유도합니다.
+
+---
+
+## 5. 특수 케이스 처리 전략
+
+### 교착 상태 (Deadlock)
+모든 작업이 서로의 결과를 기다리며 `WAITING` 상태에 빠진 경우, 스케줄러가 의존 관계를 강제로 해제하거나 실패 처리하여 루프가 멈추지 않도록 합니다.
+
+### 최대 단계 제한 (Max Steps)
+무한 루프 방지를 위해 `GateController`에서 특정 작업의 `step_count`를 체크합니다. 제한에 도달하면 더 이상의 작업 분해를 금지하고 결과를 요약하도록 강제합니다.
+
+### 이벤트 발행 (Event Emission)
+루프의 모든 주요 시점(`STEP_STARTED`, `TOOL_EXECUTED`, `DECOMPOSED`)에서 이벤트를 발행하여 실시간 트레이싱 및 디버깅 로그를 생성합니다.
+
+---
+
+## 6. 호출 예시 (Usage)
+서버 레이어에서 에이전트를 생성하고 구동하는 전형적인 코드 흐름입니다.
+
+```python
+# API 핸들러 내부
+root = ComplexTask(id=f"{session_id}.root", description="분석 요청")
+
+agent = Agent(
+    scheduler=Scheduler(),
+    shared_state=SharedState(),
+    tool_registry=create_tool_registry(model),
+    llm_client=get_llm_client(model)
+)
+
+# 에이전트 실행 및 최종 결과 수신
+final_output = await agent.run(user_query, root)
+```

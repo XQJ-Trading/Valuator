@@ -1,1 +1,134 @@
-# LLM 모델 (Models)\n\nLLM 통합 인터페이스. 다양한 모델 제공자 지원.\n\n## 지원 모델\n\n| 제공자 | 모델 | 파일 |\n|--------|------|------|\n| Anthropic | Claude (Opus, Sonnet) | 기본값 |\n| Google | Gemini | `gemini_direct.py` |\n| OpenRouter | 다양한 모델 | `openrouter.py` |\n\n## LLM 클라이언트 인터페이스\n\n```python\nclass LLMClient(Protocol):\n    async def message(\n        self,\n        system: str,\n        user: str,\n        max_tokens: int = 8192,\n    ) -> str:\n        \"\"\"메시지 전송\"\"\"\n    \n    async def parse_json(\n        self,\n        system: str,\n        user: str,\n        max_tokens: int = 8192,\n    ) -> dict[str, Any]:\n        \"\"\"JSON 응답\"\"\"\n```\n\n## 사용 (StepPlanner에서)\n\n### 의사 결정 생성\n\n```python\nclass StepPlanner:\n    def __init__(self, llm_client: Any, ...):\n        self._llm = llm_client\n    \n    async def decide(self, task: Task, ctx: TaskContext) -> TaskDecision:\n        # 프롬프트 생성\n        system_prompt = prompts.build_system_prompt(...)\n        base_prompt = prompts.build_step_prompt(...)\n        \n        # LLM 호출 (JSON 응답)\n        response = await self._llm.parse_json(\n            system=system_prompt,\n            user=base_prompt,\n            max_tokens=8192,\n        )\n        \n        # 파싱\n        decision = parse_decision(response)\n        return decision\n```\n\n### Critic (분해 평가)\n\n```python\nclass DecompositionCritic:\n    def __init__(self, llm_client: Any):\n        self._llm = llm_client\n    \n    async def evaluate_decomposition(self, task, decision, ctx):\n        prompt = build_critique_prompt(task, decision, ctx)\n        \n        response = await self._llm.parse_json(\n            system=\"You are an expert decomposition critic.\",\n            user=prompt,\n        )\n        \n        return CritiqueResult(\n            quality_score=float(response[\"score\"]),\n            reason=response[\"reason\"],\n        )\n```\n\n## Claude 모델\n\n### 설정\n\n```python\n# 기본값: Claude Opus\n# 환경 변수로 변경 가능\nexport ANTHROPIC_API_KEY=\"sk-ant-...\"\nexport CLAUDE_MODEL=\"claude-opus-4-1\"\n```\n\n### 호출\n\n```python\nfrom anthropic import Anthropic\n\nclient = Anthropic(api_key=os.getenv(\"ANTHROPIC_API_KEY\"))\n\nmessage = client.messages.create(\n    model=\"claude-opus-4-1\",\n    max_tokens=8192,\n    system=\"...\",\n    messages=[\n        {\"role\": \"user\", \"content\": \"...\"},\n    ],\n)\n\nresponse = message.content[0].text\n```\n\n## Gemini 모델\n\n### gemini_direct.py\n\n```python\nclass GeminiDirectClient:\n    def __init__(self, api_key: str, model: str = \"gemini-2.0-flash\"):\n        self._client = genai.Client(api_key=api_key)\n        self._model = model\n    \n    async def parse_json(self, system: str, user: str, max_tokens: int):\n        response = await self._client.models.generate_content(\n            model=self._model,\n            contents=[\n                {\"role\": \"user\", \"parts\": [{\"text\": system + \"\\n\" + user}]},\n            ],\n            generation_config={\n                \"max_output_tokens\": max_tokens,\n                \"response_mime_type\": \"application/json\",\n            },\n        )\n        return json.loads(response.text)\n```\n\n## OpenRouter\n\n### openrouter.py\n\n```python\nclass OpenRouterClient:\n    def __init__(self, api_key: str, model: str):\n        self._api_key = api_key\n        self._model = model\n        self._base_url = \"https://openrouter.ai/api/v1\"\n    \n    async def parse_json(self, system: str, user: str, max_tokens: int):\n        response = await httpx.post(\n            f\"{self._base_url}/chat/completions\",\n            headers={\"Authorization\": f\"Bearer {self._api_key}\"},\n            json={\n                \"model\": self._model,\n                \"messages\": [\n                    {\"role\": \"system\", \"content\": system},\n                    {\"role\": \"user\", \"content\": user},\n                ],\n                \"max_tokens\": max_tokens,\n            },\n        )\n        data = response.json()\n        return json.loads(data[\"choices\"][0][\"message\"][\"content\"])\n```\n\n## 선택 메커니즘\n\n### server/chat_api.py에서\n\n```python\nmodel = request.model or \"claude\"  # 기본값: claude\nllm_client = get_llm_client(model)\n\ndef get_llm_client(model: str) -> Any:\n    if model == \"claude\":\n        from anthropic import Anthropic\n        return Anthropic(api_key=os.getenv(\"ANTHROPIC_API_KEY\"))\n    \n    elif model == \"gemini\":\n        import google.generativeai as genai\n        return GeminiDirectClient(\n            api_key=os.getenv(\"GOOGLE_API_KEY\"),\n        )\n    \n    elif model == \"openrouter\":\n        return OpenRouterClient(\n            api_key=os.getenv(\"OPENROUTER_API_KEY\"),\n            model=os.getenv(\"OPENROUTER_MODEL\"),\n        )\n    \n    else:\n        raise ValueError(f\"unknown model: {model}\")\n```\n\n## 토큰 사용 추적\n\n### LLMUsageWriter\n\n```python\nclass LLMUsageWriter:\n    def add_usage(\n        self,\n        model: str,\n        input_tokens: int,\n        output_tokens: int,\n    ):\n        # 추적\n        self._total_input += input_tokens\n        self._total_output += output_tokens\n        self._calls[model].append({\n            \"input\": input_tokens,\n            \"output\": output_tokens,\n        })\n    \n    def summary(self) -> dict:\n        return {\n            \"total_input_tokens\": self._total_input,\n            \"total_output_tokens\": self._total_output,\n            \"calls_by_model\": dict(self._calls),\n        }\n```\n\n### 사용\n\n```python\nusage_writer = LLMUsageWriter()\n\nagent = Agent(\n    llm_client=llm_client,\n    ...,\n    usage_writer=usage_writer,\n)\n\nawait agent.run(query, root_task)\n\n# 최종 보고서\nsummary = usage_writer.summary()\nprint(f\"Total tokens: {summary['total_input_tokens']} input, {summary['total_output_tokens']} output\")\n```\n\n## 비용 계산\n\n```python\n# 모델별 가격 (2024)\nPRICING = {\n    \"claude-opus-4-1\": {\"input\": 0.015, \"output\": 0.075},      # $/1M tokens\n    \"gemini-2.0-flash\": {\"input\": 0.075, \"output\": 0.30},\n    \"openrouter-llama\": {\"input\": 0.0001, \"output\": 0.0003},\n}\n\ndef calculate_cost(model, input_tokens, output_tokens):\n    pricing = PRICING[model]\n    input_cost = (input_tokens / 1_000_000) * pricing[\"input\"]\n    output_cost = (output_tokens / 1_000_000) * pricing[\"output\"]\n    return input_cost + output_cost\n```\n\n## 에러 처리\n\n### 재시도\n\n```python\nasync def call_with_retry(\n    llm_client,\n    system: str,\n    user: str,\n    max_retries: int = 3,\n):\n    for attempt in range(max_retries):\n        try:\n            return await llm_client.parse_json(system, user)\n        except RateLimitError as e:\n            if attempt < max_retries - 1:\n                await asyncio.sleep(2 ** attempt)  # exponential backoff\n            else:\n                raise\n        except Exception as e:\n            raise\n```\n\n### 타임아웃\n\n```python\ntry:\n    response = await asyncio.wait_for(\n        llm_client.parse_json(system, user),\n        timeout=60,  # 초\n    )\nexcept asyncio.TimeoutError:\n    # LLM이 응답하지 않음\n    pass\n```\n\n## 맞춤 모델 추가\n\n### Protocol 구현\n\n```python\nclass MyCustomLLM:\n    async def message(self, system: str, user: str, max_tokens: int) -> str:\n        # 구현\n        pass\n    \n    async def parse_json(self, system: str, user: str, max_tokens: int) -> dict:\n        # 구현\n        pass\n```\n\n### get_llm_client에 추가\n\n```python\ndef get_llm_client(model: str) -> Any:\n    if model == \"my_model\":\n        return MyCustomLLM()\n    # ...\n```\n"
+에이전트 시스템의 심장부라고 할 수 있는 **LLM 모델(Models) 통합 레이어** 설계 문서를 정리해 드립니다. 다양한 모델 제공자를 하나의 인터페이스로 묶고, 사용량 추적과 비용 계산까지 포함하는 구조로 다듬었습니다.
+
+---
+
+# LLM 모델 (Models)
+
+에이전트가 사고하고 결정 내리는 데 필요한 LLM 추론 능력을 추상화한 계층입니다. 다양한 모델 제공자(Provider)를 지원하며, 시스템 내 모든 모듈은 구현체에 관계없이 동일한 인터페이스를 사용합니다.
+
+
+
+## 1. 지원 모델 및 제공자
+
+| 제공자 | 주요 모델 (기본값) | 구현 파일 | 특징 |
+| :--- | :--- | :--- | :--- |
+| **Anthropic** | Claude 3.5 Sonnet / 3 Opus | `anthropic_client.py` | 정교한 추론 및 도구 사용 능력 |
+| **Google** | Gemini 2.0 Flash / Pro | `gemini_direct.py` | 빠른 속도와 긴 컨텍스트 윈도우 |
+| **OpenRouter** | Llama 3, Qwen 등 다양함 | `openrouter.py` | 오픈소스 모델 및 저비용 모델 접근 |
+
+---
+
+## 2. LLM 클라이언트 인터페이스 (Protocol)
+
+모든 클라이언트는 아래의 `LLMClient` 프로토콜을 준수해야 합니다.
+
+```python
+from typing import Protocol, Any, dict
+
+class LLMClient(Protocol):
+    async def message(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 8192,
+    ) -> str:
+        """일반 텍스트 메시지 응답 반환"""
+    
+    async def parse_json(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 8192,
+    ) -> dict[str, Any]:
+        """구조화된 JSON 응답 반환 (의사 결정 및 평가에 사용)"""
+```
+
+---
+
+## 3. 주요 구성 요소에서의 활용
+
+### StepPlanner (의사 결정)
+LLM의 `parse_json` 기능을 사용하여 에이전트의 다음 행동(`TaskDecision`)을 결정합니다.
+
+```python
+class StepPlanner:
+    async def decide(self, task: Task, ctx: TaskContext) -> TaskDecision:
+        # 프롬프트 생성 및 LLM 호출
+        response = await self._llm.parse_json(
+            system=prompts.build_system_prompt(ctx),
+            user=prompts.build_step_prompt(task, ctx),
+            max_tokens=8192,
+        )
+        # JSON 응답을 객체로 변환
+        return parse_decision(response)
+```
+
+### DecompositionCritic (분해 검증)
+제안된 작업 분해가 적절한지 비판적으로 평가하여 점수를 매깁니다.
+
+---
+
+## 4. 모델 선택 및 팩토리 패턴
+
+`get_llm_client` 함수를 통해 환경 변수나 요청 파라미터에 따라 적절한 클라이언트를 동적으로 생성합니다.
+
+```python
+def get_llm_client(model_type: str) -> LLMClient:
+    if model_type == "claude":
+        return AnthropicClient(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    elif model_type == "gemini":
+        return GeminiDirectClient(api_key=os.getenv("GOOGLE_API_KEY"))
+    elif model_type == "openrouter":
+        return OpenRouterClient(api_key=os.getenv("OPENROUTER_API_KEY"), model="meta-llama/llama-3-70b-instruct")
+    raise ValueError(f"지원하지 않는 모델 타입입니다: {model_type}")
+```
+
+---
+
+## 5. 사용량 추적 및 비용 관리
+
+### LLMUsageWriter
+모든 LLM 호출의 토큰 사용량을 기록하여 최종 실행 보고서를 작성합니다.
+
+```python
+class LLMUsageWriter:
+    def add_usage(self, model: str, input_tokens: int, output_tokens: int):
+        self._usage_log.append({
+            "model": model,
+            "input": input_tokens,
+            "output": output_tokens,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+    def get_summary(self):
+        # 모델별 총 사용량 및 비용 계산 로직
+        pass
+```
+
+### 실시간 비용 계산 (2026 기준 예시)
+> [!NOTE]
+> 아래 가격은 100만(1M) 토큰당 추정 가격($)이며, 시장 상황에 따라 변동될 수 있습니다.
+
+| 모델명 | 입력(Input) | 출력(Output) |
+| :--- | :--- | :--- |
+| `claude-3-5-sonnet` | \$3.00 | \$15.00 |
+| `gemini-2.0-flash` | \$0.10 | \$0.40 |
+| `llama-3-70b` (OR) | \$0.60 | \$0.60 |
+
+---
+
+## 6. 에러 처리 및 회복 전략
+
+1.  **지수 백오프 재시도 (Exponential Backoff):** `RateLimitError` 발생 시 대기 시간을 늘려가며 최대 3회 재시도합니다.
+2.  **타임아웃 설정:** 응답이 60초 이상 지연될 경우 세션을 보호하기 위해 `asyncio.timeout`을 적용합니다.
+3.  **폴백(Fallback) 메커니즘:** (선택 사항) 특정 모델 실패 시 저렴하거나 성능이 유사한 다른 모델로 자동 전환하는 로직을 추가할 수 있습니다.
+
+---
+
+## 7. 새로운 모델 추가 방법
+
+1.  **Protocol 구현:** `LLMClient` 인터페이스를 따르는 새로운 클래스를 생성합니다.
+2.  **JSON 파싱 최적화:** 해당 모델이 `JSON Mode`를 지원한다면 이를 활용하고, 지원하지 않는다면 프롬프트 엔지니어링을 통해 JSON 형식을 강제합니다.
+3.  **팩토리 등록:** `get_llm_client` 함수에 조건문을 추가하여 시스템에서 호출할 수 있게 합니다.
+
+---

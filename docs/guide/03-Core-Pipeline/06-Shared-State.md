@@ -1,1 +1,101 @@
-# 공유 상태 (SharedState)\n\n모든 작업이 접근 가능한 팩트 저장소. 작업 간 정보 공유의 유일한 경로.\n\n## 개요\n\n```python\nclass SharedState:\n    def publish(self, key, value, source_task_id, *, grounded, as_of_utc, time_scope, target_start, target_end, source_urls):\n        \"\"\"팩트 발행\"\"\"\n    \n    def view_for(self, task_id):\n        \"\"\"TaskContext용 뷰 생성\"\"\"\n```\n\n## 팩트 구조\n\n```python\n@dataclass\nclass Fact:\n    key: str                    # 팩트 이름 (e.g., \"apple_revenue\")\n    value: Any                  # 실제 값\n    source_task_id: str         # 이 팩트를 발행한 작업\n    grounded: bool              # 근거 있음? (도구/검색 결과 기반)\n    as_of_utc: str             # 언제 기준인가\n    time_scope: str            # 시간 범위 (e.g., \"FY2024\")\n    target_start: str          # 질의의 시간 범위 시작\n    target_end: str            # 질의의 시간 범위 끝\n    source_urls: tuple[str]    # 출처 URL들\n    published_at: str          # 발행 시각\n```\n\n## 발행 (Publish)\n\n### TaskDecision에서\n\n```python\n# Planning 단계에서 LLM이 결정\nTaskDecision(\n    action=Action.AGGREGATE,\n    facts={\n        \"apple_revenue_2024\": {\n            \"value\": 195_000_000_000,\n            \"grounded\": True,  # 근거 있음\n            \"source_urls\": [\"https://finance.yahoo.com/...\"]\n        },\n        \"market_cap\": {\n            \"value\": 3_200_000_000_000,\n            \"grounded\": True,\n            \"source_urls\": [\"https://...\"]\n        },\n    }\n)\n```\n\n### Scheduler에서 적용\n\n```python\ndef apply_decision(self, task, decision, shared):\n    if decision.action == Action.AGGREGATE:\n        # facts 발행\n        for key, value in decision.facts.items():\n            fact_value, grounded, source_urls = self._fact_payload(value)\n            shared.publish(\n                key,\n                fact_value,\n                source_task_id=task.id,\n                grounded=grounded,\n                as_of_utc=ctx.as_of_utc,\n                time_scope=temporal.time_scope,\n                target_start=temporal.target_start,\n                target_end=temporal.target_end,\n                source_urls=source_urls,\n            )\n```\n\n## 조회 (Query)\n\n### TaskContext에서\n\n```python\n# Planner에서 프롬프트 생성 시\nctx.shared.get(\"apple_revenue_2024\")\n# → {\"value\": 195000000000, \"source_task_id\": \"task.1.0\", ...}\n\nctx.shared.find_all()\n# → {\"apple_revenue_2024\": {...}, \"market_cap\": {...}, ...}\n```\n\n### SharedStateView\n\n```python\nclass SharedStateView:\n    def __init__(self, facts: dict[str, Fact], timestamps: list[str]):\n        self._facts = facts\n        self._timestamps = timestamps\n    \n    def get(self, key: str) -> Any | None:\n        fact = self._facts.get(key)\n        return fact.value if fact else None\n    \n    def find_all(self) -> dict[str, Any]:\n        return {key: fact.value for key, fact in self._facts.items()}\n    \n    def find_by_source(self, source_task_id: str) -> dict[str, Any]:\n        return {key: fact.value for key, fact in self._facts.items()\n                if fact.source_task_id == source_task_id}\n```\n\n## 메타데이터\n\n### grounded (근거)\n\n도구/외부 API의 결과인가, 아니면 LLM의 추론인가?\n\n```python\n# 근거 있음 (도구 결과)\nshared.publish(\n    \"apple_stock_price\",\n    value=234.5,\n    grounded=True,  # yfinance에서 조회\n    source_urls=[\"https://finance.yahoo.com/\"],\n)\n\n# 근거 없음 (LLM의 분석)\nshared.publish(\n    \"analysis_summary\",\n    value=\"Apple은 견고한 재정 상태를 유지하고 있습니다\",\n    grounded=False,  # LLM이 종합한 결론\n)\n```\n\n### 시간 범위\n\n```python\nfrom domain.query import QueryAnalysis, summarize_temporal_contract\n\n# QueryAnalysis에서\nanalysis = analyze_query(\"Apple의 2024년 수익은?\")\n# → time_scope = \"FY2024\", target_start = \"2024-01\", target_end = \"2024-12\"\n\n# 팩트 발행 시\ntemporal = summarize_temporal_contract(\n    as_of_utc=ctx.as_of_utc,\n    units=ctx.query_units,\n)\n\nshared.publish(\n    \"apple_revenue\",\n    value=195_000_000_000,\n    grounded=True,\n    as_of_utc=ctx.as_of_utc,\n    time_scope=temporal.time_scope,       # \"FY2024\"\n    target_start=temporal.target_start,   # \"2024-01-01\"\n    target_end=temporal.target_end,       # \"2024-12-31\"\n)\n```\n\n### source_urls\n\n출처 URL들. 팩트의 근거를 찾을 수 있는 위치:\n\n```python\nshared.publish(\n    \"10k_filing_url\",\n    value=\"https://www.sec.gov/Archives/edgar/...\",\n    source_urls=[\n        \"https://www.sec.gov/cgi-bin/browse-edgar?...\",\n        \"https://investor.apple.com/...\",\n    ],\n)\n```\n\n## 팩트 유효성\n\n### 중복 방지\n\n```python\n# 같은 key로 여러 번 발행\nshared.publish(\"apple_revenue\", 195_000_000_000, ...)\nshared.publish(\"apple_revenue\", 194_735_000_000, ...)  # 덮어씀\n```\n\n**정책**: 마지막 값이 이전 값을 덮어씈다.\n\n### 팩트 순서\n\n```python\n# timestamps를 유지하여 시간순 추적\nshared.view_for(task_id)  # 이 task가 조회할 수 있는 팩트들\n```\n\n## 프롬프트에서의 사용\n\nPlanner가 프롬프트 생성 시:\n\n```python\ndef build_step_prompt(task, ctx, ...):\n    prompt = f\"\"\"\n    작업: {task.description}\n    \n    지금까지 발견된 사실들:\n    {format_facts(ctx.shared.find_all())}\n    \n    도구 실행 결과:\n    {format_tool_results(ctx.tool_results)}\n    \n    다음 단계를 결정하세요.\n    \"\"\"\n    \n    return prompt\n```\n\n**프롬프트에 포함되는 정보**:\n- 팩트의 값\n- 발행 task_id\n- 근거 여부\n- 출처 URL\n- 시간 범위\n\n## 집계 (Implicit Aggregation)\n\n자식 작업들의 모든 팩트를 자동으로 병합:\n\n```python\ndef implicit_aggregate_payload(task):\n    # 모든 자식이 facts_only 상태인가?\n    if all_children_facts_only:\n        # 팩트들 병합\n        merged_facts = {}\n        for child_output in child_outputs.values():\n            merged_facts.update(child_output[\"facts\"])\n        return None, merged_facts\n```\n\n## 설계 원칙\n\n### 1. 유일한 정보 공유 경로\n\n작업 간 의존성은 **SharedState**를 통해서만 표현:\n\n```python\n# ❌ 나쁜 예: 직접 task 참조\ntask1.output  # 다른 task가 접근\n\n# ✅ 좋은 예: SharedState 통해\nshared.get(\"apple_revenue\")  # 누구든 접근 가능\n```\n\n### 2. 메타데이터 보존\n\n팩트의 출처, 시간, 근거를 항상 기록:\n\n```python\n# 나중에 \"이 팩트가 맞나?\"라고 물을 수 있도록\nfact = shared.get(\"apple_revenue\")\nprint(f\"출처: {fact.source_task_id}\")\nprint(f\"근거 있음: {fact.grounded}\")\nprint(f\"URL: {fact.source_urls}\")\n```\n\n### 3. 불변성\n\n팩트 객체는 frozen (불변):\n\n```python\n# Fact는 @dataclass(frozen=True)\nfact = Fact(...)\nfact.value = 999  # TypeError: cannot assign to frozen dataclass\n```\n\n## 실행 예시\n\n```python\n# task.1.0이 완료됨\ndecision = TaskDecision(\n    action=Action.AGGREGATE,\n    facts={\n        \"apple_revenue_2024\": {\n            \"value\": 195_000_000_000,\n            \"grounded\": True,\n            \"source_urls\": [...],\n        },\n    },\n)\n\n# Scheduler가 적용\nshared.publish(\n    \"apple_revenue_2024\",\n    195_000_000_000,\n    source_task_id=\"task.1.0\",\n    grounded=True,\n    source_urls=[...],\n)\n\n# 이제 다른 작업에서\nctx = build_context(task_2_0)\nctx.shared.get(\"apple_revenue_2024\")  # 195_000_000_000\n\n# 프롬프트에 포함\nshared_facts = ctx.shared.find_all()\nprint(shared_facts)\n# {\n#   \"apple_revenue_2024\": 195_000_000_000,\n# }\n```\n"
+# 공유 상태 (SharedState)
+
+`SharedState`는 에이전트 내의 모든 작업(Task)이 접근할 수 있는 **중앙 집중형 팩트(Fact) 저장소**입니다. 작업 간 직접적인 정보 전달을 금지하고, 모든 데이터 교환은 이 저장소를 통해서만 이루어집니다.
+
+
+
+## 1. 데이터 구조: Fact
+
+모든 정보는 `Fact`라는 단위로 저장되며, 단순한 값을 넘어 출처와 시간 정보 등 풍부한 메타데이터를 포함합니다.
+
+```python
+@dataclass(frozen=True)
+class Fact:
+    key: str                    # 식별자 (예: "apple_revenue_2024")
+    value: Any                  # 실제 데이터
+    source_task_id: str         # 팩트를 생성한 작업 ID
+    grounded: bool              # 근거 여부 (도구 결과 기반이면 True, LLM 추론이면 False)
+    source_urls: tuple[str, ...] # 출처 URL 리스트
+    
+    # 시간 관련 메타데이터
+    as_of_utc: str              # 데이터 기준 시점
+    time_scope: str             # 시간 범위 (예: "FY2024")
+    target_start: str           # 데이터 유효 시작일
+    target_end: str             # 데이터 유효 종료일
+    
+    published_at: str           # 저장소 발행 시각
+```
+
+---
+
+## 2. 팩트 발행 및 조회 흐름
+
+### 발행 (Publishing)
+작업이 완료되거나 중간 결과를 집계할 때 `AGGREGATE` 액션을 통해 팩트를 저장합니다.
+
+1.  **계획 단계:** LLM이 발견된 정보와 출처를 정리하여 `TaskDecision`에 포함합니다.
+2.  **반영 단계:** 스케줄러가 `SharedState.publish()`를 호출하여 저장소에 기록합니다.
+
+```python
+# Scheduler 내 반영 로직 예시
+shared.publish(
+    key="market_cap",
+    value=3_200_000_000_000,
+    grounded=True,
+    source_urls=("https://finance.yahoo.com/quote/AAPL",),
+    # ... 기타 시간 메타데이터
+)
+```
+
+### 조회 (Querying)
+플래너가 다음 단계를 결정하기 위해 컨텍스트를 구성할 때 저장된 팩트를 읽어옵니다.
+
+* **`get(key)`**: 특정 키에 해당하는 값 반환.
+* **`find_all()`**: 현재까지 수집된 모든 팩트를 딕셔너리 형태로 반환.
+* **`view_for(task_id)`**: 특정 작업 시점에서 유효한 팩트들만 필터링된 뷰(View)를 제공.
+
+---
+
+## 3. 핵심 메커니즘
+
+### 팩트 유효성 및 덮어쓰기
+동일한 `key`로 새로운 팩트가 발행되면 **마지막에 발행된 값이 이전 값을 덮어씁니다.** 이는 최신 정보가 우선시되는 정책을 따릅니다.
+
+### 암시적 집계 (Implicit Aggregation)
+하위 작업들이 모두 완료되고 정보를 반환할 때, 에이전트는 자식 작업들이 생산한 팩트들을 자동으로 병합(Merge)하여 부모 작업의 컨텍스트에 주입합니다.
+
+### 프롬프트 주입
+플래너는 수집된 팩트들을 기반으로 다음과 같이 프롬프트를 구성합니다.
+> **지금까지 발견된 사실들:**
+> - apple_revenue: 195B (근거: 있음, 출처: SEC 10-K)
+> - analysis_summary: "성장세 유지" (근거: 없음, LLM 추론)
+
+---
+
+## 4. 설계 원칙 (Design Principles)
+
+1.  **유일한 정보 경로 (Single Source of Truth):**
+    작업은 다른 작업의 내부 상태를 직접 참조할 수 없습니다. 오직 `SharedState`에 발행된 팩트만을 신뢰합니다.
+2.  **메타데이터 보존 (Preserve Provenance):**
+    "무엇이" 맞는가보다 "왜" 맞는가가 중요합니다. 모든 팩트는 `source_urls`와 `grounded` 플래그를 통해 검증 가능해야 합니다.
+3.  **불변성 (Immutability):**
+    한 번 생성된 `Fact` 객체는 수정될 수 없습니다(`frozen=True`). 데이터가 변경되어야 한다면 새로운 `Fact`를 발행하여 교체해야 합니다.
+
+---
+
+## 5. 시간 범위(Temporal) 처리 예시
+
+질의 내용에 따라 팩트의 유효 범위를 엄격하게 관리합니다.
+
+```python
+# "2024년 수익" 질의 처리 시
+shared.publish(
+    key="apple_revenue",
+    value=195_000_000_000,
+    time_scope="FY2024",
+    target_start="2024-01-01",
+    target_end="2024-12-31"
+)
+```
+
+이 구조를 통해 에이전트는 서로 다른 시점의 데이터를 혼동하지 않고 정확한 비교 분석을 수행할 수 있습니다. 특히 `grounded` 메타데이터는 최종 답변의 신뢰도를 높이는 결정적인 역할을 합니다.

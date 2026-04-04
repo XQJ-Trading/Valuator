@@ -1,1 +1,158 @@
-# 도구 시스템 (Tools)\n\n작업이 외부 정보를 수집하고 계산을 수행하는 수단.\n\n## 도구 종류\n\n| 도구 | 용도 | 입력 | 출력 |\n|------|------|------|------|\n| **PerplexitySearchTool** | 웹 검색 | query: str | 검색 결과 텍스트 |\n| **YFinanceBalanceSheetTool** | 재무 데이터 | ticker: str | 잔액표 JSON |\n| **SECTool** | SEC 문서 | ticker: str, form_type: str | 10-K, 8-K 등 |\n| **ExecuteCodeTool** | 파이썬 실행 | code: str | 실행 결과 |\n\n## 도구 등록\n\n### runtime.py에서\n\n```python\ndef create_tool_registry(model: str, usage_writer=None):\n    registry = ToolRegistry()\n    \n    # 각 도구 인스턴스 생성\n    code_tool = ExecuteCodeTool()\n    code_tool.warm_up()  # 샌드박스 준비\n    \n    # 등록\n    for tool in (\n        PerplexitySearchTool(),\n        code_tool,\n        YFinanceBalanceSheetTool(),\n        SECTool(model=model),\n    ):\n        registry.register(tool)\n    \n    registry.bind_usage_writer(usage_writer)\n    return registry\n```\n\n## 도구 인터페이스\n\n### Tool 기본 클래스\n\n```python\nclass Tool(ABC):\n    @property\n    @abstractmethod\n    def name(self) -> str:\n        \"\"\"도구 이름 (e.g., 'web_search')\"\"\"\n    \n    @property\n    @abstractmethod\n    def description(self) -> str:\n        \"\"\"사람이 읽을 수 있는 설명\"\"\"\n    \n    @abstractmethod\n    def get_spec(self) -> ToolSpec:\n        \"\"\"JSON Schema (LLM이 읽음)\"\"\"\n    \n    @abstractmethod\n    async def execute(self, **kwargs) -> Any:\n        \"\"\"실제 실행\"\"\"\n```\n\n### 예: PerplexitySearchTool\n\n```python\nclass PerplexitySearchTool(Tool):\n    @property\n    def name(self) -> str:\n        return \"web_search\"\n    \n    def get_spec(self) -> ToolSpec:\n        return ToolSpec(\n            name=\"web_search\",\n            description=\"검색 쿼리로 웹 검색 수행\",\n            input_schema={\n                \"type\": \"object\",\n                \"properties\": {\n                    \"query\": {\"type\": \"string\", \"description\": \"검색어\"},\n                },\n                \"required\": [\"query\"],\n            },\n        )\n    \n    async def execute(self, query: str) -> str:\n        # Perplexity API 호출\n        response = await self._api_client.search(query)\n        return response.text\n```\n\n## 도구 실행\n\n### Agent에서\n\n```python\nasync def _execute_tool(self, task, tool_request, ctx):\n    # Tool Registry에서 도구 찾음\n    tool = self._tools.get(tool_request.tool_name)\n    \n    # 실행\n    try:\n        result = await tool.execute(**tool_request.args)\n        \n        # 성공\n        self._scheduler.mark_tool_complete(\n            task,\n            ToolResult(success=True, result=result),\n        )\n    except Exception as e:\n        # 실패\n        self._scheduler.mark_tool_complete(\n            task,\n            ToolResult(success=False, error=str(e)),\n        )\n```\n\n### ToolRegistry\n\n```python\nclass ToolRegistry:\n    def register(self, tool: Tool) -> None:\n        self._tools[tool.name] = tool\n    \n    def get(self, name: str) -> Tool | None:\n        return self._tools.get(name)\n    \n    async def execute(self, name: str, args: dict[str, Any], timeout: float) -> Any:\n        tool = self.get(name)\n        if tool is None:\n            raise ValueError(f\"tool not found: {name}\")\n        \n        try:\n            # 타임아웃 설정\n            return await asyncio.wait_for(\n                tool.execute(**args),\n                timeout=timeout,\n            )\n        except asyncio.TimeoutError:\n            raise TimeoutError(f\"{name} execution timed out\")\n```\n\n## 특수 도구: ExecuteCodeTool\n\n### 샌드박스 기반 실행\n\n```python\nclass ExecuteCodeTool(Tool):\n    def __init__(self):\n        self._executor = SandboxExecutor()  # 별도 프로세스\n    \n    def warm_up(self):\n        \"\"\"샌드박스 시작\"\"\"\n        self._executor.start()\n    \n    async def execute(self, code: str) -> str:\n        # 코드를 서브프로세스에서 실행\n        result = await self._executor.run_code(\n            code,\n            timeout=30,  # 최대 30초\n        )\n        return result.stdout\n```\n\n### 보안\n\n```python\n# 샌드박스 프로토콜\n# 1. 명령을 JSON으로 직렬화\n# 2. 서브프로세스로 전송\n# 3. 결과 수신\n# 4. 타임아웃 강제 종료\n```\n\n## 도구 실패 처리\n\n### 같은 요청 재시도 방지\n\n```python\n# Task에서\nfailed_tool_request_signatures: set[str]\ntool_failure_counts: dict[str, int]\nblocked_tools: set[str]\n\n# 실행 전\nsignature = _tool_request_signature(tool_name=\"web_search\", args={...})\nif signature in task.failed_tool_request_signatures:\n    # 이전에 실패했던 요청: 다시 호출하지 않음\n    return\n\n# 실행 후\nif not result.success:\n    task.tool_failure_counts[tool_name] += 1\n    if task.tool_failure_counts[tool_name] > MAX_FAILURES:\n        task.blocked_tools.add(tool_name)  # 이 도구 차단\n```\n\n## 프롬프트에서의 도구\n\n### 도구 목록\n\n```python\nctx.available_tools  # [\"web_search\", \"code_execute\", ...]\n\n# StepPlanner가 프롬프트에 포함\nspecs = [tool.get_spec() for tool in available_tools]\nprint_tool_specs(specs)\n```\n\n### Tool Hint\n\nTaskSpec에서 LLM을 가이드:\n\n```python\nTaskSpec(\n    description=\"Apple의 2024 수익 확인\",\n    task_name=\"search_apple_revenue\",\n    tool_hint=\"web_search\",  # 이 도구 사용 권장\n)\n```\n\n## 사용 추적\n\n### LLM 토큰 사용\n\n```python\nusage_writer = LLMUsageWriter()\n\nregistry = create_tool_registry(model, usage_writer)\n\n# 도구 실행 후\nresult = await registry.execute(...)\n\n# 사용량 기록\nusage_writer.add_usage(\n    model=model,\n    input_tokens=...,\n    output_tokens=...,\n)\n```\n\n## 새 도구 추가\n\n### 1단계: Tool 클래스 구현\n\n```python\nclass MyCustomTool(Tool):\n    @property\n    def name(self) -> str:\n        return \"my_tool\"\n    \n    @property\n    def description(self) -> str:\n        return \"내 커스텀 도구\"\n    \n    def get_spec(self) -> ToolSpec:\n        return ToolSpec(\n            name=self.name,\n            description=self.description,\n            input_schema={\n                \"type\": \"object\",\n                \"properties\": {\n                    \"param1\": {\"type\": \"string\"},\n                },\n                \"required\": [\"param1\"],\n            },\n        )\n    \n    async def execute(self, param1: str) -> Any:\n        # 구현\n        return f\"Result: {param1}\"\n```\n\n### 2단계: runtime.py에 등록\n\n```python\ndef create_tool_registry(model, usage_writer=None):\n    registry = ToolRegistry()\n    \n    for tool in (\n        PerplexitySearchTool(),\n        ExecuteCodeTool(),\n        MyCustomTool(),  # 추가\n    ):\n        registry.register(tool)\n    \n    return registry\n```\n\n### 3단계: LLM이 자동으로 사용\n\nTaskDecision의 tool_request:\n```python\nTaskDecision(\n    action=Action.EXECUTE,\n    tool_request=ToolRequest(\n        tool_name=\"my_tool\",\n        args={\"param1\": \"value\"},\n    ),\n)\n```\n\n## 타임아웃 관리\n\n```python\n# Agent Loop에서\nresult = await self._tools.execute(\n    tool_request.tool_name,\n    tool_request.args,\n    timeout=30,  # 초\n)\n```\n\n각 도구별 기본값:\n- web_search: 15초\n- code_execute: 30초\n- yfinance: 10초\n- sec_tool: 30초\n"
+# 도구 시스템 (Tools)
+
+작업(Task)이 외부 정보를 수집하거나 복잡한 계산을 수행하기 위해 사용하는 핵심 수단입니다.
+
+## 1. 도구 목록 개요
+
+| 도구 | 용도 | 입력 (Schema) | 출력 |
+| :--- | :--- | :--- | :--- |
+| **PerplexitySearchTool** | 실시간 웹 검색 | `query: str` | 검색 결과 텍스트 |
+| **YFinanceBalanceSheetTool** | 기업 재무 데이터 조회 | `ticker: str` | 잔액표(JSON) |
+| **SECTool** | 미국 증시 공시 문서 조회 | `ticker: str`, `form_type: str` | 10-K, 8-K 등 원문 |
+| **ExecuteCodeTool** | 파이썬 코드 실행 | `code: str` | 실행 결과 (Stdout) |
+
+---
+
+## 2. 도구 인터페이스 정의
+
+모든 도구는 공통된 인터페이스를 따르며, LLM이 이해할 수 있는 JSON 스키마를 제공해야 합니다.
+
+### Tool 기본 클래스
+```python
+from abc import ABC, abstractmethod
+from typing import Any
+
+class Tool(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """도구의 고유 식별자 (예: 'web_search')"""
+    
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """LLM이 도구의 용도를 이해하기 위한 설명"""
+    
+    @abstractmethod
+    def get_spec(self) -> ToolSpec:
+        """LLM 호출에 필요한 JSON Schema 반환"""
+    
+    @abstractmethod
+    async def execute(self, **kwargs) -> Any:
+        """도구의 실제 비즈니스 로직 실행"""
+```
+
+### 구현 예시: PerplexitySearchTool
+```python
+class PerplexitySearchTool(Tool):
+    @property
+    def name(self) -> str:
+        return "web_search"
+    
+    def get_spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="web_search",
+            description="검색 쿼리로 최신 웹 정보를 검색합니다.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "검색어"},
+                },
+                "required": ["query"],
+            },
+        )
+    
+    async def execute(self, query: str) -> str:
+        response = await self._api_client.search(query)
+        return response.text
+```
+
+---
+
+## 3. 도구 등록 및 관리 (Registry)
+
+시스템 시작 시 사용할 도구들을 등록하고 관리하는 중앙 레지스트리입니다.
+
+### 도구 등록 프로세스 (`runtime.py`)
+```python
+def create_tool_registry(model: str, usage_writer=None):
+    registry = ToolRegistry()
+    
+    # 특수 초기화가 필요한 도구 인스턴스 생성
+    code_tool = ExecuteCodeTool()
+    code_tool.warm_up()  # 샌드박스 환경 사전 준비
+    
+    # 레지스트리에 도구 일괄 등록
+    tools_to_register = [
+        PerplexitySearchTool(),
+        code_tool,
+        YFinanceBalanceSheetTool(),
+        SECTool(model=model),
+    ]
+    
+    for tool in tools_to_register:
+        registry.register(tool)
+    
+    registry.bind_usage_writer(usage_writer)
+    return registry
+```
+
+---
+
+## 4. 실행 및 예외 처리
+
+에이전트는 레지스트리를 통해 도구를 실행하며, 타임아웃과 실패에 대한 방어 로직을 가집니다.
+
+### 도구 실행 흐름
+1. **도구 조회:** `tool_request.tool_name`으로 등록된 인스턴스를 찾음.
+2. **비동기 실행:** `asyncio.wait_for`를 사용하여 도구별 타임아웃 강제.
+3. **결과 처리:** 성공 시 결과 반환, 실패 시 에러 로그 기록 및 재시도 방지.
+
+### 실패 방지 로직 (Anti-Loop)
+동일한 인자로 반복해서 실패하는 것을 막기 위해 실행 전 시그니처를 확인합니다.
+```python
+# Task 상태 관리 예시
+signature = _generate_signature(tool_name, args)
+
+if signature in task.failed_tool_request_signatures:
+    # 이전에 실패했던 동일 요청은 즉시 차단
+    return Error("Same request failed previously.")
+
+if task.tool_failure_counts[tool_name] > MAX_FAILURES:
+    task.blocked_tools.add(tool_name) # 해당 도구 전체 차단
+```
+
+---
+
+## 5. 특수 도구: ExecuteCodeTool (Sandbox)
+
+보안과 격리를 위해 코드는 별도의 샌드박스 프로세스에서 실행됩니다.
+
+* **보안 프로토콜:**
+    1.  실행 코드를 JSON으로 직렬화하여 전달.
+    2.  독립된 서브프로세스에서 코드 실행.
+    3.  결과(Stdout/Stderr) 수신 후 프로세스 자원 회수.
+    4.  **타임아웃(기본 30초)** 초과 시 강제 종료.
+
+---
+
+## 6. 새 도구 추가 가이드
+
+1.  **클래스 구현:** `Tool` 추상 클래스를 상속받아 `name`, `get_spec`, `execute` 구현.
+2.  **레지스트리 등록:** `runtime.py`의 `create_tool_registry` 함수 내 목록에 추가.
+3.  **LLM 연동:** 별도의 작업 없이도 `StepPlanner`가 자동으로 새로운 `ToolSpec`을 인식하여 프롬프트에 포함함.
+
+> [!TIP]
+> **Tool Hint 활용**
+> 특정 작업에서 LLM이 헤맬 경우 `TaskSpec`에 `tool_hint="web_search"`와 같이 특정 도구 사용을 권장할 수 있습니다.
+
+---
+
+## 7. 도구별 권장 타임아웃
+
+| 도구 이름 | 권장 타임아웃 |
+| :--- | :--- |
+| `web_search` | 15초 |
+| `code_execute` | 30초 |
+| `yfinance` | 10초 |
+| `sec_tool` | 30초 |

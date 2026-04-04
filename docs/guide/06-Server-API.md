@@ -1,1 +1,139 @@
-# 서버 API\n\nFastAPI 기반 HTTP 인터페이스. 클라이언트가 분석 요청을 보내고 결과를 조회합니다.\n\n## 아키텍처\n\n```\nserver/\n├── main.py                 # FastAPI 앱\n├── chat_api.py            # 분석 엔드포인트\n└── session_viewer_api.py  # 세션 조회\n```\n\n## 엔드포인트\n\n### 1. 분석 요청\n\n**POST** `/api/chat`\n\n```json\n{\n  \"query\": \"Apple의 2024 수익은?\",\n  \"model\": \"claude\",\n  \"session_id\": \"S-20260405-...\"\n}\n```\n\n**응답**:\n```json\n{\n  \"status\": \"completed\",\n  \"output\": \"Apple의 2024 회계연도 수익은 약 1,950억 달러입니다...\",\n  \"session_id\": \"S-20260405-...\",\n  \"duration\": 45.3,\n  \"llm_usage\": {\n    \"total_input_tokens\": 12345,\n    \"total_output_tokens\": 6789\n  }\n}\n```\n\n**흐름**:\n1. 요청 수신\n2. 세션 생성 (또는 기존 세션 재개)\n3. Agent 초기화\n4. Agent.run() 실행\n5. 최종 결과 반환\n\n### 2. 세션 조회\n\n**GET** `/api/sessions/{session_id}`\n\n**응답**:\n```json\n{\n  \"session_id\": \"S-20260405-...\",\n  \"query\": \"Apple의 2024 수익은?\",\n  \"status\": \"completed\",\n  \"created_at\": \"2026-04-05T10:30:00Z\",\n  \"completed_at\": \"2026-04-05T10:31:45Z\",\n  \"steps\": [\n    {\n      \"timestamp\": \"2026-04-05T10:30:05Z\",\n      \"event\": \"step_started\",\n      \"task_id\": \"root\",\n      \"task_name\": \"분석 요청\"\n    },\n    {\n      \"timestamp\": \"2026-04-05T10:30:15Z\",\n      \"event\": \"decomposed\",\n      \"task_id\": \"root\",\n      \"child_count\": 3\n    },\n    // ...\n  ]\n}\n```\n\n### 3. 세션 트리\n\n**GET** `/api/sessions/{session_id}/tree`\n\n**응답**:\n```json\n{\n  \"root\": {\n    \"id\": \"root\",\n    \"description\": \"분석 요청\",\n    \"state\": \"DONE\",\n    \"children\": [\n      {\n        \"id\": \"root.0\",\n        \"description\": \"Apple의 2024 수익 조회\",\n        \"state\": \"DONE\",\n        \"tool_results\": [{...}]\n      },\n      // ...\n    ]\n  }\n}\n```\n\n### 4. 건강 확인\n\n**GET** `/health`\n\n```json\n{\n  \"status\": \"ok\"\n}\n```\n\n## 내부 흐름\n\n### chat_api.py\n\n```python\nfrom fastapi import APIRouter, Request\nfrom pydantic import BaseModel\n\nrouter = APIRouter(prefix=\"/api\")\n\nclass ChatRequest(BaseModel):\n    query: str\n    model: str = \"claude\"\n    session_id: str | None = None\n\nclass ChatResponse(BaseModel):\n    status: str\n    output: str\n    session_id: str\n    duration: float\n    llm_usage: dict\n\n@router.post(\"/chat\")\nasync def chat(request: ChatRequest) -> ChatResponse:\n    # 1. 세션 초기화\n    session_id = request.session_id or generate_session_id()\n    session = SessionStore.get_or_create(session_id)\n    \n    # 2. 도구 레지스트리 생성\n    tool_registry = create_tool_registry(request.model)\n    \n    # 3. LLM 클라이언트 선택\n    llm_client = get_llm_client(request.model)\n    \n    # 4. Agent 초기화\n    root = ComplexTask(\n        id=f\"{session_id}.root\",\n        description=\"분석 요청 처리\",\n    )\n    \n    agent = Agent(\n        scheduler=Scheduler(),\n        shared_state=SharedState(),\n        tool_registry=tool_registry,\n        llm_client=llm_client,\n        query_analysis=analyze_query(request.query),\n        trace_writer=session.trace_writer,\n        on_event=lambda event: emit_event(session, event),\n    )\n    \n    # 5. 실행\n    start_time = time.time()\n    try:\n        final_output = await agent.run(request.query, root)\n        status = \"completed\"\n        error = None\n    except Exception as e:\n        final_output = None\n        status = \"failed\"\n        error = str(e)\n    \n    duration = time.time() - start_time\n    \n    # 6. 세션 저장\n    session.update(\n        status=status,\n        final_output=final_output,\n        error=error,\n        duration=duration,\n    )\n    \n    # 7. 응답\n    return ChatResponse(\n        status=status,\n        output=final_output_text(final_output),\n        session_id=session_id,\n        duration=duration,\n        llm_usage=session.trace_writer.usage_summary(),\n    )\n```\n\n## 세션 관리\n\n### SessionStore\n\n```python\nclass SessionStore:\n    @staticmethod\n    def get_or_create(session_id: str) -> Session:\n        # session_id로 디렉토리 생성/열기\n        session_dir = SESSIONS_DIR / session_id\n        session_dir.mkdir(exist_ok=True)\n        \n        return Session(\n            id=session_id,\n            dir=session_dir,\n            trace_writer=TraceWriter(session_dir),\n        )\n\nclass Session:\n    def __init__(self, id: str, dir: Path, trace_writer):\n        self.id = id\n        self.dir = dir\n        self.trace_writer = trace_writer\n        self.created_at = datetime.now(UTC)\n        self.status = \"in_progress\"\n    \n    def update(\n        self,\n        status: str,\n        final_output: Any,\n        error: str | None = None,\n        duration: float = 0,\n    ):\n        self.status = status\n        self.completed_at = datetime.now(UTC)\n        \n        # JSON 메타데이터 저장\n        self.trace_writer.update_session(\n            status=status,\n            completed_at=self.completed_at.isoformat(),\n            error=error,\n            final_answer=final_output_text(final_output),\n            duration=duration,\n            llm_usage_summary=self.trace_writer.usage_summary(),\n        )\n```\n\n### 파일 구조\n\n```\nvaluator/sessions/\n├── S-20260405-104410360712Z/\n│   ├── metadata.json           # 세션 메타데이터\n│   ├── trace.jsonl             # 이벤트 기록 (각 줄이 이벤트)\n│   └── trace_markdown.md       # Markdown 포맷\n├── S-20260405-104500000000Z/\n│   ├── metadata.json\n│   ├── trace.jsonl\n│   └── trace_markdown.md\n└── ...\n```\n\n## 세션 조회\n\n### session_viewer_api.py\n\n```python\nrouter = APIRouter(prefix=\"/api/sessions\")\n\n@router.get(\"/{session_id}\")\nasync def get_session(session_id: str):\n    session = SessionStore.load(session_id)\n    if session is None:\n        raise HTTPException(status_code=404)\n    \n    return {\n        \"session_id\": session.id,\n        \"query\": session.query,\n        \"status\": session.status,\n        \"created_at\": session.created_at.isoformat(),\n        \"completed_at\": session.completed_at.isoformat(),\n        \"duration\": session.duration,\n        \"steps\": session.trace_writer.read_events(),\n    }\n\n@router.get(\"/{session_id}/tree\")\nasync def get_session_tree(session_id: str):\n    session = SessionStore.load(session_id)\n    tree = session.trace_writer.build_task_tree()\n    return tree\n\n@router.get(\"/{session_id}/markdown\")\nasync def get_session_markdown(session_id: str):\n    session = SessionStore.load(session_id)\n    markdown = session.trace_writer.render_markdown()\n    return {\"content\": markdown}\n```\n\n## CORS\n\n```python\nfrom fastapi.middleware.cors import CORSMiddleware\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\n        \"http://localhost:5173\",   # 개발 클라이언트\n        \"http://127.0.0.1:5173\",\n        \"http://localhost:3000\",\n        \"http://127.0.0.1:3000\",\n    ],\n    allow_credentials=True,\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n```\n\n## 에러 처리\n\n### 예외 처리\n\n```python\n@router.post(\"/chat\")\nasync def chat(request: ChatRequest):\n    try:\n        # ...\n    except ValueError as e:\n        return ChatResponse(\n            status=\"failed\",\n            output=None,\n            error=str(e),\n        )\n    except Exception as e:\n        logger.exception(f\"Unexpected error: {e}\")\n        return ChatResponse(\n            status=\"failed\",\n            output=None,\n            error=\"Internal server error\",\n        )\n```\n\n## 시작\n\n```bash\ncd Valuator\nuvicorn server.main:app --reload --port 8000\n```\n\n## 클라이언트 예시\n\n### 분석 요청\n\n```python\nimport httpx\n\nasync with httpx.AsyncClient() as client:\n    response = await client.post(\n        \"http://localhost:8000/api/chat\",\n        json={\n            \"query\": \"Apple의 2024 수익은?\",\n            \"model\": \"claude\",\n        },\n    )\n    result = response.json()\n    print(result[\"output\"])\n```\n\n### 세션 조회\n\n```python\nsession_id = result[\"session_id\"]\n\nresponse = await client.get(\n    f\"http://localhost:8000/api/sessions/{session_id}\",\n)\nsession = response.json()\n\nfor step in session[\"steps\"]:\n    print(f\"{step['timestamp']}: {step['event']}\")\n```\n"
+# 서버 API (Server API)
+
+Valuator 서버는 에이전트 루프를 구동하고, 모든 분석 과정을 세션 단위로 기록하여 클라이언트에게 RESTful 인터페이스를 제공합니다.
+
+## 1. 프로젝트 아키텍처
+
+서버 코드는 기능에 따라 엔드포인트가 분리되어 있으며, 세션 데이터를 파일 시스템에 유지합니다.
+
+```text
+server/
+├── main.py                 # FastAPI 앱 초기화 및 미들웨어 설정
+├── chat_api.py            # 핵심 분석 (/api/chat) 엔드포인트
+├── session_viewer_api.py  # 세션 및 로그 조회 API
+└── session_store.py       # 세션 객체 및 파일 입출력 관리
+```
+
+---
+
+## 2. API 엔드포인트 개요
+
+| 메서드 | 엔드포인트 | 설명 |
+| :--- | :--- | :--- |
+| `POST` | `/api/chat` | 신규 분석 요청 및 에이전트 실행 |
+| `GET` | `/api/sessions/{id}` | 특정 세션의 요약 및 전체 이벤트 로그 조회 |
+| `GET` | `/api/sessions/{id}/tree` | 작업을 트리 구조(부모-자식)로 시각화하여 반환 |
+| `GET` | `/api/health` | 서버 상태 확인 |
+
+---
+
+## 3. 상세 엔드포인트 명세
+
+### [POST] 분석 요청 (`/api/chat`)
+사용자의 질의를 받아 에이전트를 가동합니다.
+
+**Request Body**
+```json
+{
+  "query": "Apple의 2024 회계연도 수익 분석",
+  "model": "claude",
+  "session_id": null 
+}
+```
+
+**Response**
+```json
+{
+  "status": "completed",
+  "output": "Apple의 2024년 총 매출은...",
+  "session_id": "S-20260405-104410Z",
+  "duration": 45.3,
+  "llm_usage": {
+    "total_input_tokens": 12345,
+    "total_output_tokens": 6789
+  }
+}
+```
+
+---
+
+## 4. 내부 실행 흐름 (Request Lifecycle)
+
+하나의 `/api/chat` 요청이 들어오면 서버 내부에서는 다음 과정을 거칩니다.
+
+
+
+1.  **세션 준비:** 전달된 `session_id`가 없으면 신규 ID를 생성하고 디렉토리를 확보합니다.
+2.  **환경 구성:** 요청된 모델에 맞춰 `ToolRegistry`와 `LLMClient`를 인스턴스화합니다.
+3.  **에이전트 주입:** `Scheduler`, `SharedState`, `TraceWriter`를 에이전트에 주입합니다. 이때 `on_event` 콜백을 통해 이벤트를 실시간으로 기록합니다.
+4.  **실행 (`Agent.run`):** 비동기 루프가 완료될 때까지 대기합니다.
+5.  **사후 처리:** 실행 시간, 토큰 사용량, 최종 답변을 `metadata.json`에 업데이트하고 클라이언트에 응답합니다.
+
+---
+
+## 5. 세션 및 로그 관리 (Persistence)
+
+모든 분석 세션은 고유 디렉토리에 저장되어 서버 재시작 후에도 조회가 가능합니다.
+
+### 디렉토리 구조
+```text
+valuator/sessions/
+└── S-20260405-104410Z/       # 세션 고유 ID
+    ├── metadata.json         # 상태, 시간, 토큰 사용량 등 요약
+    ├── trace.jsonl           # 모든 AgentEvent의 순차적 기록
+    └── trace_markdown.md     # 사람이 읽기 편하도록 렌더링된 로그
+```
+
+### 세션 데이터 객체 (`Session`)
+```python
+class Session:
+    def __init__(self, id: str, dir: Path, trace_writer):
+        self.id = id
+        self.dir = dir
+        self.trace_writer = trace_writer # JSONL 기록 담당
+        self.created_at = datetime.now(UTC)
+        self.status = "in_progress"
+```
+
+---
+
+## 6. 클라이언트 사용 예시
+
+### Python (httpx 사용)
+```python
+import httpx
+
+async def run_analysis():
+    async with httpx.AsyncClient() as client:
+        # 1. 분석 시작
+        res = await client.post("http://localhost:8000/api/chat", json={
+            "query": "Apple 수익 확인",
+            "model": "gemini"
+        })
+        session_id = res.json()["session_id"]
+        
+        # 2. 진행 상태/로그 확인
+        log_res = await client.get(f"http://localhost:8000/api/sessions/{session_id}")
+        for step in log_res.json()["steps"]:
+            print(f"[{step['timestamp']}] {step['event']}")
+```
+
+---
+
+## 7. 서버 실행 및 설정
+
+### CORS 설정
+프론트엔드(React/Vue 등)와의 통신을 위해 `main.py`에서 허용된 오리진(Origin)을 관리합니다. 기본적으로 `localhost:5173` 및 `3000` 포트가 개방되어 있습니다.
+
+### 실행 명령
+```bash
+# Valuator 루트 디렉토리에서 실행
+uvicorn server.main:app --reload --port 8000
+```
+
+> [!TIP]
+> **디버깅 모드**
+> 실시간 로그 출력을 확인하려면 `--log-level debug` 옵션을 추가하세요. 세션 로그는 `valuator/sessions/` 디렉토리에서 실시간으로 생성되는 `.jsonl` 파일을 통해 `tail -f`로 관찰할 수도 있습니다.
+
+---
+**업데이트 확인:** 이 문서는 2026년 4월 기준 API 명세를 바탕으로 작성되었습니다. 모델 가격이나 엔드포인트 변경 시 업데이트가 필요합니다.

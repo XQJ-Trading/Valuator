@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from valuator.utils.logger import logger
 
+from .auth import verify_auth
 from .chat_api import router as chat_router
 from .session_viewer_api import ensure_viewer_roots, router as session_viewer_router
 
@@ -21,7 +22,12 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="AI Agent Server", version="1.5.0", lifespan=lifespan)
+    app = FastAPI(
+        title="AI Agent Server",
+        version="1.5.0",
+        lifespan=lifespan,
+        dependencies=[Depends(verify_auth)],
+    )
 
     app.add_middleware(
         CORSMiddleware,

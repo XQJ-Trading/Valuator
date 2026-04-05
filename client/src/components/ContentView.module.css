@@ -4,6 +4,94 @@
   height: 100%;
 }
 
+.tabViewRoot {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.tabBar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  height: 35px;
+  scrollbar-width: none;
+}
+
+.tabBar::-webkit-scrollbar {
+  display: none;
+}
+
+.tabItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 12px;
+  min-width: 80px;
+  max-width: 200px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  position: relative;
+  user-select: none;
+}
+
+.tabItem:hover {
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.tabItemActive {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border-top: 1px solid var(--accent, #007acc);
+}
+
+.tabLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabClose {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0;
+}
+
+.tabItem:hover .tabClose,
+.tabItemActive .tabClose {
+  opacity: 1;
+}
+
+.tabClose:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
 .mdRoot {
   height: 100%;
   min-height: 0;
@@ -144,20 +232,6 @@
   color: var(--md-raw-heading);
 }
 
-.tab {
-  flex-shrink: 0;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .content {
   flex: 1;

@@ -16,6 +16,55 @@ import styles from "./ContentView.module.css";
 type MdViewMode = "preview" | "render-everything" | "raw";
 type JsonViewMode = "preview" | "markdown-style" | "render-everything" | "raw";
 
+function TabBar({
+  openTabs,
+  activeTabPath,
+  onSelectTab,
+  onCloseTab,
+}: {
+  openTabs: string[];
+  activeTabPath: string | null;
+  onSelectTab: (path: string) => void;
+  onCloseTab: (path: string) => void;
+}) {
+  return (
+    <div className={styles.tabBar} role="tablist">
+      {openTabs.map((path) => {
+        const name = path.split("/").at(-1) ?? path;
+        const isActive = path === activeTabPath;
+        return (
+          <div
+            key={path}
+            role="tab"
+            aria-selected={isActive}
+            className={
+              isActive
+                ? `${styles.tabItem} ${styles.tabItemActive}`
+                : styles.tabItem
+            }
+            onClick={() => onSelectTab(path)}
+          >
+            <span className={styles.tabLabel} title={path}>
+              {name}
+            </span>
+            <button
+              type="button"
+              className={styles.tabClose}
+              aria-label={`Close ${name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCloseTab(path);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MarkdownFilePanel({
   dataSource,
   filePath,
@@ -297,61 +346,103 @@ export default function ContentView({
   dataSource: DataSource;
   filePath: string | null;
 }) {
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
   const [file, setFile] = useState<FileResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- sync loading/error from async fetch */
+  // Sync filePath prop changes to tabs
   useEffect(() => {
     if (!filePath) return;
+    setOpenTabs((prev) =>
+      prev.includes(filePath) ? prev : [...prev, filePath]
+    );
+    setActiveTabPath(filePath);
+  }, [filePath]);
+
+  // Fetch file content based on active tab
+  /* eslint-disable react-hooks/set-state-in-effect -- sync loading/error from async fetch */
+  useEffect(() => {
+    if (!activeTabPath) return;
     setLoading(true);
     setError(null);
-    fetchFile(filePath, dataSource)
+    fetchFile(activeTabPath, dataSource)
       .then(setFile)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [filePath, dataSource]);
+  }, [activeTabPath, dataSource]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  if (!filePath) {
+  const closeTab = (path: string) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((p) => p !== path);
+      if (activeTabPath === path) {
+        const idx = prev.indexOf(path);
+        setActiveTabPath(next[idx] ?? next[idx - 1] ?? null);
+      }
+      return next;
+    });
+  };
+
+  if (openTabs.length === 0) {
     return <div className="content-empty">Select a file to view</div>;
   }
+
+  if (!activeTabPath) {
+    return <div className="content-empty">Select a file to view</div>;
+  }
+
   if (loading) return <div className="status-msg">Loading…</div>;
   if (error) return <div className="error-msg">Error: {error}</div>;
   if (!file) return null;
 
   const ext = file.ext.toLowerCase();
 
-  if (ext === ".md") {
-    return (
-      <MarkdownFilePanel
-        key={filePath}
-        dataSource={dataSource}
-        filePath={filePath}
-        content={file.content}
-        onFileUpdated={setFile}
-      />
-    );
-  }
+  const renderContent = () => {
+    if (ext === ".md") {
+      return (
+        <MarkdownFilePanel
+          key={activeTabPath}
+          dataSource={dataSource}
+          filePath={activeTabPath}
+          content={file.content}
+          onFileUpdated={setFile}
+        />
+      );
+    }
 
-  if (ext === ".json" || ext === ".jsonl") {
+    if (ext === ".json" || ext === ".jsonl") {
+      return (
+        <JsonFilePanel
+          key={activeTabPath}
+          dataSource={dataSource}
+          filePath={activeTabPath}
+          content={file.content}
+          ext={ext}
+          onFileUpdated={setFile}
+        />
+      );
+    }
+
     return (
-      <JsonFilePanel
-        key={filePath}
-        dataSource={dataSource}
-        filePath={filePath}
-        content={file.content}
-        ext={ext}
-        onFileUpdated={setFile}
-      />
+      <div className="content-area">
+        <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          {file.content}
+        </pre>
+      </div>
     );
-  }
+  };
 
   return (
-    <div className="content-area">
-      <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {file.content}
-      </pre>
+    <div className={styles.tabViewRoot}>
+      <TabBar
+        openTabs={openTabs}
+        activeTabPath={activeTabPath}
+        onSelectTab={setActiveTabPath}
+        onCloseTab={closeTab}
+      />
+      {renderContent()}
     </div>
   );
 }

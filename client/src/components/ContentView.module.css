@@ -20,7 +20,7 @@
   overflow-x: auto;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
-  height: 35px;
+  height: 28px;
   scrollbar-width: none;
 }
 
@@ -31,8 +31,8 @@
 .tabItem {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 12px;
+  gap: 4px;
+  padding: 0 6px 0 10px;
   min-width: 80px;
   max-width: 200px;
   flex-shrink: 0;
@@ -107,7 +107,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 16px;
+  padding: 6px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
 }

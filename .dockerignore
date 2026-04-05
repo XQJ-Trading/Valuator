@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# Environment and secrets
+.env
+.env.local
+.env*.local
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Frontend
+client/node_modules/
+client/dist/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+certs/
+.claude/
+tests/
+docs/
+scripts/

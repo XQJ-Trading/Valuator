@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -21,6 +22,13 @@ async def lifespan(_app: FastAPI):
     logger.info("Shutting down application...")
 
 
+def _get_allowed_origins() -> list[str]:
+    """Get allowed CORS origins from environment variable or defaults."""
+    default_origins = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+    origins_str = os.getenv("ALLOWED_ORIGINS", default_origins)
+    return [o.strip() for o in origins_str.split(",") if o.strip()]
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="AI Agent Server",
@@ -31,12 +39,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-        ],
+        allow_origins=_get_allowed_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

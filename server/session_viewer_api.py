@@ -34,7 +34,7 @@ def guide_data_root() -> Path:
     configured = os.getenv("GUIDE_DATA_ROOT")
     if configured:
         return Path(configured).expanduser().resolve()
-    return (_repo_root() / "logs" / "session_history").resolve()
+    return (_repo_root() / "guide-data").resolve()
 
 
 def ensure_viewer_roots() -> None:

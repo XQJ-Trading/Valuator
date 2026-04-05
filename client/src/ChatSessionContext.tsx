@@ -13,11 +13,13 @@ import {
   clearChatMessages,
   fetchAgentRunning,
   fetchChatMessages,
+  fetchFile,
   getOrCreateChatSessionId,
   postChatMessage,
   postChatStop,
   type ChatMessage,
   type ChatResetEvent,
+  type DataSource,
 } from "./api";
 import { parseProgressLine } from "./chatProgressParse";
 
@@ -199,6 +201,32 @@ export function ChatSessionProvider({
     };
   }, []);
 
+  const expandMentions = async (text: string): Promise<string> => {
+    const TOKEN = /@\[(session|guide):([^\]]+)\]/g;
+    const matches = [...text.matchAll(TOKEN)];
+    if (matches.length === 0) return text;
+
+    // Deduplicate by "source:path" key
+    const seen = new Set<string>();
+    const refs: { source: DataSource; path: string }[] = [];
+    for (const [, source, path] of matches) {
+      const key = `${source}:${path}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        refs.push({ source: source as DataSource, path });
+      }
+    }
+
+    const blocks = await Promise.all(
+      refs.map(async ({ source, path }) => {
+        const file = await fetchFile(path, source);
+        return `* ${source}:${path}\n\`\`\`md\n${file.content}\n\`\`\``;
+      }),
+    );
+
+    return `# REFERENCE\n${blocks.join("\n\n")}\n\n# QUERY\n${text}`;
+  };
+
   const sendMessage = useCallback(
     async (textOverride?: string) => {
       const chatSessionId = chatSessionIdRef.current;
@@ -207,7 +235,8 @@ export function ChatSessionProvider({
 
       setPending(true);
       try {
-        const msg = await postChatMessage(chatSessionId, text);
+        const expanded = await expandMentions(text);
+        const msg = await postChatMessage(chatSessionId, expanded);
         if (!messageIdsRef.current.has(msg.id)) {
           messageIdsRef.current.add(msg.id);
           setMessages((prev) => [...prev, msg]);

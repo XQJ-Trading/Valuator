@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from domain.query import QueryAnalysis, QueryRequirement, QueryUnit
+from domain.company import Company, Listing, Subject
+from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.shared_state import Fact, SharedStateView
 from valuator.core.planning import StepPlanner
@@ -713,3 +714,56 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     assert "grounded=True" in prompt
     assert "sources=1" in prompt
     assert "As-of UTC timestamp: 2026-03-30T00:00:00Z" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_includes_subject_market_tool_guidance() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="삼성전자 재무 분석")
+    subject = Subject(
+        company=Company(
+            company_id="KRX:005930",
+            company_name="삼성전자",
+            aliases=("005930",),
+        ),
+        listing=Listing(
+            listing_id="KRX:005930",
+            company_id="KRX:005930",
+            security_code="005930",
+            exchange="KOSPI",
+            vendor_symbols={"yahoo": "005930.KS"},
+        ),
+    )
+    ctx = TaskContext(
+        task_id="root",
+        description="삼성전자 재무 분석",
+        step_count=0,
+        as_of_utc="2026-03-30T00:00:00Z",
+        shared=SharedStateView({}, []),
+        query="삼성전자 재무 분석",
+        query_analysis=QueryAnalysis(
+            query_intent=QueryIntent(
+                query="삼성전자 재무 분석",
+                subjects=(subject,),
+            )
+        ),
+        available_tools=["web_search_tool", "opendart_tool", "code_execute_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    system_prompt = llm.calls[0]["system_prompt"]
+    assert "[SUBJECTS]" in prompt
+    assert "market=KRX" in prompt
+    assert "preferred_tool=opendart_tool" in prompt
+    assert "Korean-listed companies" in system_prompt
+    assert "US-listed stocks use yfinance_balance_sheet" in system_prompt

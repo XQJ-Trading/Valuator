@@ -100,6 +100,10 @@ def build_system_prompt(
         [
             "",
             "Use web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
+            "Market rule: Korean-listed companies (KRX/KOSPI/KOSDAQ/KONEX) use opendart_tool for financial statements and disclosures.",
+            "Market rule: US-listed stocks use yfinance_balance_sheet by default for financials and ratios.",
+            "Use sec_tool only when you specifically need data from a specific US 10-K.",
+            "Do not use opendart_tool for US equities, and do not use yfinance_balance_sheet for Korean listings, unless the preferred market tool already failed.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
             "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
             # "Use domain_tool with grounding_mode='grounded_required' for current/historical/mixed tasks.",
@@ -114,6 +118,7 @@ def build_system_prompt(
             "재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 "
             "yfinance_balance_sheet를 연도별로 분리 호출하되, 반드시 하나의 부모 태스크로 묶어라. "
             "단일 연도 데이터로 추세를 주장하지 마라.",
+            "한국 상장사의 연도별 재무제표도 opendart_tool을 연도별로 분리 호출해 같은 방식으로 집계하라.",
             "",
             "포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:",
             "  - 비용 구조: SBC, CapEx, 영업 레버리지",
@@ -184,12 +189,13 @@ def build_step_prompt(
     ]
     if ctx.query_units:
         sections.append("[QUERY_UNITS]\n" + query_units_text(task, ctx))
+    subjects = subjects_text(ctx)
+    if subjects:
+        sections.append("[SUBJECTS]\n" + subjects)
     if task.tool_hint:
         sections.append(f"[TOOL_HINT]\n{task.tool_hint}")
     if task.blocked_tools:
-        sections.append(
-            "[BLOCKED_TOOLS]\n" + ", ".join(sorted(task.blocked_tools))
-        )
+        sections.append("[BLOCKED_TOOLS]\n" + ", ".join(sorted(task.blocked_tools)))
     if task.last_invalid_error:
         sections.append(
             "[PREVIOUS_REJECTION]\n"
@@ -416,6 +422,34 @@ def query_units_text(task: Task, ctx: TaskContext) -> str:
             f"target_end={unit.target_end or '(none)'}"
         )
     return "\n".join(lines) or "(none)"
+
+
+def subjects_text(ctx: TaskContext) -> str:
+    subjects = ctx.query_analysis.query_intent.subjects
+    if not subjects:
+        return ""
+
+    lines: list[str] = []
+    for subject in subjects:
+        company = subject.company.company_name
+        listing = subject.listing
+        if listing is None:
+            lines.append(f"{company}: market=unknown; preferred_tool=web_search_tool")
+            continue
+
+        market = listing.legacy_market
+        if market == "KRX":
+            tool = "opendart_tool"
+        elif market == "USA":
+            tool = "yfinance_balance_sheet"
+        else:
+            tool = "web_search_tool"
+        lines.append(
+            f"{company}: exchange={listing.exchange}; "
+            f"security_code={listing.security_code}; "
+            f"market={market}; preferred_tool={tool}"
+        )
+    return "\n".join(lines)
 
 
 def shared_fact_line(*, key: str, fact: Any, prompt_value_preview_chars: int) -> str:

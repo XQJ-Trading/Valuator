@@ -15,8 +15,20 @@ TaskId = str
 
 DEFAULT_GENERIC_TOOLS = [
     "web_search_tool",
+    "opendart_tool",
     "sec_tool",
     "yfinance_balance_sheet",
+    "code_execute_tool",
+]
+KRX_TOOLS = [
+    "web_search_tool",
+    "opendart_tool",
+    "code_execute_tool",
+]
+USA_TOOLS = [
+    "web_search_tool",
+    "yfinance_balance_sheet",
+    "sec_tool",
     "code_execute_tool",
 ]
 
@@ -191,7 +203,9 @@ def summarize_temporal_contract(
         return TemporalContract(as_of_utc=as_of_utc)
 
     scopes = list(dict.fromkeys(unit.time_scope for unit in units if unit.time_scope))
-    starts = list(dict.fromkeys(unit.target_start for unit in units if unit.target_start))
+    starts = list(
+        dict.fromkeys(unit.target_start for unit in units if unit.target_start)
+    )
     ends = list(dict.fromkeys(unit.target_end for unit in units if unit.target_end))
 
     time_scope = scopes[0] if len(scopes) == 1 else "mixed" if scopes else ""
@@ -215,20 +229,20 @@ def fill_routing_defaults(
     _modules: dict[str, DomainModule],
 ) -> QueryAnalysis:
     """Fill allowed_tools when the query analysis omitted them."""
-    if not analysis.domain_ids:
-        analysis.allowed_tools = list(DEFAULT_GENERIC_TOOLS)
-        return analysis
-
     if analysis.allowed_tools:
         return analysis
 
-    analysis.allowed_tools = sorted(
-        {
-            "code_execute_tool",
-            # "domain_tool",
-            "sec_tool",
-            "web_search_tool",
-            "yfinance_balance_sheet",
-        }
-    )
+    markets = {
+        subject.listing.legacy_market
+        for subject in analysis.query_intent.subjects
+        if subject.listing is not None
+    }
+    if markets == {"KRX"}:
+        analysis.allowed_tools = list(KRX_TOOLS)
+        return analysis
+    if markets == {"USA"}:
+        analysis.allowed_tools = list(USA_TOOLS)
+        return analysis
+
+    analysis.allowed_tools = list(DEFAULT_GENERIC_TOOLS)
     return analysis

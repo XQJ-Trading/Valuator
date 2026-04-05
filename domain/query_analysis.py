@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from valuator.utils.config import config
+from .boundary.types import ListingSeed
 from .boundary.query_temporal import normalize_target_date_token
-from .company import ListingSeed, resolve_company_surfaces, resolve_subjects
+from .company import resolve_subjects, resolve_surfaces
 from .query import (
     QueryAnalysis,
     QueryIntent,
@@ -482,7 +483,7 @@ def _company_surfaces_fully_resolved(
     combined = _dedupe_strings([*raw.tickers, *raw.company_names])
     if not combined:
         return True
-    resolution = resolve_company_surfaces(
+    resolution = resolve_surfaces(
         company_names=tuple(combined),
         on_miss=on_miss,
     )

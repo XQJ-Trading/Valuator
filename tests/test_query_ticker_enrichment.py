@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from domain.company import CompanySurfaceResolution, resolve_company_surfaces
+from domain.company import CompanySurfaceResolution, resolve_surfaces
 from domain.query_analysis import (
     QueryIntentPayload,
     _company_surfaces_fully_resolved,
@@ -45,8 +45,8 @@ def test_company_surfaces_fully_resolved_unknown_without_on_miss() -> None:
     assert _company_surfaces_fully_resolved(raw, None) is False
 
 
-def test_resolve_company_surfaces_returns_unresolved() -> None:
-    r = resolve_company_surfaces(
+def test_resolve_surfaces_returns_unresolved() -> None:
+    r = resolve_surfaces(
         company_names=("TotallyUnknownXyz999",),
         on_miss=None,
     )

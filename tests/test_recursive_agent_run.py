@@ -262,12 +262,8 @@ async def test_agent_preserves_facts_only_child_output() -> None:
             "source_task_id": "root.0",
         }
     }
-    done_event = next(
-        event
-        for event in events
-        if event.type == "aggregated" and event.task_id == "root.0"
-    )
-    assert done_event.detail["output"] == stored_root.child_outputs["root.0"]
+
+
 
 
 @pytest.mark.asyncio

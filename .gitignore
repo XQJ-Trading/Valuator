@@ -67,6 +67,7 @@ logs/task_rewrite/*.json
 # Temporary files
 *.tmp
 *.temp
+.cache/
 
 # Frontend (Vue/Vite)
 client/node_modules/

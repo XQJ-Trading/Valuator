@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from importlib import import_module
 
+from .boundary.types import ListingSeed
 from .company import (
     Company,
     CompanySurfaceResolution,
     Listing,
-    ListingSeed,
     Subject,
-    resolve_company_surfaces,
+    resolve_surfaces,
     resolve_subjects,
 )
 from .query import (
@@ -53,7 +53,7 @@ __all__ = [
     "analyze_query",
     "build_query_breakdown",
     "fill_routing_defaults",
-    "resolve_company_surfaces",
+    "resolve_surfaces",
     "resolve_subjects",
     "summarize_temporal_contract",
 ]

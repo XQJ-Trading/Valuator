@@ -448,7 +448,7 @@ async def run(args: argparse.Namespace) -> int:
             await asyncio.to_thread(_write_cli_trace_compat, trace_writer)
             raise
         finally:
-            if tool_registry is not None:
+            if tool_registry is not None and hasattr(tool_registry, "close"):
                 tool_registry.close()
             close_session_log_file(runtime_log_path)
 

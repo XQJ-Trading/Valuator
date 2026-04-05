@@ -11,7 +11,9 @@ from .utils.time_utils import utc_isoformat
 def create_tool_registry(model: str, usage_writer: Any | None = None):
     from .tools.base import ToolRegistry
     from .tools.code_execute_tool import ExecuteCodeTool
+
     # from .tools.domain_tool import DomainTool
+    from .tools.opendart_tool import OpenDartTool
     from .tools.sec_tool import SECTool
     from .tools.web_search_tool import PerplexitySearchTool
     from .tools.yfinance_tool import YFinanceBalanceSheetTool
@@ -22,6 +24,7 @@ def create_tool_registry(model: str, usage_writer: Any | None = None):
     for tool in (
         PerplexitySearchTool(),
         code_tool,
+        OpenDartTool(),
         YFinanceBalanceSheetTool(),
         SECTool(model=model),
         # DomainTool(model=model),

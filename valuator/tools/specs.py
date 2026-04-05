@@ -179,6 +179,30 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "timeout": {"type": "integer"},
         },
     ),
+    "opendart_tool": ToolSpec(
+        name="opendart_tool",
+        required=("corp",),
+        optional=("year", "report_type", "data_type"),
+        capability="Korean corporate financial statements and disclosures via FSS Open DART",
+        arg_choices={
+            "report_type": ("annual", "q1", "q2", "q3"),
+            "data_type": ("financial_statement", "disclosure_list"),
+        },
+        param_descriptions={
+            "corp": "Korean company name or 6-digit stock code",
+            "year": "Business year (required for financial_statement)",
+            "report_type": "Report period: annual, q1, q2, q3",
+            "data_type": "Data type: financial_statement or disclosure_list",
+        },
+        param_properties={
+            "year": {"type": "integer"},
+            "report_type": {"type": "string", "enum": ["annual", "q1", "q2", "q3"]},
+            "data_type": {
+                "type": "string",
+                "enum": ["financial_statement", "disclosure_list"],
+            },
+        },
+    ),
     # "domain_tool": ToolSpec(
     #     name="domain_tool",
     #     optional=(

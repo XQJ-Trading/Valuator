@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-from domain.company import ListingSeed
+from .types import ListingSeed
 
 from .krx_ticker_resolve import (
-    clear_krx_records_cache,
+    clear_cache as clear_krx_cache,
     krx_on_miss,
-    resolve_krx_listing_seeds,
+    resolve_corp_code,
+    resolve_seeds as resolve_krx,
 )
 from .sec_ticker_resolve import (
-    clear_sec_records_cache,
-    resolve_sec_listing_seeds,
+    clear_cache as clear_sec_cache,
+    resolve_seeds as resolve_sec,
     sec_on_miss,
 )
 
 __all__ = [
-    "clear_krx_records_cache",
-    "clear_sec_records_cache",
+    "clear_krx_cache",
+    "clear_sec_cache",
     "combined_on_miss",
     "krx_on_miss",
-    "resolve_krx_listing_seeds",
-    "resolve_sec_listing_seeds",
+    "resolve_corp_code",
+    "resolve_krx",
+    "resolve_sec",
     "sec_on_miss",
 ]
 

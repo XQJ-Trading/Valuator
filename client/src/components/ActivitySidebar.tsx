@@ -58,7 +58,6 @@ function IconConfig() {
 
 const items: { id: ActivityView; label: string; Icon: () => JSX.Element }[] = [
   { id: "session", label: "session-data", Icon: IconSession },
-  { id: "guide", label: "session_history", Icon: IconGuide },
   { id: "config", label: "config", Icon: IconConfig },
 ];
 

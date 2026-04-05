@@ -92,7 +92,17 @@ export function ChatSessionProvider({
     fetchChatMessages(chatSessionId)
       .then((msgs) => {
         if (cancelled) return;
-        setMessages(msgs);
+        const uniqueMessages = msgs.reduce(
+          (acc, msg) => {
+            if (!messageIdsRef.current.has(msg.id)) {
+              acc.push(msg);
+              messageIdsRef.current.add(msg.id);
+            }
+            return acc;
+          },
+          [] as ChatMessage[],
+        );
+        setMessages((prev) => [...prev, ...uniqueMessages]);
         setLoadError(null);
       })
       .catch((e: Error) => {
@@ -171,6 +181,7 @@ export function ChatSessionProvider({
           return;
         }
         if (messageIdsRef.current.has(msg.id)) return;
+        messageIdsRef.current.add(msg.id);
         setMessages((prev) => [...prev, msg]);
         if (msg.role === "assistant") {
           setActiveTaskIds([]);

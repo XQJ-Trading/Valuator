@@ -8,7 +8,7 @@ import {
 import styles from "./ConfigView.module.css";
 
 export default function ConfigView() {
-  const ipId = useId();
+  const keyId = useId();
   const secretId = useId();
   const [draft, setDraft] = useState<AgentConnectionConfig>(() => loadAgentConfig());
   const [saved, setSaved] = useState<AgentConnectionConfig>(() => loadAgentConfig());
@@ -21,7 +21,7 @@ export default function ConfigView() {
   }, []);
 
   const dirty =
-    draft.serverIp !== saved.serverIp || draft.serverSecret !== saved.serverSecret;
+    draft.authKey !== saved.authKey || draft.authSecret !== saved.authSecret;
 
   const persist = () => {
     saveAgentConfig(draft);
@@ -46,33 +46,30 @@ export default function ConfigView() {
           <div className="content-area">
             <div className={styles.form}>
               <div className={styles.field}>
-                <label className={styles.label} htmlFor={ipId}>
-                  Agent server IP
+                <label className={styles.label} htmlFor={keyId}>
+                  Server auth key
                 </label>
-                <span className={styles.hint}>
-                  Host, IP, or URL (e.g. 192.168.1.10:8080)
-                </span>
                 <input
-                  id={ipId}
+                  id={keyId}
                   className={styles.input}
                   type="text"
-                  value={draft.serverIp}
-                  onChange={(e) => setDraft((d) => ({ ...d, serverIp: e.target.value }))}
-                  placeholder="127.0.0.1:8001"
+                  value={draft.authKey}
+                  onChange={(e) => setDraft((d) => ({ ...d, authKey: e.target.value }))}
+                  placeholder=""
                   autoComplete="off"
                 />
               </div>
               <div className={styles.field}>
                 <label className={styles.label} htmlFor={secretId}>
-                  Agent server secret
+                  Server auth secret
                 </label>
                 <input
                   id={secretId}
                   className={styles.input}
                   type="password"
-                  value={draft.serverSecret}
+                  value={draft.authSecret}
                   onChange={(e) =>
-                    setDraft((d) => ({ ...d, serverSecret: e.target.value }))
+                    setDraft((d) => ({ ...d, authSecret: e.target.value }))
                   }
                   placeholder=""
                   autoComplete="off"

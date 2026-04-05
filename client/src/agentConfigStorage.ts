@@ -1,13 +1,13 @@
 const STORAGE_KEY = "sessionviewer.agentConfig";
 
 export interface AgentConnectionConfig {
-  serverIp: string;
-  serverSecret: string;
+  authKey: string;
+  authSecret: string;
 }
 
 const DEFAULTS: AgentConnectionConfig = {
-  serverIp: "",
-  serverSecret: "",
+  authKey: "",
+  authSecret: "",
 };
 
 function parseStored(raw: string | null): AgentConnectionConfig {
@@ -17,8 +17,8 @@ function parseStored(raw: string | null): AgentConnectionConfig {
     if (!v || typeof v !== "object") return { ...DEFAULTS };
     const o = v as Record<string, unknown>;
     return {
-      serverIp: typeof o.serverIp === "string" ? o.serverIp : "",
-      serverSecret: typeof o.serverSecret === "string" ? o.serverSecret : "",
+      authKey: typeof o.authKey === "string" ? o.authKey : "",
+      authSecret: typeof o.authSecret === "string" ? o.authSecret : "",
     };
   } catch {
     return { ...DEFAULTS };

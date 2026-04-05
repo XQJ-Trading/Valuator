@@ -1,3 +1,5 @@
+import { loadAgentConfig } from "./agentConfigStorage";
+
 export type DataSource = "session" | "guide";
 
 export type ActivityView = DataSource | "config";
@@ -60,17 +62,33 @@ export function getOrCreateChatSessionId(): string {
   return sessionId;
 }
 
+function authHeaders(): Record<string, string> {
+  const cfg = loadAgentConfig();
+  return {
+    "X-Auth-Key": encodeURIComponent(cfg.authKey),
+    "X-Auth-Secret": encodeURIComponent(cfg.authSecret),
+  };
+}
+
 function chatApiPath(path: string, sessionId: string): string {
   const q = new URLSearchParams({ session_id: sessionId });
   return `${path}?${q.toString()}`;
 }
 
 export function chatStreamPath(sessionId: string): string {
-  return chatApiPath("/api/chat/stream", sessionId);
+  const cfg = loadAgentConfig();
+  const q = new URLSearchParams({
+    session_id: sessionId,
+    auth_key: cfg.authKey,
+    auth_secret: cfg.authSecret,
+  });
+  return `/api/chat/stream?${q.toString()}`;
 }
 
 export async function fetchChatMessages(sessionId: string): Promise<ChatMessage[]> {
-  const res = await fetch(chatApiPath("/api/chat/messages", sessionId));
+  const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   const data = (await res.json()) as { messages: ChatMessage[] };
   return data.messages;
@@ -82,7 +100,7 @@ export async function postChatMessage(
 ): Promise<ChatMessage> {
   const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ text }),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));
@@ -92,6 +110,7 @@ export async function postChatMessage(
 export async function clearChatMessages(sessionId: string): Promise<void> {
   const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));
 }
@@ -101,13 +120,16 @@ export async function postChatStop(
 ): Promise<{ ok: boolean; stopped: boolean }> {
   const res = await fetch(chatApiPath("/api/chat/stop", sessionId), {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<{ ok: boolean; stopped: boolean }>;
 }
 
 export async function fetchAgentRunning(sessionId: string): Promise<boolean> {
-  const res = await fetch(chatApiPath("/api/chat/agent-status", sessionId));
+  const res = await fetch(chatApiPath("/api/chat/agent-status", sessionId), {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   const data = (await res.json()) as { running?: boolean };
   return Boolean(data.running);
@@ -117,7 +139,9 @@ export async function fetchSessionDefaultExplore(): Promise<{
   sessionFolder: string | null;
   browsePath: string | null;
 }> {
-  const res = await fetch("/api/session/default-explore");
+  const res = await fetch("/api/session/default-explore", {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<{
     sessionFolder: string | null;
@@ -146,7 +170,9 @@ export async function fetchBrowseOutline(
   const s = sessionFolder?.trim();
   if (s) q.set("session", s);
   if (options?.ensureBrowse) q.set("ensure_browse", "true");
-  const res = await fetch(`/api/session/browse-outline?${q}`);
+  const res = await fetch(`/api/session/browse-outline?${q}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<{
     sessionFolder: string | null;
@@ -186,7 +212,9 @@ async function parseErrorBody(res: Response): Promise<string> {
 
 export async function searchFiles(query: string, limit = 5): Promise<SearchResponse> {
   const q = encodeURIComponent(query);
-  const res = await fetch(`/api/search?q=${q}&limit=${limit}`);
+  const res = await fetch(`/api/search?q=${q}&limit=${limit}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json();
 }
@@ -194,6 +222,7 @@ export async function searchFiles(query: string, limit = 5): Promise<SearchRespo
 export async function fetchTree(relPath: string, source: DataSource): Promise<TreeResponse> {
   const res = await fetch(
     `/api/tree?${sourceParam(source)}&path=${encodeURIComponent(relPath)}`,
+    { headers: authHeaders() },
   );
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json();
@@ -202,6 +231,7 @@ export async function fetchTree(relPath: string, source: DataSource): Promise<Tr
 export async function fetchFile(relPath: string, source: DataSource): Promise<FileResponse> {
   const res = await fetch(
     `/api/file?${sourceParam(source)}&path=${encodeURIComponent(relPath)}`,
+    { headers: authHeaders() },
   );
   if (!res.ok) {
     throw new Error(await parseErrorBody(res));
@@ -216,7 +246,7 @@ export async function saveFile(
 ): Promise<FileResponse> {
   const res = await fetch("/api/file", {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ source, path: relPath, content }),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));
@@ -230,7 +260,7 @@ async function postFs(
 ): Promise<FsMutationResult> {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ source, ...body }),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));

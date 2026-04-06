@@ -64,6 +64,9 @@ logs/server_history/*.json
 logs/task_rewrite/*.json
 *.log
 
+# Guide data
+guide-data/**
+
 # Temporary files
 *.tmp
 *.temp

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  authenticateSession,
   chatStreamPath,
   clearChatMessages,
   fetchAgentRunning,
@@ -90,6 +91,8 @@ export function ChatSessionProvider({
   useEffect(() => {
     let cancelled = false;
     const chatSessionId = chatSessionIdRef.current;
+    let es: EventSource | null = null;
+
     setLoadingList(true);
     fetchChatMessages(chatSessionId)
       .then((msgs) => {
@@ -123,81 +126,90 @@ export function ChatSessionProvider({
         /* ignore */
       });
 
-    const es = new EventSource(chatStreamPath(chatSessionId));
-    es.onmessage = (ev) => {
-      try {
-        const payload = JSON.parse(ev.data) as ChatMessage | ChatResetEvent | Record<string, unknown>;
-        if (isChatResetEvent(payload as ChatMessage | ChatResetEvent)) {
-          messageIdsRef.current = new Set();
-          setMessages([]);
-          setActiveTaskIds([]);
-          setTaskDisplayNames(new Map());
-          setTaskDescriptions(new Map());
-          setAgentRunning(false);
-          setLastStepFlow(null);
-          onMessagesUpdatedRef.current?.();
-          onBrowseOutlineRefreshRef.current?.();
-          return;
-        }
-        const typed = payload as { type?: string };
-        if (typed.type === "agent_started") {
-          setAgentRunning(true);
-          setLastStepFlow(null);
-          return;
-        }
-        if (typed.type === "agent_finished") {
-          setAgentRunning(false);
-          setLastStepFlow(null);
-          onBrowseOutlineRefreshRef.current?.();
-          return;
-        }
-        if (typed.type === "task_progress") {
-          const raw = (payload as { line: string }).line;
-          const item = parseProgressLine(raw);
-          if (item.kind === "step") {
-            if (item.description) {
-              setTaskDescriptions((prev) => new Map(prev).set(item.taskId, item.description));
+    // Authenticate session before establishing SSE connection
+    void authenticateSession(chatSessionId)
+      .then(() => {
+        if (cancelled) return;
+        es = new EventSource(chatStreamPath(chatSessionId));
+        es.onmessage = (ev) => {
+          try {
+            const payload = JSON.parse(ev.data) as ChatMessage | ChatResetEvent | Record<string, unknown>;
+            if (isChatResetEvent(payload as ChatMessage | ChatResetEvent)) {
+              messageIdsRef.current = new Set();
+              setMessages([]);
+              setActiveTaskIds([]);
+              setTaskDisplayNames(new Map());
+              setTaskDescriptions(new Map());
+              setAgentRunning(false);
+              setLastStepFlow(null);
+              onMessagesUpdatedRef.current?.();
+              onBrowseOutlineRefreshRef.current?.();
+              return;
             }
-            const displayName = item.taskName;
-            if (displayName) {
-              setTaskDisplayNames((prev) => new Map(prev).set(item.taskId, displayName));
+            const typed = payload as { type?: string };
+            if (typed.type === "agent_started") {
+              setAgentRunning(true);
+              setLastStepFlow(null);
+              return;
             }
-            setLastStepFlow({
-              taskId: item.taskId,
-              taskName: item.taskName,
-              globalSeq: item.globalSeq,
-              localStep: item.localStep,
-              description: item.description,
-            });
-            setActiveTaskIds((prev) =>
-              prev.includes(item.taskId) ? prev : [...prev, item.taskId],
-            );
-          } else if (item.kind === "done" || item.kind === "failed") {
-            setActiveTaskIds((prev) => prev.filter((id) => id !== item.taskId));
+            if (typed.type === "agent_finished") {
+              setAgentRunning(false);
+              setLastStepFlow(null);
+              onBrowseOutlineRefreshRef.current?.();
+              return;
+            }
+            if (typed.type === "task_progress") {
+              const raw = (payload as { line: string }).line;
+              const item = parseProgressLine(raw);
+              if (item.kind === "step") {
+                if (item.description) {
+                  setTaskDescriptions((prev) => new Map(prev).set(item.taskId, item.description));
+                }
+                const displayName = item.taskName;
+                if (displayName) {
+                  setTaskDisplayNames((prev) => new Map(prev).set(item.taskId, displayName));
+                }
+                setLastStepFlow({
+                  taskId: item.taskId,
+                  taskName: item.taskName,
+                  globalSeq: item.globalSeq,
+                  localStep: item.localStep,
+                  description: item.description,
+                });
+                setActiveTaskIds((prev) =>
+                  prev.includes(item.taskId) ? prev : [...prev, item.taskId],
+                );
+              } else if (item.kind === "done" || item.kind === "failed") {
+                setActiveTaskIds((prev) => prev.filter((id) => id !== item.taskId));
+                onMessagesUpdatedRef.current?.();
+              }
+              return;
+            }
+            const msg = payload as ChatMessage;
+            if (typeof msg.id !== "string" || !msg.id || (msg.role !== "user" && msg.role !== "assistant")) {
+              return;
+            }
+            if (messageIdsRef.current.has(msg.id)) return;
+            messageIdsRef.current.add(msg.id);
+            setMessages((prev) => [...prev, msg]);
+            if (msg.role === "assistant") {
+              setActiveTaskIds([]);
+              setTaskDisplayNames(new Map());
+            }
             onMessagesUpdatedRef.current?.();
+          } catch {
+            /* ignore malformed SSE */
           }
-          return;
-        }
-        const msg = payload as ChatMessage;
-        if (typeof msg.id !== "string" || !msg.id || (msg.role !== "user" && msg.role !== "assistant")) {
-          return;
-        }
-        if (messageIdsRef.current.has(msg.id)) return;
-        messageIdsRef.current.add(msg.id);
-        setMessages((prev) => [...prev, msg]);
-        if (msg.role === "assistant") {
-          setActiveTaskIds([]);
-          setTaskDisplayNames(new Map());
-        }
-        onMessagesUpdatedRef.current?.();
-      } catch {
-        /* ignore malformed SSE */
-      }
-    };
+        };
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setLoadError(e.message);
+      });
 
     return () => {
       cancelled = true;
-      es.close();
+      es?.close();
     };
   }, []);
 

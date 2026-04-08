@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
+from .auth import register_session
 from .session_viewer_api import session_data_root
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -354,3 +355,10 @@ async def stream(session_id: uuid.UUID):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/authenticate")
+async def authenticate_session(session_id: uuid.UUID) -> dict:
+    """Authenticate a session_id for SSE/stream access using key+secret in headers."""
+    register_session(str(session_id))
+    return {"ok": True}

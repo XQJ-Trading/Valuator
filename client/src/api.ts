@@ -76,13 +76,17 @@ function chatApiPath(path: string, sessionId: string): string {
 }
 
 export function chatStreamPath(sessionId: string): string {
-  const cfg = loadAgentConfig();
-  const q = new URLSearchParams({
-    session_id: sessionId,
-    auth_key: cfg.authKey,
-    auth_secret: cfg.authSecret,
-  });
+  const q = new URLSearchParams({ session_id: sessionId });
   return `/api/chat/stream?${q.toString()}`;
+}
+
+export async function authenticateSession(sessionId: string): Promise<void> {
+  const q = new URLSearchParams({ session_id: sessionId });
+  const res = await fetch(`/api/chat/authenticate?${q}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
 }
 
 export async function fetchChatMessages(sessionId: string): Promise<ChatMessage[]> {

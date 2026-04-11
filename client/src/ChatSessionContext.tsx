@@ -15,6 +15,7 @@ import {
   fetchAgentRunning,
   fetchChatMessages,
   fetchFile,
+  fetchTree,
   getOrCreateChatSessionId,
   postChatMessage,
   postChatStop,
@@ -45,7 +46,7 @@ export type ChatSessionContextValue = {
   activeTaskIds: string[];
   taskDisplayNames: Map<string, string>;
   taskDescriptions: Map<string, string>;
-  sendMessage: (textOverride?: string) => Promise<void>;
+  sendMessage: (textOverride?: string) => Promise<boolean>;
   clearMessages: () => Promise<void>;
   stopAgent: () => Promise<void>;
   draftText: string;
@@ -218,32 +219,113 @@ export function ChatSessionProvider({
     const matches = [...text.matchAll(TOKEN)];
     if (matches.length === 0) return text;
 
-    // Deduplicate by "source:path" key
+    // Deduplicate by "source:path" key, preserving order
     const seen = new Set<string>();
-    const refs: { source: DataSource; path: string }[] = [];
+    const directRefs: { source: DataSource; path: string }[] = [];
     for (const [, source, path] of matches) {
       const key = `${source}:${path}`;
       if (!seen.has(key)) {
         seen.add(key);
-        refs.push({ source: source as DataSource, path });
+        directRefs.push({ source: source as DataSource, path });
       }
     }
 
-    const blocks = await Promise.all(
-      refs.map(async ({ source, path }) => {
-        const file = await fetchFile(path, source);
-        return `* ${source}:${path}\n\`\`\`md\n${file.content}\n\`\`\``;
+    // Recursively collect all file paths under a directory
+    const collectFiles = async (
+      source: DataSource,
+      dirPath: string,
+    ): Promise<{ source: DataSource; path: string }[]> => {
+      const tree = await fetchTree(dirPath, source);
+      const results: { source: DataSource; path: string }[] = [];
+      for (const child of tree.children) {
+        if (child.type === "file") {
+          results.push({ source, path: child.path });
+        } else {
+          results.push(...(await collectFiles(source, child.path)));
+        }
+      }
+      return results;
+    };
+
+    // Build indented tree lines recursively (files prefixed with @)
+    const buildTreeLines = async (source: DataSource, dirPath: string, indent: number): Promise<string[]> => {
+      const tree = await fetchTree(dirPath, source);
+      const lines: string[] = [];
+      const prefix = "  ".repeat(indent);
+      for (const child of tree.children) {
+        if (child.type === "directory") {
+          lines.push(`${prefix}* ${child.name}`);
+          lines.push(...(await buildTreeLines(source, child.path, indent + 1)));
+        } else {
+          lines.push(`${prefix}* @${child.name}`);
+        }
+      }
+      return lines;
+    };
+
+    // Resolve each direct mention: file → fetch content, directory → fetch tree + subfiles
+    type FileResult = { kind: "file"; source: DataSource; path: string; content: string };
+    type DirResult = { kind: "dir"; source: DataSource; path: string; treeStr: string; subFiles: { source: DataSource; path: string }[] };
+    const resolved = await Promise.all(
+      directRefs.map(async ({ source, path }): Promise<FileResult | DirResult> => {
+        try {
+          const file = await fetchFile(path, source);
+          return { kind: "file", source, path, content: file.content };
+        } catch {
+          // fetchFile returns 400 "is a directory" — treat as directory
+          const [subLines, subFiles] = await Promise.all([
+            buildTreeLines(source, path, 1),
+            collectFiles(source, path),
+          ]);
+          const name = path.split("/").at(-1) ?? path;
+          const treeStr = [`* ${name}`, ...subLines].join("\n");
+          return { kind: "dir", source, path, treeStr, subFiles };
+        }
       }),
     );
 
-    return `# REFERENCE\n${blocks.join("\n\n")}\n\n# QUERY\n${text}`;
+    const directFileKeys = new Set<string>(
+      resolved.filter((r) => r.kind === "file").map((r) => `${r.source}:${r.path}`),
+    );
+    const directBlocks = resolved.map((r) => {
+      const label = `@${r.path.split("/").at(-1)}`;
+      return r.kind === "file"
+        ? `${label}\n\`\`\`\n${r.content}\n\`\`\``
+        : `${label}\n\`\`\`\n${r.treeStr}\n\`\`\``;
+    });
+
+    // Collect sub-files from directories, deduplicating and excluding directly mentioned files
+    const contextSeen = new Set<string>(directFileKeys);
+    const contextCandidates = resolved.flatMap((r) => (r.kind === "dir" ? r.subFiles : []));
+    const filteredContext = contextCandidates.filter(({ source, path }) => {
+      const key = `${source}:${path}`;
+      if (contextSeen.has(key)) return false;
+      contextSeen.add(key);
+      return true;
+    });
+
+    const contextBlocks = await Promise.all(
+      filteredContext.map(async ({ source, path }) => {
+        const file = await fetchFile(path, source);
+        return `@${path.split("/").at(-1)}\n\`\`\`\n${file.content}\n\`\`\``;
+      }),
+    );
+
+    const parts: string[] = [];
+    if (contextBlocks.length > 0) {
+      parts.push(`CONTEXT:\n${contextBlocks.join("\n\n")}`);
+    }
+    parts.push(`DIRECT REFERENCE:\n${directBlocks.join("\n\n")}`);
+    parts.push(`# QUERY\n\`\`\`\n${text}\n\`\`\``);
+
+    return parts.join("\n\n");
   };
 
   const sendMessage = useCallback(
-    async (textOverride?: string) => {
+    async (textOverride?: string): Promise<boolean> => {
       const chatSessionId = chatSessionIdRef.current;
       const text = (textOverride ?? draftText).trim();
-      if (!text || pending) return;
+      if (!text || pending) return false;
 
       setPending(true);
       try {
@@ -255,9 +337,11 @@ export function ChatSessionProvider({
           onMessagesUpdatedRef.current?.();
         }
         setDraftText("");
+        return true;
       } catch (e) {
         console.error(e);
         alert(e instanceof Error ? e.message : "Send failed");
+        return false;
       } finally {
         setPending(false);
       }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { fetchSessionDefaultExplore, type ActivityView } from "./api";
 import { ChatSessionProvider } from "./ChatSessionContext";
+import { ToastProvider } from "./ToastContext";
 import ActivitySidebar from "./components/ActivitySidebar";
 import FileTree from "./components/FileTree";
 import ContentView from "./components/ContentView";
@@ -19,6 +20,7 @@ export default function App() {
   const [outlineChatTick, setOutlineChatTick] = useState(0);
   const [outlineFolderEnsureTick, setOutlineFolderEnsureTick] = useState(0);
   const [sessionExploreTarget, setSessionExploreTarget] = useState<string | null>(null);
+  const [chatVisible, setChatVisible] = useState(true);
 
   /** Latest session browse path for the tree — only when switching to Session view, not on every chat tick. */
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function App() {
   };
 
   return (
+    <ToastProvider>
     <ChatSessionProvider
       onMessagesUpdated={() => setChatSyncVersion((v) => v + 1)}
       onBrowseOutlineRefresh={() => setOutlineChatTick((v) => v + 1)}
@@ -58,68 +61,104 @@ export default function App() {
       <div className="app">
         <div className="titlebar">
           <span className="titlebar-label">Research UI</span>
+          <button
+            className={`titlebar-icon-btn${chatVisible ? " active" : ""}`}
+            onClick={() => setChatVisible((v) => !v)}
+            title="Toggle Chat"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2 2h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-3 2v-2H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
+            </svg>
+          </button>
         </div>
 
         <div className="main-row">
           <ActivitySidebar activityView={activityView} onSelect={handleActivityView} />
 
-          <div className="main-content">
-            {activityView === "config" ? (
-              <ConfigView />
-            ) : (
+          <Group orientation="horizontal" className="content-row">
+            <Panel minSize="30%">
+              <div className="main-content">
+                {activityView === "config" ? (
+                  <ConfigView />
+                ) : (
+                  <>
+                    <Group orientation="horizontal" className="panels">
+                      <Panel defaultSize="300px" minSize="150px" maxSize="40%">
+                        {activityView === "guide" ? (
+                          <FileTree
+                            key={activityView}
+                            dataSource={activityView}
+                            activePath={activePath}
+                            onSelect={setActivePath}
+                            onSelectDirectory={setSelectedDirectoryPath}
+                            onUserSelectDirectory={() =>
+                              setOutlineFolderEnsureTick((v) => v + 1)
+                            }
+                            refreshToken={chatSyncVersion}
+                            initialExpandDirectory={null}
+                          />
+                        ) : (
+                          <Group orientation="vertical" style={{ height: "100%" }}>
+                            <Panel defaultSize="50%" minSize="15%">
+                              <FileTree
+                                key={activityView}
+                                dataSource={activityView}
+                                activePath={activePath}
+                                onSelect={setActivePath}
+                                onSelectDirectory={setSelectedDirectoryPath}
+                                onUserSelectDirectory={() =>
+                                  setOutlineFolderEnsureTick((v) => v + 1)
+                                }
+                                refreshToken={chatSyncVersion}
+                                initialExpandDirectory={
+                                  activityView === "session" ? sessionExploreTarget : null
+                                }
+                              />
+                            </Panel>
+                            <Separator className="resize-handle resize-handle-row" />
+                            <Panel defaultSize="50%" minSize="15%">
+                              <TaskTreeOutline
+                                dataSource={activityView}
+                                enabled={true}
+                                selectedDirectoryPath={selectedDirectoryPath}
+                                outlineChatTick={outlineChatTick}
+                                outlineFolderEnsureTick={outlineFolderEnsureTick}
+                                onOpenTaskFile={setActivePath}
+                              />
+                            </Panel>
+                          </Group>
+                        )}
+                      </Panel>
+
+                      <Separator className="resize-handle" />
+
+                      <Panel minSize="30%">
+                        <ContentView dataSource={activityView} filePath={activePath} />
+                      </Panel>
+                    </Group>
+                  </>
+                )}
+              </div>
+            </Panel>
+
+            {chatVisible && (
               <>
-                <CenterSessionBar />
-                <Group orientation="horizontal" className="panels">
-                  <Panel defaultSize="300px" minSize="150px" maxSize="40%">
-                    <FileTree
-                      key={activityView}
-                      dataSource={activityView}
-                      activePath={activePath}
-                      onSelect={setActivePath}
-                      onSelectDirectory={setSelectedDirectoryPath}
-                      onUserSelectDirectory={() =>
-                        setOutlineFolderEnsureTick((v) => v + 1)
-                      }
-                      refreshToken={chatSyncVersion}
-                      initialExpandDirectory={
-                        activityView === "session" ? sessionExploreTarget : null
-                      }
-                    />
-                  </Panel>
-
-                  <Separator className="resize-handle" />
-
-                  <Panel minSize="30%">
-                    <ContentView dataSource={activityView} filePath={activePath} />
-                  </Panel>
-                </Group>
+                <Separator className="resize-handle" />
+                <Panel defaultSize="300px" minSize="200px" maxSize="40%">
+                  <div className="reserved-layout">
+                    <AgentChatPanel />
+                  </div>
+                </Panel>
               </>
             )}
-          </div>
+          </Group>
+        </div>
 
-          <div className="reserved-layout">
-            <Group orientation="vertical" className="reserved-panels">
-              <Panel defaultSize="38%" minSize="12%" maxSize="72%">
-                <TaskTreeOutline
-                  dataSource={activityView === "config" ? "session" : activityView}
-                  enabled={activityView !== "config"}
-                  selectedDirectoryPath={selectedDirectoryPath}
-                  outlineChatTick={outlineChatTick}
-                  outlineFolderEnsureTick={outlineFolderEnsureTick}
-                  onOpenTaskFile={(path) => {
-                    if (activityView === "config") return;
-                    setActivePath(path);
-                  }}
-                />
-              </Panel>
-              <Separator className="resize-handle resize-handle-row" />
-              <Panel minSize="22%">
-                <AgentChatPanel />
-              </Panel>
-            </Group>
-          </div>
+        <div className="bottom-bar">
+          <CenterSessionBar />
         </div>
       </div>
     </ChatSessionProvider>
+    </ToastProvider>
   );
 }

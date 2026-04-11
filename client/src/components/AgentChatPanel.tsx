@@ -57,8 +57,8 @@ export default function AgentChatPanel() {
 
   const handleSubmit = useCallback(
     async (textOverride?: string) => {
-      await sendSessionMessage(textOverride);
       chatEditorRef.current?.clear();
+      await sendSessionMessage(textOverride);
     },
     [sendSessionMessage],
   );

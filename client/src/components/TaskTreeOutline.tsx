@@ -40,6 +40,7 @@ export default function TaskTreeOutline({
   selectedDirectoryPath,
   outlineChatTick,
   outlineFolderEnsureTick,
+  rootEntries,
 }: {
   dataSource: DataSource;
   enabled: boolean;
@@ -57,11 +58,27 @@ export default function TaskTreeOutline({
   const [error, setError] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
   const prevFolderEnsureTickRef = useRef(0);
+  const loadedKeyRef = useRef<{ dataSource: DataSource; selectedDir: string | null; chatTick: number } | null>(null);
 
   const dataSourceLabel = dataSource === "guide" ? "Guide" : "Session";
 
   useEffect(() => {
     if (!enabled) return;
+
+    // Skip fetch if same dataSource + selectedDir + chatTick (only enabled or rootEntries changed)
+    const folderTickAdvanced = outlineFolderEnsureTick > prevFolderEnsureTickRef.current;
+    const currentKey = { dataSource, selectedDir: selectedDirectoryPath, chatTick: outlineChatTick };
+    const prev = loadedKeyRef.current;
+    if (
+      !folderTickAdvanced &&
+      prev &&
+      prev.dataSource === currentKey.dataSource &&
+      prev.selectedDir === currentKey.selectedDir &&
+      prev.chatTick === currentKey.chatTick
+    ) {
+      return;
+    }
+
     const myGeneration = ++loadGenerationRef.current;
     setLoading(true);
     setError(null);
@@ -72,7 +89,6 @@ export default function TaskTreeOutline({
     void (async () => {
       try {
         const sessionFolder = sessionFolderFromSelection(selectedDirectoryPath);
-        const folderTickAdvanced = outlineFolderEnsureTick > prevFolderEnsureTickRef.current;
         if (folderTickAdvanced) {
           prevFolderEnsureTickRef.current = outlineFolderEnsureTick;
         }
@@ -84,6 +100,7 @@ export default function TaskTreeOutline({
         if (out.rows.length > 0) {
           setBrowseRows(out.rows);
           setBrowseRootUsed(out.browseRootPath);
+          loadedKeyRef.current = currentKey;
           return;
         }
         try {
@@ -91,6 +108,7 @@ export default function TaskTreeOutline({
           if (loadGenerationRef.current !== myGeneration) return;
           setTaskRows(parseTaskTreeMd(f.content));
           setError(null);
+          loadedKeyRef.current = currentKey;
         } catch (e) {
           if (loadGenerationRef.current !== myGeneration) return;
           setTaskRows([]);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { fetchSessionDefaultExplore, type ActivityView } from "./api";
 import { ChatSessionProvider } from "./ChatSessionContext";
+import { ToastProvider } from "./ToastContext";
 import ActivitySidebar from "./components/ActivitySidebar";
 import FileTree from "./components/FileTree";
 import ContentView from "./components/ContentView";
@@ -51,6 +52,7 @@ export default function App() {
   };
 
   return (
+    <ToastProvider>
     <ChatSessionProvider
       onMessagesUpdated={() => setChatSyncVersion((v) => v + 1)}
       onBrowseOutlineRefresh={() => setOutlineChatTick((v) => v + 1)}
@@ -124,5 +126,6 @@ export default function App() {
         </div>
       </div>
     </ChatSessionProvider>
+    </ToastProvider>
   );
 }

@@ -5,6 +5,7 @@ import {
   type DataSource,
   type FileResponse,
 } from "../api";
+import { useToast } from "../ToastContext";
 import MarkdownView from "./MarkdownView";
 import JsonMarkdownStyleView from "./JsonMarkdownStyleView";
 import JsonTreeView from "./JsonTreeView";
@@ -346,11 +347,21 @@ export default function ContentView({
   dataSource: DataSource;
   filePath: string | null;
 }) {
+  const [tabsDataSource, setTabsDataSource] = useState<DataSource>(dataSource);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
   const [file, setFile] = useState<FileResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const pushToast = useToast();
+
+  // dataSource가 바뀌면 이전 source의 탭 상태를 render 중에 즉시 초기화한다.
+  // effect 안에서 하면 이전 activeTabPath로 fetch가 먼저 실행된 뒤에야 리셋되므로 render 중 처리.
+  if (tabsDataSource !== dataSource) {
+    setTabsDataSource(dataSource);
+    setOpenTabs([]);
+    setActiveTabPath(null);
+    setFile(null);
+  }
 
   // Sync filePath prop changes to tabs
   useEffect(() => {
@@ -366,10 +377,11 @@ export default function ContentView({
   useEffect(() => {
     if (!activeTabPath) return;
     setLoading(true);
-    setError(null);
     fetchFile(activeTabPath, dataSource)
       .then(setFile)
-      .catch((e) => setError(e.message))
+      .catch((e: Error) =>
+        pushToast({ type: "warning", title: "File not found", message: e.message })
+      )
       .finally(() => setLoading(false));
   }, [activeTabPath, dataSource]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -394,7 +406,6 @@ export default function ContentView({
   }
 
   if (loading) return <div className="status-msg">Loading…</div>;
-  if (error) return <div className="error-msg">Error: {error}</div>;
   if (!file) return null;
 
   const ext = file.ext.toLowerCase();

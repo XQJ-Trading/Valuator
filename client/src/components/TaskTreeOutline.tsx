@@ -40,7 +40,6 @@ export default function TaskTreeOutline({
   selectedDirectoryPath,
   outlineChatTick,
   outlineFolderEnsureTick,
-  rootEntries,
 }: {
   dataSource: DataSource;
   enabled: boolean;
@@ -65,7 +64,7 @@ export default function TaskTreeOutline({
   useEffect(() => {
     if (!enabled) return;
 
-    // Skip fetch if same dataSource + selectedDir + chatTick (only enabled or rootEntries changed)
+    // Skip fetch if same dataSource + selectedDir + chatTick
     const folderTickAdvanced = outlineFolderEnsureTick > prevFolderEnsureTickRef.current;
     const currentKey = { dataSource, selectedDir: selectedDirectoryPath, chatTick: outlineChatTick };
     const prev = loadedKeyRef.current;

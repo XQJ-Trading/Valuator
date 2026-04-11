@@ -3,7 +3,6 @@
   min-height: 40px;
   max-height: 220px;
   padding: 6px 16px;
-  border-bottom: 1px solid var(--border);
   background: var(--bg-tertiary);
   display: flex;
   align-items: center;

@@ -68,7 +68,6 @@ export default function App() {
               <ConfigView />
             ) : (
               <>
-                <CenterSessionBar />
                 <Group orientation="horizontal" className="panels">
                   <Panel defaultSize="300px" minSize="150px" maxSize="40%">
                     <Group orientation="vertical" style={{ height: "100%" }}>
@@ -118,6 +117,10 @@ export default function App() {
           <div className="reserved-layout">
             <AgentChatPanel />
           </div>
+        </div>
+
+        <div className="bottom-bar">
+          <CenterSessionBar />
         </div>
       </div>
     </ChatSessionProvider>

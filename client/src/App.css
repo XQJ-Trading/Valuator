@@ -22,6 +22,12 @@
   font-weight: 600;
 }
 
+.bottom-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
 .main-row {
   display: flex;
   flex: 1;

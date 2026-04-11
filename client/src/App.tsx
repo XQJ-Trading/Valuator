@@ -71,20 +71,38 @@ export default function App() {
                 <CenterSessionBar />
                 <Group orientation="horizontal" className="panels">
                   <Panel defaultSize="300px" minSize="150px" maxSize="40%">
-                    <FileTree
-                      key={activityView}
-                      dataSource={activityView}
-                      activePath={activePath}
-                      onSelect={setActivePath}
-                      onSelectDirectory={setSelectedDirectoryPath}
-                      onUserSelectDirectory={() =>
-                        setOutlineFolderEnsureTick((v) => v + 1)
-                      }
-                      refreshToken={chatSyncVersion}
-                      initialExpandDirectory={
-                        activityView === "session" ? sessionExploreTarget : null
-                      }
-                    />
+                    <Group orientation="vertical" style={{ height: "100%" }}>
+                      <Panel defaultSize="50%" minSize="15%">
+                        <FileTree
+                          key={activityView}
+                          dataSource={activityView}
+                          activePath={activePath}
+                          onSelect={setActivePath}
+                          onSelectDirectory={setSelectedDirectoryPath}
+                          onUserSelectDirectory={() =>
+                            setOutlineFolderEnsureTick((v) => v + 1)
+                          }
+                          refreshToken={chatSyncVersion}
+                          initialExpandDirectory={
+                            activityView === "session" ? sessionExploreTarget : null
+                          }
+                        />
+                      </Panel>
+                      <Separator className="resize-handle resize-handle-row" />
+                      <Panel defaultSize="50%" minSize="15%">
+                        <TaskTreeOutline
+                          dataSource={activityView === "config" ? "session" : activityView}
+                          enabled={activityView !== "config"}
+                          selectedDirectoryPath={selectedDirectoryPath}
+                          outlineChatTick={outlineChatTick}
+                          outlineFolderEnsureTick={outlineFolderEnsureTick}
+                          onOpenTaskFile={(path) => {
+                            if (activityView === "config") return;
+                            setActivePath(path);
+                          }}
+                        />
+                      </Panel>
+                    </Group>
                   </Panel>
 
                   <Separator className="resize-handle" />
@@ -98,25 +116,7 @@ export default function App() {
           </div>
 
           <div className="reserved-layout">
-            <Group orientation="vertical" className="reserved-panels">
-              <Panel defaultSize="38%" minSize="12%" maxSize="72%">
-                <TaskTreeOutline
-                  dataSource={activityView === "config" ? "session" : activityView}
-                  enabled={activityView !== "config"}
-                  selectedDirectoryPath={selectedDirectoryPath}
-                  outlineChatTick={outlineChatTick}
-                  outlineFolderEnsureTick={outlineFolderEnsureTick}
-                  onOpenTaskFile={(path) => {
-                    if (activityView === "config") return;
-                    setActivePath(path);
-                  }}
-                />
-              </Panel>
-              <Separator className="resize-handle resize-handle-row" />
-              <Panel minSize="22%">
-                <AgentChatPanel />
-              </Panel>
-            </Group>
+            <AgentChatPanel />
           </div>
         </div>
       </div>

@@ -215,11 +215,6 @@
   min-width: 0;
 }
 
-.reserved-panels {
-  height: 100%;
-  width: 100%;
-}
-
 /* markdown rendering */
 .md-content {
   line-height: 1.65;

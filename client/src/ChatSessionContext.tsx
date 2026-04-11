@@ -46,7 +46,7 @@ export type ChatSessionContextValue = {
   activeTaskIds: string[];
   taskDisplayNames: Map<string, string>;
   taskDescriptions: Map<string, string>;
-  sendMessage: (textOverride?: string) => Promise<void>;
+  sendMessage: (textOverride?: string) => Promise<boolean>;
   clearMessages: () => Promise<void>;
   stopAgent: () => Promise<void>;
   draftText: string;
@@ -322,10 +322,10 @@ export function ChatSessionProvider({
   };
 
   const sendMessage = useCallback(
-    async (textOverride?: string) => {
+    async (textOverride?: string): Promise<boolean> => {
       const chatSessionId = chatSessionIdRef.current;
       const text = (textOverride ?? draftText).trim();
-      if (!text || pending) return;
+      if (!text || pending) return false;
 
       setPending(true);
       try {
@@ -337,9 +337,11 @@ export function ChatSessionProvider({
           onMessagesUpdatedRef.current?.();
         }
         setDraftText("");
+        return true;
       } catch (e) {
         console.error(e);
         alert(e instanceof Error ? e.message : "Send failed");
+        return false;
       } finally {
         setPending(false);
       }

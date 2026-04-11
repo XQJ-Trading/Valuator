@@ -113,18 +113,12 @@ const ChatEditor = forwardRef<
         spellcheck: "false",
       },
       handleKeyDown: (_view, event) => {
-        const isSubmit =
-          event.key === "Enter" &&
-          !event.shiftKey &&
-          (!event.isComposing || event.metaKey || event.ctrlKey);
-        if (isSubmit) {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
           const ed = editorRef.current;
           if (!ed) return false;
           const text = ed.getText().trim();
-          if (text) {
-            onSubmitRef.current(text);
-          }
+          if (text) onSubmitRef.current(text);
           return true;
         }
         return false;

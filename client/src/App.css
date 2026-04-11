@@ -22,6 +22,30 @@
   font-weight: 600;
 }
 
+.titlebar-icon-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.titlebar-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.titlebar-icon-btn.active {
+  color: var(--text-accent);
+}
+
 .bottom-bar {
   flex-shrink: 0;
   border-top: 1px solid var(--border);

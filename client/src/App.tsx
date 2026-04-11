@@ -20,6 +20,7 @@ export default function App() {
   const [outlineChatTick, setOutlineChatTick] = useState(0);
   const [outlineFolderEnsureTick, setOutlineFolderEnsureTick] = useState(0);
   const [sessionExploreTarget, setSessionExploreTarget] = useState<string | null>(null);
+  const [chatVisible, setChatVisible] = useState(true);
 
   /** Latest session browse path for the tree — only when switching to Session view, not on every chat tick. */
   useEffect(() => {
@@ -60,6 +61,15 @@ export default function App() {
       <div className="app">
         <div className="titlebar">
           <span className="titlebar-label">Research UI</span>
+          <button
+            className={`titlebar-icon-btn${chatVisible ? " active" : ""}`}
+            onClick={() => setChatVisible((v) => !v)}
+            title="Toggle Chat"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2 2h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-3 2v-2H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
+            </svg>
+          </button>
         </div>
 
         <div className="main-row">
@@ -131,13 +141,16 @@ export default function App() {
               </div>
             </Panel>
 
-            <Separator className="resize-handle" />
-
-            <Panel defaultSize="300px" minSize="200px" maxSize="40%">
-              <div className="reserved-layout">
-                <AgentChatPanel />
-              </div>
-            </Panel>
+            {chatVisible && (
+              <>
+                <Separator className="resize-handle" />
+                <Panel defaultSize="300px" minSize="200px" maxSize="40%">
+                  <div className="reserved-layout">
+                    <AgentChatPanel />
+                  </div>
+                </Panel>
+              </>
+            )}
           </Group>
         </div>
 

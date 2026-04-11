@@ -92,6 +92,7 @@ const MarkdownFilePanel = forwardRef<
   const [savedContent, setSavedContent] = useState(content);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
 
   const localKey = `valuator.draft.${dataSource}.${filePath}`;
 
@@ -103,7 +104,10 @@ const MarkdownFilePanel = forwardRef<
   // Restore draft from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem(localKey);
-    if (stored !== null && stored !== content) setDraft(stored);
+    if (stored !== null && stored !== content) {
+      setDraft(stored);
+      setDraftSaved(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -116,6 +120,7 @@ const MarkdownFilePanel = forwardRef<
     try {
       const updated = await saveFile(filePath, dataSource, draft);
       setSavedContent(updated.content);
+      setDraftSaved(false);
       localStorage.removeItem(localKey);
       onFileUpdated(updated);
     } catch (e) {
@@ -125,9 +130,13 @@ const MarkdownFilePanel = forwardRef<
     }
   }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
 
-  // 3s debounce save to localStorage
+  // 3s debounce save to localStorage; reset draftSaved immediately on each draft change
   useEffect(() => {
-    const id = setTimeout(() => localStorage.setItem(localKey, draft), 3000);
+    setDraftSaved(false);
+    const id = setTimeout(() => {
+      localStorage.setItem(localKey, draft);
+      setDraftSaved(true);
+    }, 3000);
     return () => clearTimeout(id);
   }, [draft, localKey]);
 
@@ -164,11 +173,10 @@ const MarkdownFilePanel = forwardRef<
             <span>Saving…</span>
           ) : dirty ? (
             <>
-              <span
-                className={styles.toolbarDirtyDot}
-                aria-hidden
-              />
-              <span aria-label="Unsaved changes">Modified</span>
+              <span className={styles.toolbarDirtyDot} aria-hidden />
+              <span aria-label={draftSaved ? "Saved as draft" : "Unsaved changes"}>
+                {draftSaved ? "Saved as draft" : "Modified"}
+              </span>
             </>
           ) : null}
         </div>
@@ -250,6 +258,7 @@ const JsonFilePanel = forwardRef<
   const [savedContent, setSavedContent] = useState(content);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
 
   const localKey = `valuator.draft.${dataSource}.${filePath}`;
 
@@ -261,7 +270,10 @@ const JsonFilePanel = forwardRef<
   // Restore draft from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem(localKey);
-    if (stored !== null && stored !== content) setDraft(stored);
+    if (stored !== null && stored !== content) {
+      setDraft(stored);
+      setDraftSaved(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -274,6 +286,7 @@ const JsonFilePanel = forwardRef<
     try {
       const updated = await saveFile(filePath, dataSource, draft);
       setSavedContent(updated.content);
+      setDraftSaved(false);
       localStorage.removeItem(localKey);
       onFileUpdated(updated);
     } catch (e) {
@@ -283,9 +296,13 @@ const JsonFilePanel = forwardRef<
     }
   }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
 
-  // 3s debounce save to localStorage
+  // 3s debounce save to localStorage; reset draftSaved immediately on each draft change
   useEffect(() => {
-    const id = setTimeout(() => localStorage.setItem(localKey, draft), 3000);
+    setDraftSaved(false);
+    const id = setTimeout(() => {
+      localStorage.setItem(localKey, draft);
+      setDraftSaved(true);
+    }, 3000);
     return () => clearTimeout(id);
   }, [draft, localKey]);
 
@@ -323,7 +340,9 @@ const JsonFilePanel = forwardRef<
           ) : dirty ? (
             <>
               <span className={styles.toolbarDirtyDot} aria-hidden />
-              <span aria-label="Unsaved changes">Modified</span>
+              <span aria-label={draftSaved ? "Saved as draft" : "Unsaved changes"}>
+                {draftSaved ? "Saved as draft" : "Modified"}
+              </span>
             </>
           ) : null}
         </div>

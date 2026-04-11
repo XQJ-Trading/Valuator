@@ -65,29 +65,16 @@ export default function App() {
         <div className="main-row">
           <ActivitySidebar activityView={activityView} onSelect={handleActivityView} />
 
-          <div className="main-content">
-            {activityView === "config" ? (
-              <ConfigView />
-            ) : (
-              <>
-                <Group orientation="horizontal" className="panels">
-                  <Panel defaultSize="300px" minSize="150px" maxSize="40%">
-                    {activityView === "guide" ? (
-                      <FileTree
-                        key={activityView}
-                        dataSource={activityView}
-                        activePath={activePath}
-                        onSelect={setActivePath}
-                        onSelectDirectory={setSelectedDirectoryPath}
-                        onUserSelectDirectory={() =>
-                          setOutlineFolderEnsureTick((v) => v + 1)
-                        }
-                        refreshToken={chatSyncVersion}
-                        initialExpandDirectory={null}
-                      />
-                    ) : (
-                      <Group orientation="vertical" style={{ height: "100%" }}>
-                        <Panel defaultSize="50%" minSize="15%">
+          <Group orientation="horizontal" className="content-row">
+            <Panel minSize="30%">
+              <div className="main-content">
+                {activityView === "config" ? (
+                  <ConfigView />
+                ) : (
+                  <>
+                    <Group orientation="horizontal" className="panels">
+                      <Panel defaultSize="300px" minSize="150px" maxSize="40%">
+                        {activityView === "guide" ? (
                           <FileTree
                             key={activityView}
                             dataSource={activityView}
@@ -98,39 +85,60 @@ export default function App() {
                               setOutlineFolderEnsureTick((v) => v + 1)
                             }
                             refreshToken={chatSyncVersion}
-                            initialExpandDirectory={
-                              activityView === "session" ? sessionExploreTarget : null
-                            }
+                            initialExpandDirectory={null}
                           />
-                        </Panel>
-                        <Separator className="resize-handle resize-handle-row" />
-                        <Panel defaultSize="50%" minSize="15%">
-                          <TaskTreeOutline
-                            dataSource={activityView}
-                            enabled={true}
-                            selectedDirectoryPath={selectedDirectoryPath}
-                            outlineChatTick={outlineChatTick}
-                            outlineFolderEnsureTick={outlineFolderEnsureTick}
-                            onOpenTaskFile={setActivePath}
-                          />
-                        </Panel>
-                      </Group>
-                    )}
-                  </Panel>
+                        ) : (
+                          <Group orientation="vertical" style={{ height: "100%" }}>
+                            <Panel defaultSize="50%" minSize="15%">
+                              <FileTree
+                                key={activityView}
+                                dataSource={activityView}
+                                activePath={activePath}
+                                onSelect={setActivePath}
+                                onSelectDirectory={setSelectedDirectoryPath}
+                                onUserSelectDirectory={() =>
+                                  setOutlineFolderEnsureTick((v) => v + 1)
+                                }
+                                refreshToken={chatSyncVersion}
+                                initialExpandDirectory={
+                                  activityView === "session" ? sessionExploreTarget : null
+                                }
+                              />
+                            </Panel>
+                            <Separator className="resize-handle resize-handle-row" />
+                            <Panel defaultSize="50%" minSize="15%">
+                              <TaskTreeOutline
+                                dataSource={activityView}
+                                enabled={true}
+                                selectedDirectoryPath={selectedDirectoryPath}
+                                outlineChatTick={outlineChatTick}
+                                outlineFolderEnsureTick={outlineFolderEnsureTick}
+                                onOpenTaskFile={setActivePath}
+                              />
+                            </Panel>
+                          </Group>
+                        )}
+                      </Panel>
 
-                  <Separator className="resize-handle" />
+                      <Separator className="resize-handle" />
 
-                  <Panel minSize="30%">
-                    <ContentView dataSource={activityView} filePath={activePath} />
-                  </Panel>
-                </Group>
-              </>
-            )}
-          </div>
+                      <Panel minSize="30%">
+                        <ContentView dataSource={activityView} filePath={activePath} />
+                      </Panel>
+                    </Group>
+                  </>
+                )}
+              </div>
+            </Panel>
 
-          <div className="reserved-layout">
-            <AgentChatPanel />
-          </div>
+            <Separator className="resize-handle" />
+
+            <Panel defaultSize="300px" minSize="200px" maxSize="40%">
+              <div className="reserved-layout">
+                <AgentChatPanel />
+              </div>
+            </Panel>
+          </Group>
         </div>
 
         <div className="bottom-bar">

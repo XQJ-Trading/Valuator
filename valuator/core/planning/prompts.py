@@ -102,8 +102,6 @@ def build_system_prompt(
             "Use web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
             "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
-            # "Use domain_tool with grounding_mode='grounded_required' for current/historical/mixed tasks.",
-            # "Use domain_tool with grounding_mode='synthesis_only' only for future-only scenario synthesis.",
             "Prefer WAIT over inventing missing facts.",
             "",
             "[REQUIREMENTS]는 분석이 충족해야 할 조건이다.",

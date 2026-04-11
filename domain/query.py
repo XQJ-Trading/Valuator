@@ -85,7 +85,6 @@ class QueryRequirement:
     id: str
     acceptance: str
     unit_ids: list[int] = field(default_factory=list)
-    domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     provenance: str = ""
     required: bool = True
@@ -225,7 +224,6 @@ def fill_routing_defaults(
     analysis.allowed_tools = sorted(
         {
             "code_execute_tool",
-            # "domain_tool",
             "sec_tool",
             "web_search_tool",
             "yfinance_balance_sheet",

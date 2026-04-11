@@ -684,7 +684,6 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
                     id="R-001",
                     acceptance="2024년 사건을 정리한다",
                     unit_ids=[0],
-                    domain_ids=["macro"],
                     provenance="user query",
                 )
             ],

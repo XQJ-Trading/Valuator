@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   fetchFile,
   saveFile,
@@ -15,6 +15,7 @@ import styles from "./ContentView.module.css";
 
 type MdViewMode = "preview" | "render-everything" | "raw";
 type JsonViewMode = "preview" | "markdown-style" | "render-everything" | "raw";
+type FilePanelMode = MdViewMode | JsonViewMode;
 
 function TabBar({
   openTabs,
@@ -65,18 +66,31 @@ function TabBar({
   );
 }
 
-function MarkdownFilePanel({
+function EditableFilePanel({
   dataSource,
   filePath,
   content,
   onFileUpdated,
+  activeMode,
+  onModeChange,
+  modes,
+  ariaLabel,
+  children,
 }: {
   dataSource: DataSource;
   filePath: string;
   content: string;
   onFileUpdated: (f: FileResponse) => void;
+  activeMode: FilePanelMode;
+  onModeChange: (mode: FilePanelMode) => void;
+  modes: Array<{ value: FilePanelMode; label: string }>;
+  ariaLabel: string;
+  children: (args: {
+    draft: string;
+    saving: boolean;
+    setDraft: (value: string) => void;
+  }) => ReactNode;
 }) {
-  const [mdMode, setMdMode] = useState<MdViewMode>("preview");
   const [draft, setDraft] = useState(content);
   const [savedContent, setSavedContent] = useState(content);
   const [saving, setSaving] = useState(false);
@@ -135,50 +149,60 @@ function MarkdownFilePanel({
             </>
           ) : null}
         </div>
-        <div className={styles.segment} role="tablist" aria-label="Markdown view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mdMode === "preview"}
-            className={
-              mdMode === "preview"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setMdMode("preview")}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mdMode === "render-everything"}
-            className={
-              mdMode === "render-everything"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setMdMode("render-everything")}
-          >
-            Render Everything
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mdMode === "raw"}
-            className={
-              mdMode === "raw"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setMdMode("raw")}
-          >
-            Markdown
-          </button>
+        <div className={styles.segment} role="tablist" aria-label={ariaLabel}>
+          {modes.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              role="tab"
+              aria-selected={activeMode === mode.value}
+              className={
+                activeMode === mode.value
+                  ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
+                  : styles.segmentBtn
+              }
+              onClick={() => onModeChange(mode.value)}
+            >
+              {mode.label}
+            </button>
+          ))}
         </div>
       </div>
-      <div className={styles.mdBody}>
-        {mdMode === "preview" ? (
+      <div className={styles.mdBody}>{children({ draft, saving, setDraft })}</div>
+    </div>
+  );
+}
+
+function MarkdownFilePanel({
+  dataSource,
+  filePath,
+  content,
+  onFileUpdated,
+}: {
+  dataSource: DataSource;
+  filePath: string;
+  content: string;
+  onFileUpdated: (f: FileResponse) => void;
+}) {
+  const [mdMode, setMdMode] = useState<MdViewMode>("preview");
+
+  return (
+    <EditableFilePanel
+      dataSource={dataSource}
+      filePath={filePath}
+      content={content}
+      onFileUpdated={onFileUpdated}
+      activeMode={mdMode}
+      onModeChange={(mode) => setMdMode(mode as MdViewMode)}
+      modes={[
+        { value: "preview", label: "Preview" },
+        { value: "render-everything", label: "Render Everything" },
+        { value: "raw", label: "Markdown" },
+      ]}
+      ariaLabel="Markdown view"
+    >
+      {({ draft, saving, setDraft }) =>
+        mdMode === "preview" ? (
           <MarkdownView content={draft} />
         ) : mdMode === "render-everything" ? (
           <RenderEverythingView content={draft} ext=".md" />
@@ -189,9 +213,9 @@ function MarkdownFilePanel({
             readOnly={saving}
             ariaLabel={`Markdown source, ${filePath}`}
           />
-        )}
-      </div>
-    </div>
+        )
+      }
+    </EditableFilePanel>
   );
 }
 
@@ -209,118 +233,25 @@ function JsonFilePanel({
   onFileUpdated: (f: FileResponse) => void;
 }) {
   const [jsonMode, setJsonMode] = useState<JsonViewMode>("preview");
-  const [draft, setDraft] = useState(content);
-  const [savedContent, setSavedContent] = useState(content);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraft(content);
-    setSavedContent(content);
-  }, [content]);
-
-  const dirty = draft !== savedContent;
-
-  const persist = useCallback(async () => {
-    if (draft === savedContent || saving) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const updated = await saveFile(filePath, dataSource, draft);
-      setSavedContent(updated.content);
-      onFileUpdated(updated);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }, [draft, savedContent, saving, filePath, dataSource, onFileUpdated]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-        void persist();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [persist]);
 
   return (
-    <div className={styles.mdRoot}>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarStatus} aria-live="polite">
-          {saveError ? (
-            <span className={styles.toolbarError} title={saveError}>
-              {saveError}
-            </span>
-          ) : saving ? (
-            <span>Saving…</span>
-          ) : dirty ? (
-            <>
-              <span className={styles.toolbarDirtyDot} aria-hidden />
-              <span aria-label="Unsaved changes">Modified</span>
-            </>
-          ) : null}
-        </div>
-        <div className={styles.segment} role="tablist" aria-label="JSON view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "preview"}
-            className={
-              jsonMode === "preview"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("preview")}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "markdown-style"}
-            className={
-              jsonMode === "markdown-style"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("markdown-style")}
-          >
-            Markdown-style
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "render-everything"}
-            className={
-              jsonMode === "render-everything"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("render-everything")}
-          >
-            Render Everything
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "raw"}
-            className={
-              jsonMode === "raw"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("raw")}
-          >
-            Raw
-          </button>
-        </div>
-      </div>
-      <div className={styles.mdBody}>
-        {jsonMode === "preview" ? (
+    <EditableFilePanel
+      dataSource={dataSource}
+      filePath={filePath}
+      content={content}
+      onFileUpdated={onFileUpdated}
+      activeMode={jsonMode}
+      onModeChange={(mode) => setJsonMode(mode as JsonViewMode)}
+      modes={[
+        { value: "preview", label: "Preview" },
+        { value: "markdown-style", label: "Markdown-style" },
+        { value: "render-everything", label: "Render Everything" },
+        { value: "raw", label: "Raw" },
+      ]}
+      ariaLabel="JSON view"
+    >
+      {({ draft, saving, setDraft }) =>
+        jsonMode === "preview" ? (
           <JsonTreeView content={draft} ext={ext} />
         ) : jsonMode === "markdown-style" ? (
           <JsonMarkdownStyleView content={draft} ext={ext} />
@@ -333,9 +264,9 @@ function JsonFilePanel({
             readOnly={saving}
             ariaLabel={`JSON source, ${filePath}`}
           />
-        )}
-      </div>
-    </div>
+        )
+      }
+    </EditableFilePanel>
   );
 }
 

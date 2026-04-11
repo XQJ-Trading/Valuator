@@ -49,7 +49,6 @@ __all__ = [
     "QueryUnit",
     "RubricAspect",
     "Subject",
-    "expand",
     "analyze_query",
     "build_query_breakdown",
     "fill_routing_defaults",
@@ -67,7 +66,6 @@ _LAZY_EXPORTS = {
     "DomainRouter": (".router", "DomainRouter"),
     "QueryAnalyzer": (".query_analysis", "QueryAnalyzer"),
     "RubricAspect": (".types", "RubricAspect"),
-    "expand": (".expander", "expand"),
     "analyze_query": (".router", "analyze_query"),
 }
 

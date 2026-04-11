@@ -125,54 +125,10 @@ def enrich_tool_request(*, tool_request: Any, ctx: TaskContext) -> ToolRequest:
         as_of_utc=ctx.as_of_utc,
         units=ctx.query_units,
     )
-    if tool_request.tool_name in {
-        "web_search_tool",
-        # "domain_tool",
-    }:
+    if tool_request.tool_name == "web_search_tool":
         for key in ("as_of_utc", "time_scope", "target_start", "target_end"):
             value = getattr(temporal, key)
             if value:
                 args.setdefault(key, value)
-    # if tool_request.tool_name == "domain_tool":
-    #     context = str(args.get("context") or "").strip()
-    #     if not context:
-    #         context = domain_context(ctx)
-    #         if context:
-    #             args["context"] = context
-    #     args["grounding_mode"] = "grounded_required" if context else "synthesis_only"
 
     return ToolRequest(tool_name=tool_request.tool_name, args=args)
-
-
-# def domain_context(ctx: TaskContext) -> str:
-#     if not ctx.shared.facts:
-#         return ""
-#     temporal = summarize_temporal_contract(
-#         as_of_utc=ctx.as_of_utc,
-#         units=ctx.query_units,
-#     )
-#     lines = [
-#         "[GROUNDING_FACTS]",
-#         f"as_of_utc={ctx.as_of_utc or '(unknown)'}",
-#     ]
-#     if temporal.time_scope:
-#         lines.append(f"time_scope={temporal.time_scope}")
-#     if temporal.target_start or temporal.target_end:
-#         lines.append(
-#             f"target_period={temporal.target_start or '(open)'}..{temporal.target_end or '(open)'}"
-#         )
-#     for key, fact in ctx.shared.facts.items():
-#         meta = [f"grounded={fact.grounded}"]
-#         if fact.time_scope:
-#             meta.append(f"time_scope={fact.time_scope}")
-#         if fact.target_start or fact.target_end:
-#             meta.append(
-#                 "target=" f"{fact.target_start or '(open)'}..{fact.target_end or '(open)'}"
-#             )
-#         if fact.source_urls:
-#             meta.append(f"sources={len(fact.source_urls)}")
-#         value = json.dumps(fact.value, ensure_ascii=False, default=str)
-#         if len(value) > 400:
-#             value = value[:397] + "..."
-#         lines.append(f"- {key} [{', '.join(meta)}]: {value}")
-#     return "\n".join(lines)

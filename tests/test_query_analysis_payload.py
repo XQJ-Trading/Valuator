@@ -1,6 +1,6 @@
 """Regression tests for query analysis LLM payload normalization."""
 
-from domain.query_analysis import QueryUnitPayload
+from domain.query_analysis import QueryRequirementPayload, QueryUnitPayload
 
 
 def test_query_unit_resolves_period_tokens_against_as_of() -> None:
@@ -36,3 +36,16 @@ def test_query_unit_iso_dates_unaffected_by_context() -> None:
     )
     assert u.target_start == "2024-01-01"
     assert u.target_end == "2024-12-31"
+
+
+def test_query_requirement_payload_accepts_missing_domain_ids() -> None:
+    requirement = QueryRequirementPayload.model_validate(
+        {
+            "id": "r1",
+            "acceptance": "summarize the main events",
+            "unit_ids": [0],
+            "entity_ids": [],
+            "provenance": "user query",
+        }
+    )
+    assert requirement.unit_ids == [0]

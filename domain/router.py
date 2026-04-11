@@ -99,7 +99,6 @@ def _append_recommendation_requirement(analysis: QueryAnalysis) -> QueryAnalysis
             "including why each name is selected and the no-buy or trim triggers."
         ),
         unit_ids=list(range(len(analysis.units))),
-        domain_ids=list(dict.fromkeys(analysis.domain_ids)),
         entity_ids=[],
         provenance="Derived from recommendation/screening intent in the user query.",
     )

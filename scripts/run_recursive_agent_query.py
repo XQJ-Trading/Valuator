@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from valuator.runtime import create_tool_registry, final_output_text, finalize_trace  # noqa: E402
+from valuator.runtime import create_tool_registry, finalize_trace  # noqa: E402
 from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
 from valuator.session.browse_tree import (  # noqa: E402
@@ -384,7 +384,6 @@ async def run(args: argparse.Namespace) -> int:
                 trace_writer=trace_writer,
             )
             output = await agent.run(effective_query, root_task)
-            final_text = final_output_text(output)
             final_text = await asyncio.to_thread(
                 session_store.final_output_markdown, output
             )
@@ -449,7 +448,9 @@ async def run(args: argparse.Namespace) -> int:
             raise
         finally:
             if tool_registry is not None:
-                tool_registry.close()
+                close = getattr(tool_registry, "close", None)
+                if callable(close):
+                    close()
             close_session_log_file(runtime_log_path)
 
 

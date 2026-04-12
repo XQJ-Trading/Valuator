@@ -82,9 +82,10 @@ const MarkdownFilePanel = forwardRef<
     filePath: string;
     content: string;
     onFileUpdated: (f: FileResponse) => void;
+    mobileLayout?: boolean;
   }
 >(function MarkdownFilePanel(
-  { dataSource, filePath, content, onFileUpdated },
+  { dataSource, filePath, content, onFileUpdated, mobileLayout },
   ref,
 ) {
   const [mdMode, setMdMode] = useState<MdViewMode>("preview");
@@ -161,8 +162,11 @@ const MarkdownFilePanel = forwardRef<
 
   useImperativeHandle(ref, () => ({ persist, dirty }), [persist, dirty]);
 
+  const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
+  const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
+
   return (
-    <div className={styles.mdRoot}>
+    <div className={rootCls}>
       <div className={styles.toolbar}>
         <div className={styles.toolbarStatus} aria-live="polite">
           {saveError ? (
@@ -222,7 +226,7 @@ const MarkdownFilePanel = forwardRef<
           </button>
         </div>
       </div>
-      <div className={styles.mdBody}>
+      <div className={bodyCls}>
         {mdMode === "preview" ? (
           <MarkdownView content={draft} />
         ) : mdMode === "render-everything" ? (
@@ -248,9 +252,10 @@ const JsonFilePanel = forwardRef<
     content: string;
     ext: JsonExt;
     onFileUpdated: (f: FileResponse) => void;
+    mobileLayout?: boolean;
   }
 >(function JsonFilePanel(
-  { dataSource, filePath, content, ext, onFileUpdated },
+  { dataSource, filePath, content, ext, onFileUpdated, mobileLayout },
   ref,
 ) {
   const [jsonMode, setJsonMode] = useState<JsonViewMode>("preview");
@@ -327,8 +332,11 @@ const JsonFilePanel = forwardRef<
 
   useImperativeHandle(ref, () => ({ persist, dirty }), [persist, dirty]);
 
+  const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
+  const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
+
   return (
-    <div className={styles.mdRoot}>
+    <div className={rootCls}>
       <div className={styles.toolbar}>
         <div className={styles.toolbarStatus} aria-live="polite">
           {saveError ? (
@@ -401,7 +409,7 @@ const JsonFilePanel = forwardRef<
           </button>
         </div>
       </div>
-      <div className={styles.mdBody}>
+      <div className={bodyCls}>
         {jsonMode === "preview" ? (
           <JsonTreeView content={draft} ext={ext} />
         ) : jsonMode === "markdown-style" ? (
@@ -424,9 +432,11 @@ const JsonFilePanel = forwardRef<
 export default function ContentView({
   dataSource,
   filePath,
+  mobileLayout,
 }: {
   dataSource: DataSource;
   filePath: string | null;
+  mobileLayout?: boolean;
 }) {
   const [tabsDataSource, setTabsDataSource] = useState<DataSource>(dataSource);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
@@ -518,6 +528,7 @@ export default function ContentView({
           filePath={activeTabPath}
           content={file.content}
           onFileUpdated={setFile}
+          mobileLayout={mobileLayout}
         />
       );
     }
@@ -532,6 +543,7 @@ export default function ContentView({
           content={file.content}
           ext={ext}
           onFileUpdated={setFile}
+          mobileLayout={mobileLayout}
         />
       );
     }
@@ -545,8 +557,12 @@ export default function ContentView({
     );
   };
 
+  const tabViewCls = mobileLayout
+    ? `${styles.tabViewRoot} ${styles.tabViewRootMobile}`
+    : styles.tabViewRoot;
+
   return (
-    <div className={styles.tabViewRoot}>
+    <div className={tabViewCls}>
       <TabBar
         openTabs={openTabs}
         activeTabPath={activeTabPath}

@@ -13,6 +13,14 @@
   overflow: hidden;
 }
 
+.tabViewRootMobile {
+  height: auto;
+  min-height: unset;
+  overflow-y: visible;
+  overflow-x: hidden;
+  width: 100%;
+}
+
 .tabBar {
   flex-shrink: 0;
   display: flex;
@@ -101,6 +109,14 @@
   overflow: hidden;
 }
 
+.mdRootMobile {
+  height: auto;
+  min-height: unset;
+  overflow-y: visible;
+  overflow-x: hidden;
+  width: 100%;
+}
+
 .toolbar {
   flex-shrink: 0;
   display: flex;
@@ -174,6 +190,15 @@
   padding: 16px 24px;
   display: flex;
   flex-direction: column;
+}
+
+.mdBodyMobile {
+  flex: none;
+  min-height: unset;
+  overflow-y: visible;
+  overflow-x: auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .rawTextarea {

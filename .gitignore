@@ -66,6 +66,7 @@ logs/task_rewrite/*.json
 
 # Guide data
 guide-data/**
+!.gitkeep
 
 # Temporary files
 *.tmp

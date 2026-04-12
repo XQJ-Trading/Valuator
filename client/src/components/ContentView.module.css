@@ -14,10 +14,6 @@
 }
 
 .tabViewRootMobile {
-  height: auto;
-  min-height: unset;
-  overflow-y: visible;
-  overflow-x: hidden;
   width: 100%;
 }
 
@@ -110,10 +106,6 @@
 }
 
 .mdRootMobile {
-  height: auto;
-  min-height: unset;
-  overflow-y: visible;
-  overflow-x: hidden;
   width: 100%;
 }
 
@@ -193,10 +185,6 @@
 }
 
 .mdBodyMobile {
-  flex: none;
-  min-height: unset;
-  overflow-y: visible;
-  overflow-x: auto;
   width: 100%;
   box-sizing: border-box;
 }

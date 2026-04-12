@@ -96,8 +96,14 @@ const MarkdownFilePanel = forwardRef<
   const [draftSaved, setDraftSaved] = useState(false);
 
   const localKey = `valuator.draft.${dataSource}.${filePath}`;
+  const draftRestoredRef = useRef(false);
 
   useEffect(() => {
+    if (draftRestoredRef.current) {
+      // A localStorage draft is active — only track what the server has, don't overwrite local edits
+      setSavedContent(content);
+      return;
+    }
     setDraft(content);
     setSavedContent(content);
   }, [content]);
@@ -108,6 +114,7 @@ const MarkdownFilePanel = forwardRef<
     if (stored !== null && stored !== content) {
       setDraft(stored);
       setDraftSaved(true);
+      draftRestoredRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -123,6 +130,7 @@ const MarkdownFilePanel = forwardRef<
       setSavedContent(updated.content);
       setDraftSaved(false);
       localStorage.removeItem(localKey);
+      draftRestoredRef.current = false;
       onFileUpdated(updated);
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Save failed");
@@ -131,13 +139,13 @@ const MarkdownFilePanel = forwardRef<
     }
   }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
 
-  // 3s debounce save to localStorage; reset draftSaved immediately on each draft change
+  // 1s debounce save to localStorage; reset draftSaved immediately on each draft change
   useEffect(() => {
     setDraftSaved(false);
     const id = setTimeout(() => {
       localStorage.setItem(localKey, draft);
       setDraftSaved(true);
-    }, 3000);
+    }, 1000);
     return () => clearTimeout(id);
   }, [draft, localKey]);
 
@@ -266,8 +274,14 @@ const JsonFilePanel = forwardRef<
   const [draftSaved, setDraftSaved] = useState(false);
 
   const localKey = `valuator.draft.${dataSource}.${filePath}`;
+  const draftRestoredRef = useRef(false);
 
   useEffect(() => {
+    if (draftRestoredRef.current) {
+      // A localStorage draft is active — only track what the server has, don't overwrite local edits
+      setSavedContent(content);
+      return;
+    }
     setDraft(content);
     setSavedContent(content);
   }, [content]);
@@ -278,6 +292,7 @@ const JsonFilePanel = forwardRef<
     if (stored !== null && stored !== content) {
       setDraft(stored);
       setDraftSaved(true);
+      draftRestoredRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -293,6 +308,7 @@ const JsonFilePanel = forwardRef<
       setSavedContent(updated.content);
       setDraftSaved(false);
       localStorage.removeItem(localKey);
+      draftRestoredRef.current = false;
       onFileUpdated(updated);
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Save failed");
@@ -301,13 +317,13 @@ const JsonFilePanel = forwardRef<
     }
   }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
 
-  // 3s debounce save to localStorage; reset draftSaved immediately on each draft change
+  // 1s debounce save to localStorage; reset draftSaved immediately on each draft change
   useEffect(() => {
     setDraftSaved(false);
     const id = setTimeout(() => {
       localStorage.setItem(localKey, draft);
       setDraftSaved(true);
-    }, 3000);
+    }, 1000);
     return () => clearTimeout(id);
   }, [draft, localKey]);
 

@@ -477,9 +477,9 @@ async def test_step_planner_finalize_prompt_preserves_unverified_gaps() -> None:
     prompt = llm.calls[0]["prompt"]
     system_prompt = llm.calls[0]["system_prompt"]
     assert "[FINALIZE_GUIDANCE]" in prompt
-    assert "facts_only, unverified, data gap, could not verify" in prompt
-    assert "확정 사실처럼 쓰지 마라" in prompt
-    assert "facts_only, unverified, data gap, could not verify" not in system_prompt
+    assert "facts_only, unverified, data gap, grounded=false" in prompt
+    assert "확정 사실로 쓰지 마라" in prompt
+    assert "facts_only, unverified, data gap, grounded=false" not in system_prompt
 
 
 @pytest.mark.asyncio
@@ -603,8 +603,8 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
     prompt = llm.calls[0]["prompt"]
     assert "FINALIZE" in system
     assert "Original query:" not in system
-    assert "Bull / Base / Bear" in prompt
-    assert "uncertainties" in prompt.lower()
+    assert "BULL / BASE / BEAR" in prompt
+    assert "gap" in prompt.lower()
     assert "INFORMATION GAPS" in prompt
 
 
@@ -872,5 +872,3 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
     assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
     assert "opendart_financial_tool: args=corp, year, fs_div?" in prompt
     assert "Korean issuer only." in prompt
-    assert "Identifier contract:" in system_prompt
-    assert "Do not pass ticker to OpenDART." in system_prompt

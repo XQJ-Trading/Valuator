@@ -19,11 +19,22 @@ def _clear_cache() -> None:
 
 def test_resolve_corp_code_by_stock_code(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "domain.boundary.opendart_financial.fetch_krx_corp_records",
-        lambda: [{"stock_code": "005930", "corp_code": "00126380"}],
+        "domain.boundary.opendart_financial.resolve_krx_corp_record",
+        lambda _: {"stock_code": "005930", "corp_code": "00126380"},
     )
 
     assert resolve_corp_code("005930") == "00126380"
+
+
+def test_resolve_corp_code_by_normalized_corp_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.resolve_krx_corp_record",
+        lambda _: {"corp_name": "LS  ELECTRIC", "corp_code": "00811111"},
+    )
+
+    assert resolve_corp_code("ls electric") == "00811111"
 
 
 def test_fetch_opendart_financial_maps_response_and_caches(

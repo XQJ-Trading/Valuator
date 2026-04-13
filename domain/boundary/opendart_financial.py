@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from domain.boundary.krx_ticker_resolve import fetch_krx_corp_records
+from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
 from domain.knowledge.financial import OPENDART_ACCOUNT_MAP
 from valuator.utils.config import get_opendart_api_key
 
@@ -27,18 +27,12 @@ def clear_opendart_financial_cache() -> None:
     _fs_cache.clear()
 
 
-def resolve_corp_code(stock_code: str) -> str | None:
-    """stock_code(6자리) -> 8자리 DART corp_code. 순수 lookup, API 호출 없음."""
-    surface = stock_code.strip()
-    if not surface:
+def resolve_corp_code(surface_form: str) -> str | None:
+    """KRX corp 테이블에서 종목코드 또는 회사명으로 8자리 DART corp_code 조회. 순수 lookup."""
+    record = resolve_krx_corp_record(surface_form)
+    if record is None:
         return None
-    surface_upper = surface.upper()
-    for record in fetch_krx_corp_records():
-        if record.get("stock_code", "").upper() == surface_upper:
-            return record.get("corp_code") or None
-        if record.get("corp_name", "").strip() == surface:
-            return record.get("corp_code") or None
-    return None
+    return record.get("corp_code") or None
 
 
 def fetch_opendart_financial(

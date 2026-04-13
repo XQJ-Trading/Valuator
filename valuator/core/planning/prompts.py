@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from domain.query import summarize_temporal_contract
@@ -102,6 +103,9 @@ def build_system_prompt(
             "Use web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
             "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
+            "Identifier contract:",
+            "Do not pass ticker to OpenDART.",
+            "Use corp or stock_code for opendart_financial_tool; use market ticker or yahoo symbol for market-data tools.",
             "Prefer WAIT over inventing missing facts.",
             "",
             "[REQUIREMENTS]는 분석이 충족해야 할 조건이다.",
@@ -163,134 +167,135 @@ def build_step_prompt(
     ctx: TaskContext,
     allowed_actions: list[Action],
     max_prompt_chars: int,
-    prompt_child_output_budget_chars: int,
     prompt_value_preview_chars: int,
     prompt_query_chars: int,
-    tool_spec_preview_chars: int = 300,
-    child_output_budget: int | None = None,
-    sibling_preview_chars: int | None = None,
 ) -> str:
-    co_budget = child_output_budget or prompt_child_output_budget_chars
-    sib_preview = sibling_preview_chars or tool_spec_preview_chars
+    del prompt_value_preview_chars, prompt_query_chars
 
-    sections = [
-        f"[TASK_ID]\n{task.id}",
-        f"[TASK]\n{task.description}",
-        f"[STATE]\nstep_count={ctx.step_count}\nstatus={task.state.value}",
-        "[ALLOWED_ACTIONS]\n" + ", ".join(action.value for action in allowed_actions),
-        "[TEMPORAL_CONTRACT]\n" + temporal_contract_text(ctx),
+    sections: list[tuple[str, str]] = [
+        ("[TASK_ID]", task.id),
+        ("[TASK]", task.description),
+        ("[STATE]", f"step_count={ctx.step_count}\nstatus={task.state.value}"),
+        ("[ALLOWED_ACTIONS]", ", ".join(action.value for action in allowed_actions)),
+        ("[TEMPORAL_CONTRACT]", temporal_contract_text(ctx)),
     ]
     if ctx.query_units:
-        sections.append("[QUERY_UNITS]\n" + query_units_text(task, ctx))
+        sections.append(("[QUERY_UNITS]", query_units_text(task, ctx)))
     if task.tool_hint:
-        sections.append(f"[TOOL_HINT]\n{task.tool_hint}")
+        sections.append(("[TOOL_HINT]", task.tool_hint))
     if task.blocked_tools:
-        sections.append("[BLOCKED_TOOLS]\n" + ", ".join(sorted(task.blocked_tools)))
+        sections.append(("[BLOCKED_TOOLS]", ", ".join(sorted(task.blocked_tools))))
     if task.last_invalid_error:
         sections.append(
-            "[PREVIOUS_REJECTION]\n"
-            f"invalid_decision_count={task.invalid_decision_count}\n"
-            f"{task.last_invalid_error}"
+            (
+                "[PREVIOUS_REJECTION]",
+                "invalid_decision_count="
+                f"{task.invalid_decision_count}\n{task.last_invalid_error}",
+            )
         )
     if ctx.tool_results:
         latest = ctx.tool_results[-1]
         sections.append(
-            "[LAST_TOOL_RESULT]\n"
-            f"success={latest.success}\n"
-            f"{preview_json(latest.result, max_chars=prompt_value_preview_chars)}"
+            (
+                "[LAST_TOOL_RESULT]",
+                f"success={latest.success}\n{render_prompt_value(latest.result)}",
+            )
         )
+        last_tool_artifacts = render_artifact_refs(latest.metadata.get("artifacts"))
+        if last_tool_artifacts:
+            sections.append(("[LAST_TOOL_RESULT_ARTIFACTS]", last_tool_artifacts))
     if task.last_tool_request is not None:
         sections.append(
-            "[LAST_TOOL_REQUEST]\n"
-            f"{task.last_tool_request.tool_name} "
-            f"{preview_json(task.last_tool_request.args, max_chars=prompt_value_preview_chars)}"
+            (
+                "[LAST_TOOL_REQUEST]",
+                f"{task.last_tool_request.tool_name}\n"
+                f"{render_prompt_value(task.last_tool_request.args)}",
+            )
         )
     if task.last_tool_success is not None:
-        sections.append(f"[LAST_TOOL_SUCCESS]\n{task.last_tool_success}")
+        sections.append(("[LAST_TOOL_SUCCESS]", str(task.last_tool_success)))
     if ctx.child_outputs:
-        per_child = co_budget // len(ctx.child_outputs)
-        child_lines = [
-            f"{child_id}: {preview_json(output, max_chars=per_child)}"
+        child_blocks = [
+            f"{child_id}\n{render_prompt_value(output)}"
             for child_id, output in ctx.child_outputs.items()
         ]
-        sections.append("[CHILD_OUTPUTS]\n" + "\n".join(child_lines))
+        sections.append(("[CHILD_OUTPUTS]", "\n\n".join(child_blocks)))
     if ctx.current_children:
         failed = [s for s in ctx.current_children if s.state == TaskState.FAILED]
         sections.append(
-            "[CURRENT_CHILDREN]\n"
-            + "\n".join(
-                task_summary_line(summary, output_preview_chars=sib_preview)
-                for summary in ctx.current_children
+            (
+                "[CURRENT_CHILDREN]",
+                "\n".join(task_summary_line(summary) for summary in ctx.current_children),
             )
         )
         if failed:
             sections.append(
-                "[FAILED_CHILDREN]\n"
-                + "\n".join(f"{s.id}: {s.description}" for s in failed)
-                + "\nSome children failed. Aggregate available results and note gaps."
+                (
+                    "[FAILED_CHILDREN]",
+                    "\n".join(f"{s.id}: {s.description}" for s in failed)
+                    + "\nSome children failed. Aggregate available results and note gaps.",
+                )
             )
+    output_artifacts = output_artifact_blocks(ctx)
+    if output_artifacts:
+        sections.append(("[OUTPUT_ARTIFACTS]", output_artifacts))
     if ctx.shared.facts:
         fact_lines = [
-            shared_fact_line(
-                key=key,
-                fact=fact,
-                prompt_value_preview_chars=prompt_value_preview_chars,
-            )
+            shared_fact_line(key=key, fact=fact)
             for key, fact in ctx.shared.facts.items()
         ]
-        sections.append("[SHARED_FACTS]\n" + "\n".join(fact_lines))
+        sections.append(("[SHARED_FACTS]", "\n".join(fact_lines)))
     if ctx.shared.conflicts:
         conflict_lines = [
-            f"{conflict.key}: {preview_json(conflict.existing.value, max_chars=prompt_value_preview_chars)}"
-            f" vs {preview_json(conflict.incoming.value, max_chars=prompt_value_preview_chars)}"
+            f"{conflict.key}:\n"
+            f"existing:\n{render_prompt_value(conflict.existing.value)}\n"
+            f"incoming:\n{render_prompt_value(conflict.incoming.value)}"
             for conflict in ctx.shared.conflicts
         ]
-        sections.append("[CONFLICTS]\n" + "\n".join(conflict_lines))
+        sections.append(("[CONFLICTS]", "\n\n".join(conflict_lines)))
     subject_text = subject_context_text(ctx)
     if subject_text:
-        sections.append("[SUBJECTS]\n" + subject_text)
+        sections.append(("[SUBJECTS]", subject_text))
     if ctx.siblings:
-        sibling_lines = [
-            task_summary_line(summary, output_preview_chars=sib_preview)
-            for summary in ctx.siblings.values()
-        ]
-        sections.append("[SIBLINGS]\n" + "\n".join(sibling_lines))
+        sibling_lines = [task_summary_line(summary) for summary in ctx.siblings.values()]
+        sections.append(("[SIBLINGS]", "\n".join(sibling_lines)))
     if ctx.ancestry:
-        sections.append(
-            "[ANCESTRY]\n" + " -> ".join(summary.id for summary in ctx.ancestry)
-        )
+        sections.append(("[ANCESTRY]", " -> ".join(summary.id for summary in ctx.ancestry)))
 
     requirements = requirements_for_task(ctx)
     if requirements:
         req_lines = [f"  {req.id}: {req.acceptance}" for req in requirements]
-        sections.append("[REQUIREMENTS]\n" + "\n".join(req_lines))
+        sections.append(("[REQUIREMENTS]", "\n".join(req_lines)))
     if Action.FINALIZE in allowed_actions and ctx.child_outputs:
-        sections.append("[FINALIZE_GUIDANCE]\n" + finalize_guidance_text())
+        sections.append(("[FINALIZE_GUIDANCE]", finalize_guidance_text()))
 
-    sections.append("[AVAILABLE_TOOLS]\n" + available_tools_text(ctx))
-    sections.append("Return valid JSON only.")
-    prompt = "\n\n".join(sections)
+    sections.append(("[AVAILABLE_TOOLS]", available_tools_text(ctx)))
+    sections.append(("", "Return valid JSON only."))
+    prompt = render_sections(sections)
+    if len(prompt) <= max_prompt_chars:
+        return prompt
 
-    if len(prompt) > max_prompt_chars and ctx.child_outputs:
-        overhead = len(prompt) - co_budget
-        reduced_co_budget = max(
-            max_prompt_chars - overhead,
-            len(ctx.child_outputs) * 200,
-        )
-        reduced_sib_preview = min(sib_preview, 150)
-        if reduced_co_budget < co_budget:
-            return build_step_prompt(
-                task=task,
-                ctx=ctx,
-                allowed_actions=allowed_actions,
-                max_prompt_chars=max_prompt_chars,
-                prompt_child_output_budget_chars=prompt_child_output_budget_chars,
-                prompt_value_preview_chars=prompt_value_preview_chars,
-                prompt_query_chars=prompt_query_chars,
-                tool_spec_preview_chars=tool_spec_preview_chars,
-                child_output_budget=reduced_co_budget,
-                sibling_preview_chars=reduced_sib_preview,
-            )
+    for title in (
+        "[AVAILABLE_TOOLS]",
+        "[FAILED_CHILDREN]",
+        "[CURRENT_CHILDREN]",
+        "[SIBLINGS]",
+        "[ANCESTRY]",
+        "[CONFLICTS]",
+        "[LAST_TOOL_REQUEST]",
+        "[BLOCKED_TOOLS]",
+        "[PREVIOUS_REJECTION]",
+        "[OUTPUT_ARTIFACTS]",
+        "[LAST_TOOL_RESULT_ARTIFACTS]",
+        "[FINALIZE_GUIDANCE]",
+    ):
+        filtered = [section for section in sections if section[0] != title]
+        if len(filtered) == len(sections):
+            continue
+        sections = filtered
+        prompt = render_sections(sections)
+        if len(prompt) <= max_prompt_chars:
+            return prompt
     return prompt
 
 
@@ -448,7 +453,7 @@ def query_units_text(task: Task, ctx: TaskContext) -> str:
     return "\n".join(lines) or "(none)"
 
 
-def shared_fact_line(*, key: str, fact: Any, prompt_value_preview_chars: int) -> str:
+def shared_fact_line(*, key: str, fact: Any) -> str:
     meta = [f"from {fact.source_task_id}", f"grounded={fact.grounded}"]
     if fact.time_scope:
         meta.append(f"time_scope={fact.time_scope}")
@@ -458,14 +463,12 @@ def shared_fact_line(*, key: str, fact: Any, prompt_value_preview_chars: int) ->
         )
     if fact.source_urls:
         meta.append(f"sources={len(fact.source_urls)}")
-    return f"{key}: {preview_json(fact.value, max_chars=prompt_value_preview_chars)} ({', '.join(meta)})"
+    return f"{key}: {render_prompt_value(fact.value)} ({', '.join(meta)})"
 
 
 def preview_json(value: Any, *, max_chars: int) -> str:
-    text = json.dumps(value, ensure_ascii=False, default=str)
-    if len(text) <= max_chars:
-        return text
-    return truncate_preserving_tables(text, max_chars)
+    del max_chars
+    return render_prompt_value(value)
 
 
 def prompt_query(query: str, *, prompt_query_chars: int) -> str:
@@ -489,60 +492,78 @@ def prompt_query(query: str, *, prompt_query_chars: int) -> str:
     return text[: prompt_query_chars - 3] + "..."
 
 
-def task_summary_line(summary: TaskSummary, *, output_preview_chars: int) -> str:
+def task_summary_line(summary: TaskSummary) -> str:
     line = f"{summary.id}: {summary.state.value} - {summary.description}"
     if summary.output is not None:
-        line += (
-            f" | output={preview_json(summary.output, max_chars=output_preview_chars)}"
-        )
+        line += f" | output={render_prompt_value(summary.output)}"
+    artifact_refs = render_artifact_refs(summary.artifacts)
+    if artifact_refs:
+        line += f" | artifacts={artifact_refs.replace(chr(10), '; ')}"
     return line
 
 
-def truncate_preserving_tables(text: str, limit: int) -> str:
-    table_blocks: list[tuple[int, int]] = []
-    lines = text.split("\\n")
-    i = 0
-    pos = 0
-    while i < len(lines):
-        line = lines[i]
-        line_start = pos
-        pos += len(line) + 2
-        if line.lstrip().startswith("|"):
-            block_start = line_start
-            while i < len(lines) and lines[i].lstrip().startswith("|"):
-                block_end = pos
-                i += 1
-                if i < len(lines):
-                    pos += len(lines[i]) + 2
-            table_blocks.append((block_start, block_end))
-        else:
-            i += 1
+def render_sections(sections: list[tuple[str, str]]) -> str:
+    blocks: list[str] = []
+    for title, body in sections:
+        if not body.strip():
+            continue
+        blocks.append(f"{title}\n{body}" if title else body)
+    return "\n\n".join(blocks)
 
-    if not table_blocks:
-        return text[: limit - 3] + "..."
 
-    preserved: list[str] = []
-    table_chars = sum(end - start for start, end in table_blocks)
-    prose_budget = max(limit - table_chars - 50, limit // 4)
+def render_prompt_value(value: Any, heading_level: int = 2) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Mapping):
+        lines: list[str] = []
+        for key, item in value.items():
+            rendered = render_prompt_value(item, min(heading_level + 1, 6)).strip()
+            if not rendered:
+                continue
+            label = str(key).replace("_", " ").strip()
+            if "\n" not in rendered and not rendered.startswith("- "):
+                lines.append(f"- **{label}**: {rendered}")
+            else:
+                lines.extend([f"{'#' * heading_level} {label}", "", rendered, ""])
+        return "\n".join(lines).strip()
+    if isinstance(value, list):
+        if all(not isinstance(item, (Mapping, list)) for item in value):
+            return "\n".join(
+                f"- {text}"
+                for text in (str(item).strip() for item in value)
+                if text
+            ).strip()
+        lines = []
+        for index, item in enumerate(value, start=1):
+            rendered = render_prompt_value(item, min(heading_level + 1, 6)).strip()
+            if rendered:
+                lines.extend([f"{'#' * heading_level} Item {index}", "", rendered, ""])
+        return "\n".join(lines).strip()
+    return str(value).strip()
 
-    prev_end = 0
-    for start, end in table_blocks:
-        prose = text[prev_end:start]
-        if len(prose) > prose_budget // max(len(table_blocks), 1):
-            chunk = prose_budget // max(len(table_blocks), 1)
-            prose = prose[:chunk] + "..."
-        preserved.append(prose)
-        preserved.append(text[start:end])
-        prev_end = end
 
-    trailing = text[prev_end:]
-    remaining = limit - sum(len(p) for p in preserved)
-    if remaining > 10 and trailing:
-        preserved.append(trailing[:remaining])
-    elif trailing:
-        preserved.append("...")
+def render_artifact_refs(artifacts: Any) -> str:
+    if not isinstance(artifacts, Mapping):
+        return ""
+    lines = [
+        f"{key}={value}"
+        for key, value in artifacts.items()
+        if value is not None and str(value).strip()
+    ]
+    return "\n".join(lines)
 
-    result = "".join(preserved)
-    if len(result) > limit:
-        return result[: limit - 3] + "..."
-    return result
+
+def output_artifact_blocks(ctx: TaskContext) -> str:
+    blocks: list[str] = []
+    seen: set[str] = set()
+    related = [*ctx.current_children, *ctx.siblings.values(), *ctx.ancestry]
+    for summary in related:
+        if summary.id in seen:
+            continue
+        seen.add(summary.id)
+        artifact_refs = render_artifact_refs(summary.artifacts)
+        if artifact_refs:
+            blocks.append(f"{summary.id}\n{artifact_refs}")
+    return "\n\n".join(blocks)

@@ -16,6 +16,7 @@ class TaskSummary:
     description: str
     state: TaskState
     output: Any = None
+    artifacts: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.shared_state import Fact, SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, TaskState
+from valuator.core.types import Action, TaskState, ToolResult
 from valuator.core.task import AtomicTask, ComplexTask
 
 
@@ -439,7 +439,7 @@ async def test_step_planner_prompt_includes_current_children_and_done_sibling_ou
     assert "[CURRENT_CHILDREN]" in prompt
     assert "root.0: waiting - existing child" in prompt
     assert "[SIBLINGS]" in prompt
-    assert 'output={"summary": "finished"}' in prompt
+    assert "- **summary**: finished" in prompt
     assert "[THINKING_LEVEL]" not in llm.calls[0]["system_prompt"]
 
 
@@ -713,6 +713,104 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     assert "grounded=True" in prompt
     assert "sources=1" in prompt
     assert "As-of UTC timestamp: 2026-03-30T00:00:00Z" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_drops_low_priority_sections_before_child_outputs() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    sibling = TaskSummary(
+        id="root.1",
+        description="sibling task",
+        state=TaskState.DONE,
+        output={"summary": "x" * 170_000},
+    )
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=1,
+        child_outputs={
+            "root.0": {
+                "scenario_table": "| A | B |\n| --- | --- |\n| 1 | 2 |",
+                "summary": "preserve this table",
+            }
+        },
+        siblings={"root.1": sibling},
+        shared=SharedStateView({}, []),
+        query="Amazon analysis",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[CHILD_OUTPUTS]" in prompt
+    assert "| A | B |" in prompt
+    assert "[SIBLINGS]" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=1,
+        tool_results=[
+            ToolResult(
+                success=True,
+                result={"summary_table": "| A | B |\n| --- | --- |\n| 1 | 2 |"},
+                metadata={
+                    "artifacts": {
+                        "execution_result_path": "execution/result.md",
+                        "execution_meta_path": "execution/result.md.meta.json",
+                    }
+                },
+            )
+        ],
+        current_children=[
+            TaskSummary(
+                id="root.0",
+                description="existing child",
+                state=TaskState.DONE,
+                output={"summary": "finished"},
+                artifacts={
+                    "aggregation_report_path": "aggregation/report.md",
+                    "aggregation_raw_results_path": "aggregation/raw_results.json",
+                },
+            )
+        ],
+        shared=SharedStateView({}, []),
+        query="Amazon analysis",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[LAST_TOOL_RESULT_ARTIFACTS]" in prompt
+    assert "execution_result_path=execution/result.md" in prompt
+    assert "[OUTPUT_ARTIFACTS]" in prompt
+    assert "aggregation_report_path=aggregation/report.md" in prompt
 
 
 @pytest.mark.asyncio

@@ -212,7 +212,7 @@ class ValuatorSessionStore:
         result: ToolResult,
         started_at: str,
         duration_ms: float,
-    ) -> None:
+    ) -> dict[str, str]:
         with self._lock:
             plan_task = self._plan_tasks[task_id]
             task_dir = self._task_dir(task_id) / "execution"
@@ -269,12 +269,16 @@ class ValuatorSessionStore:
             )
 
             artifacts = self._artifacts_for(task_id)
-            artifacts["execution_result_path"] = self._task_rel(task_id, result_path)
-            artifacts["execution_meta_path"] = self._task_rel(task_id, meta_path)
+            artifact_refs = {
+                "execution_result_path": self._task_rel(task_id, result_path),
+                "execution_meta_path": self._task_rel(task_id, meta_path),
+            }
+            artifacts.update(artifact_refs)
             self._session_payload["updated_at"] = utc_isoformat()
             self._write_session()
+            return artifact_refs
 
-    def write_aggregation_report(self, *, task_id: str, output: Any) -> None:
+    def write_aggregation_report(self, *, task_id: str, output: Any) -> dict[str, str]:
         with self._lock:
             plan_task = self._plan_tasks[task_id]
             task_dir = self._task_dir(task_id) / "aggregation"
@@ -343,12 +347,16 @@ class ValuatorSessionStore:
             )
 
             artifacts = self._artifacts_for(task_id)
-            artifacts["aggregation_report_path"] = self._task_rel(task_id, report_path)
-            artifacts["aggregation_raw_results_path"] = self._task_rel(
-                task_id, raw_results_path
-            )
+            artifact_refs = {
+                "aggregation_report_path": self._task_rel(task_id, report_path),
+                "aggregation_raw_results_path": self._task_rel(
+                    task_id, raw_results_path
+                ),
+            }
+            artifacts.update(artifact_refs)
             self._session_payload["updated_at"] = utc_isoformat()
             self._write_session()
+            return artifact_refs
 
     def final_output_markdown(self, output: Any) -> str:
         with self._lock:

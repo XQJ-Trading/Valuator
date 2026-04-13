@@ -429,7 +429,7 @@ class Agent:
                 task.blocked_tools.add(tool_name)
         self._scheduler.mark_tool_complete(task, result)
         if self._session_store is not None:
-            self._session_store.write_execution_result(
+            artifact_refs = self._session_store.write_execution_result(
                 task_id=task.id,
                 tool_name=decision.tool_request.tool_name,
                 args=decision.tool_request.args,
@@ -437,6 +437,8 @@ class Agent:
                 started_at=tool_started_at,
                 duration_ms=duration_ms,
             )
+            task.artifacts.update(artifact_refs)
+            result.metadata["artifacts"] = artifact_refs
         self._sync_session_tree()
         agent_trace.log_tool_execution(
             self._trace_writer,
@@ -476,10 +478,11 @@ class Agent:
             self._session_store is not None
             and decision.action in (Action.AGGREGATE, Action.FINALIZE)
         ):
-            self._session_store.write_aggregation_report(
+            artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,
                 output=task.completion_payload(),
             )
+            task.artifacts.update(artifact_refs)
         self._sync_session_tree()
         if decision.action is Action.DECOMPOSE and self._session_store is not None:
             current = self._scheduler.get_task(task.id) or task
@@ -667,10 +670,11 @@ class Agent:
         )
         self._scheduler.apply_decision(task, decision, self._shared)
         if self._session_store is not None:
-            self._session_store.write_aggregation_report(
+            artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,
                 output=task.completion_payload(),
             )
+            task.artifacts.update(artifact_refs)
         self._sync_session_tree()
         completion_payload = task.completion_payload()
         agent_trace.log_task_result(

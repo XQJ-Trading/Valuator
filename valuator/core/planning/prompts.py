@@ -185,9 +185,7 @@ def build_step_prompt(
     if task.tool_hint:
         sections.append(f"[TOOL_HINT]\n{task.tool_hint}")
     if task.blocked_tools:
-        sections.append(
-            "[BLOCKED_TOOLS]\n" + ", ".join(sorted(task.blocked_tools))
-        )
+        sections.append("[BLOCKED_TOOLS]\n" + ", ".join(sorted(task.blocked_tools)))
     if task.last_invalid_error:
         sections.append(
             "[PREVIOUS_REJECTION]\n"
@@ -248,6 +246,9 @@ def build_step_prompt(
             for conflict in ctx.shared.conflicts
         ]
         sections.append("[CONFLICTS]\n" + "\n".join(conflict_lines))
+    subject_text = subject_context_text(ctx)
+    if subject_text:
+        sections.append("[SUBJECTS]\n" + subject_text)
     if ctx.siblings:
         sibling_lines = [
             task_summary_line(summary, output_preview_chars=sib_preview)
@@ -360,8 +361,39 @@ def available_tools_text(ctx: TaskContext) -> str:
         except RuntimeError:
             lines.append(tool_name)
             continue
-        lines.append(
+        line = (
             f"{tool_name}: args={spec.args_text()}; capability={spec.capability or '-'}"
+        )
+        if spec.param_descriptions:
+            params = ", ".join(
+                f"{key}: {description}"
+                for key, description in spec.param_descriptions.items()
+            )
+            line += f"; params={params}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def subject_context_text(ctx: TaskContext) -> str:
+    subjects = ctx.query_analysis.query_intent.subjects
+    if not subjects:
+        return ""
+    lines: list[str] = []
+    for subject in subjects:
+        listing = subject.listing
+        if listing is None:
+            lines.append(f"company_name={subject.company.company_name}")
+            continue
+        if listing.market == "KRX":
+            lines.append(
+                f"company_name={subject.company.company_name}; exchange={listing.exchange}; "
+                f"corp={subject.company.company_name}; stock_code={listing.security_code}; "
+                f"yahoo_symbol={listing.yahoo_symbol}"
+            )
+            continue
+        lines.append(
+            f"company_name={subject.company.company_name}; exchange={listing.exchange}; "
+            f"ticker={listing.security_code}; yahoo_symbol={listing.yahoo_symbol}"
         )
     return "\n".join(lines)
 

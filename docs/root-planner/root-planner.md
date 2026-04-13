@@ -301,78 +301,10 @@ SK하이닉스 (000660.KS, KRX) | currency=KRW | price=180,500 | mkt_cap=107.5T 
 
 1차 구현은 `Listing.yahoo_symbol` → `yf.Ticker(symbol).info` 호출로 스냅샷을 채운다.
 
-### 6.2 KIS REST API 매핑
+### 6.2 KIS REST API 및 온톨로지 매핑
 
-국내 정식 채널로 확장할 때는 다음 문서를 기준으로 한다.
-
-#### 6.2.1 온톨로지 노드별 매핑
-
-| 온톨로지 노드 | SubjectContext 필드 | KIS API | 비고 |
-|---------------|-------------------|---------|------|
-| `Security` | `security.ticker`, `exchange`, `currency` | KRX 메타 또는 KIS 종목정보 | 국내 상장: KRW 고정, ticker = `stock_code.KS` |
-| `StockPrice` | `stock_price.current_price`, `market_cap` | KIS `inquire-price` | 당일 현재가 + 시가총액 |
-| `Indicator` | `indicator.trailing_pe`, `eps`, `pbr` 등 | KIS `inquire-price` | 동일 API 응답에 포함 |
-
-#### 6.2.2 Valuator에서 이미 쓰는 것
-
-| 항목 | 출처 |
-|------|------|
-| `stock_code` (6자리) | OpenDart → `Listing.security_code` |
-| 시장 구분 | OpenDart `corp_cls` → `Listing.exchange` (KOSPI/KOSDAQ/KONEX) |
-| 야후 심볼 | `Listing.yahoo_symbol` (e.g., `005930.KS`) |
-| 회사명 | `Company.name` |
-
-#### 6.2.3 KIS inquire-price (국내주식 현재가)
-
-**API 명**: 주식현재가 시세 / `inquire-price`
-
-| 항목 | 값 |
-|------|-----|
-| **REST path** | `/uapi/domestic-stock/v1/quotations/inquire-price` |
-| **TR ID** | 포털에서 확인 (예: `FHKST01010100` — 배포 전 재확인 **필수**) |
-| **query** | `FID_COND_MRKT_DIV_CODE`=`J` (주식), `FID_INPUT_ISCD`=종목코드 |
-
-**응답 필드 (일반적)**:
-
-| StockPrice / Indicator 필드 | KIS 필드명 |
-|-----------------------------|-----------|
-| `current_price` | `stck_prpr` (현재가) |
-| `market_cap` | `total_mkt_cap` 또는 계산값 |
-| `trailing_pe` | `per` 또는 `eps` 기반 계산 |
-| `eps` | `eps` |
-| `pbr` | `pbr` 또는 `bps` 기반 계산 |
-| `bps` | `bps` |
-
-**주의**: KIS TR ID와 응답 필드명은 [KIS Developers 포털](https://apiportal.koreainvestment.com/) 최신 스펙 기준.
-배포 전 반드시 해당 API 상세에서 재확인한다.
-
-#### 6.2.4 forward_pe 처리
-
-`forward_pe` (예상 PER)는 KIS 단일 호출에 없는 경우가 많다.
-- 생략 가능 (`Indicator.forward_pe = None`)
-- 또는 다른 출처(FnGuide 등) 추가
-
-#### 6.2.5 ISIN (선택)
-
-온톨로지 `Security.isin`이 필요하면:
-- [금융위원회 KRX상장종목정보](https://www.data.go.kr/) (공공데이터포털)
-- 또는 KIS **종목정보** 계열 API
-
-Valuator는 당장 OpenDart + Listing으로 충분한 경우가 많으므로, ISIN은 선택적.
-
-### 6.3 구현 순서 제안
-
-1. **기본**: `Listing` 기존 정보 활용 (stock_code, yahoo_symbol, exchange, currency)
-2. **KIS 연동** (선택):
-   - `inquire-price` 1회 호출로 `StockPrice` + `Indicator` 채우기
-   - 필요 시 `inquire-daily-price`로 시계열 추가
-3. **ISIN** (선택): 공공데이터 또는 KIS 종목정보 API로 보강
-
-### 6.4 참고 링크
-
-- [KIS Developers 포털](https://apiportal.koreainvestment.com/) — API 목록에서 `inquire-price`, `inquire-daily-price` 검색
-- [한국투자 GitHub](https://github.com/koreainvestment/open-trading-api) — TR ID, 예제 코드
-- [금융위원회 KRX상장종목정보](https://www.data.go.kr/) — 공공데이터포털
+> **이전됨**: 온톨로지 노드별 매핑, KIS API 상세, ISIN, 구현 순서, 참고 링크는
+> [opendart-financial-collector-plan.md](../open-dart-financial/opendart-financial-collector-plan.md)의 "외부 데이터 소스 매핑" 섹션으로 통합되었다.
 
 ---
 

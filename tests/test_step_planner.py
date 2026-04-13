@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from domain.query import QueryAnalysis, QueryRequirement, QueryUnit
+from domain.company import Company, Listing, Subject
+from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.shared_state import Fact, SharedStateView
 from valuator.core.planning import StepPlanner
@@ -712,3 +713,68 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     assert "grounded=True" in prompt
     assert "sources=1" in prompt
     assert "As-of UTC timestamp: 2026-03-30T00:00:00Z" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="mixed market identifier task")
+    samsung = Subject(
+        company=Company(company_id="KRX:005930", company_name="삼성전자", aliases=("Samsung Electronics",)),
+        listing=Listing(
+            listing_id="KRX:005930",
+            company_id="KRX:005930",
+            security_code="005930",
+            exchange="KOSPI",
+            vendor_symbols={"yahoo": "005930.KS"},
+        ),
+    )
+    amazon = Subject(
+        company=Company(company_id="SEC:1018724", company_name="Amazon.com", aliases=("AMZN",)),
+        listing=Listing(
+            listing_id="USA:AMZN",
+            company_id="SEC:1018724",
+            security_code="AMZN",
+            exchange="USA",
+            vendor_symbols={"yahoo": "AMZN"},
+        ),
+    )
+    ctx = TaskContext(
+        task_id="root",
+        description="mixed market identifier task",
+        step_count=0,
+        as_of_utc="2026-03-30T00:00:00Z",
+        shared=SharedStateView({}, []),
+        query="삼성전자와 Amazon 재무 조회",
+        query_analysis=QueryAnalysis(
+            query_intent=QueryIntent(
+                query="삼성전자와 Amazon 재무 조회",
+                subjects=(samsung, amazon),
+            )
+        ),
+        available_tools=[
+            "opendart_financial_tool",
+            "yfinance_balance_sheet",
+            "sec_tool",
+        ],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    system_prompt = llm.calls[0]["system_prompt"]
+    assert "[SUBJECTS]" in prompt
+    assert "company_name=삼성전자; exchange=KOSPI; corp=삼성전자; stock_code=005930; yahoo_symbol=005930.KS" in prompt
+    assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
+    assert "opendart_financial_tool: args=corp, year, fs_div?" in prompt
+    assert "Korean issuer only." in prompt
+    assert "Identifier contract:" in system_prompt
+    assert "Do not pass ticker to OpenDART." in system_prompt

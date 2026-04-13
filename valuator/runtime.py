@@ -11,6 +11,7 @@ from .utils.time_utils import utc_isoformat
 def create_tool_registry(model: str, usage_writer: Any | None = None):
     from .tools.base import ToolRegistry
     from .tools.code_execute_tool import ExecuteCodeTool
+    from .tools.opendart_financial_tool import OpenDartFinancialTool
     from .tools.sec_tool import SECTool
     from .tools.web_search_tool import PerplexitySearchTool
     from .tools.yfinance_tool import YFinanceBalanceSheetTool
@@ -21,6 +22,7 @@ def create_tool_registry(model: str, usage_writer: Any | None = None):
     for tool in (
         PerplexitySearchTool(),
         code_tool,
+        OpenDartFinancialTool(),
         YFinanceBalanceSheetTool(),
         SECTool(model=model),
     ):

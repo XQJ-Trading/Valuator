@@ -60,8 +60,9 @@ class Listing:
         return self.vendor_symbols.get("yahoo", self.security_code)
 
     @property
-    def legacy_market(self) -> str:
-        return legacy_market_for_exchange(self.exchange)
+    def market(self) -> str:
+        return market_for_exchange(self.exchange)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +198,7 @@ def representative_listing(subject: Subject) -> Listing | None:
     return _representative_listing_for_company(subject.company.company_id)
 
 
-def legacy_market_for_exchange(exchange: str) -> str:
+def market_for_exchange(exchange: str) -> str:
     value = exchange.strip().upper()
     if value in _KRX_MARKETS:
         return "KRX"

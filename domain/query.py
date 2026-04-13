@@ -13,12 +13,12 @@ if TYPE_CHECKING:
 DomainId = str
 TaskId = str
 
-DEFAULT_GENERIC_TOOLS = [
-    "web_search_tool",
-    "sec_tool",
-    "yfinance_balance_sheet",
-    "code_execute_tool",
-]
+_COMMON_TOOLS = {"code_execute_tool", "web_search_tool"}
+_KRX_TOOLS = {"opendart_financial_tool"}
+_USA_TOOLS = {"sec_tool", "yfinance_balance_sheet"}
+_ALL_MARKET_TOOLS = _COMMON_TOOLS | _KRX_TOOLS | _USA_TOOLS
+
+DEFAULT_GENERIC_TOOLS = sorted(_ALL_MARKET_TOOLS)
 
 CONCRETE_SUBJECT_KINDS = frozenset(
     {
@@ -214,19 +214,25 @@ def fill_routing_defaults(
     _modules: dict[str, DomainModule],
 ) -> QueryAnalysis:
     """Fill allowed_tools when the query analysis omitted them."""
-    if not analysis.domain_ids:
-        analysis.allowed_tools = list(DEFAULT_GENERIC_TOOLS)
-        return analysis
-
     if analysis.allowed_tools:
         return analysis
 
-    analysis.allowed_tools = sorted(
-        {
-            "code_execute_tool",
-            "sec_tool",
-            "web_search_tool",
-            "yfinance_balance_sheet",
-        }
-    )
+    analysis.allowed_tools = sorted(_tools_for_subjects(analysis.query_intent.subjects))
     return analysis
+
+
+def _tools_for_subjects(subjects: tuple[Subject, ...]) -> set[str]:
+    markets: set[str] = set()
+    for subject in subjects:
+        if subject.listing is not None:
+            markets.add(subject.listing.market)
+
+    if not markets:
+        return set(_ALL_MARKET_TOOLS)
+
+    tools = set(_COMMON_TOOLS)
+    if "KRX" in markets:
+        tools |= _KRX_TOOLS
+    if markets - {"KRX"}:
+        tools |= _USA_TOOLS
+    return tools

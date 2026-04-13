@@ -7,14 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable
 from valuator.utils.config import config
 
 from .boundary.query_analysis_payload import (
-    QueryAnalysisPayload,
-    QueryEntityPayload,
-    QueryIntentPayload,
-    QueryRequirementPayload,
-    QueryUnitPayload,
     _build_query_analysis,
-    _company_surfaces_fully_resolved,
-    _merge_ticker_enrichment_payload,
     _response_schema,
 )
 from .company import ListingSeed
@@ -30,7 +23,7 @@ _SYSTEM_PROMPT = (
 )
 _QUERY_ANALYSIS_RULES = (
     "- Return query_intent, domain_ids, entities, units, requirements, intent_tags, rationale.",
-    "- query_intent must contain company_names and tickers. company_names: concrete company/security names or aliases. For Korean-listed companies, use the Korean name as commonly known (for example, '삼성전자', '현대모비스'). For overseas issuers, use the official English company name. tickers: stock ticker symbols for every company mentioned (for example, 'NOW' for ServiceNow, '005930' for 삼성전자). Always populate tickers when the company is identifiable. If no concrete subject is named, use empty arrays for both.",
+    "- query_intent must contain company_names and tickers. company_names: concrete company/security names or aliases. For Korean-listed companies, use the Korean company name as commonly known (for example, '삼성전자', '현대모비스'). For overseas issuers, use the official English company name. tickers: canonical market identifiers for every company mentioned. For Korean-listed companies, use the 6-digit stock_code (for example, '005930' for 삼성전자). For overseas issuers, use the exchange ticker (for example, 'NOW' for ServiceNow). Always populate tickers when the company is identifiable. Do not invent Yahoo suffixes such as '.KS' or '.KQ' here. If no concrete subject is named, use empty arrays for both.",
     "- entities are for non-security items such as business units, products, CEOs, themes, or macro variables. Use entity kind `company`/`ticker`/`security` only for concrete issuers or securities explicitly present or clearly recoverable.",
     "- units must be semantic retrieval units, not formatting instructions.",
     "- Every unit must include id, objective, retrieval_query, domain_ids, entity_ids, time_scope.",

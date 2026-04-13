@@ -134,3 +134,38 @@ VALUATION_INFO_KEYS: tuple[tuple[str, str], ...] = (
     ("enterprise_value", "enterpriseValue"),
     ("currency", "currency"),
 )
+
+OPENDART_ACCOUNT_MAP: dict[str, str] = {
+    # Balance Sheet
+    "자산총계": "total_assets",
+    "유동자산": "current_assets",
+    "현금및현금성자산": "cash_and_equivalents",
+    "부채총계": "total_liabilities",
+    "유동부채": "current_liabilities",
+    "장기차입금": "long_term_debt",
+    "단기차입금": "short_term_debt",
+    "자본총계": "total_equity",
+    "이익잉여금": "retained_earnings",
+    # Income Statement
+    "매출액": "total_revenue",
+    "수익(매출액)": "total_revenue",
+    "매출원가": "cost_of_revenue",
+    "매출총이익": "gross_profit",
+    "판매비와관리비": "sga_expense",
+    "영업이익": "operating_income",
+    "영업손익": "operating_income",
+    "이자비용": "interest_expense",
+    "법인세비용": "tax_expense",
+    "당기순이익": "net_income",
+    "기본주당이익": "eps_basic",
+    "주당순자산": "bps",
+    # Cash Flow
+    "영업활동현금흐름": "operating_cash_flow",
+    "영업활동으로인한현금흐름": "operating_cash_flow",
+    "유형자산의취득": "capex",
+    "배당금의지급": "dividends_paid",
+    "배당금지급": "dividends_paid",
+    "자기주식의취득": "share_buyback",
+    "감가상각비": "depreciation",
+    "무형자산상각비": "amortization",
+}

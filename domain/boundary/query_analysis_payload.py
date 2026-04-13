@@ -24,22 +24,6 @@ def _dedupe_ints(values: list[int]) -> list[int]:
     return list(dict.fromkeys(values))
 
 
-def _validated_domain_ids(
-    raw_domain_ids: list[str],
-    *,
-    valid_domain_ids: set[str],
-) -> list[str]:
-    domain_ids = _dedupe_strings(raw_domain_ids)
-    if not domain_ids:
-        raise ValueError("query analysis returned no valid domain_ids")
-    unknown_domains = sorted(set(domain_ids) - valid_domain_ids)
-    if unknown_domains:
-        raise ValueError(
-            "query analysis returned unknown domain_ids: " + ", ".join(unknown_domains)
-        )
-    return domain_ids
-
-
 class QueryIntentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -61,7 +45,6 @@ class QueryUnitPayload(BaseModel):
     id: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     retrieval_query: str = Field(min_length=1)
-    domain_ids: list[str] = Field(default_factory=list, min_length=1)
     entity_ids: list[str] = Field(default_factory=list)
     time_scope: str = ""
     target_start: str = ""
@@ -96,7 +79,6 @@ class QueryAnalysisPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     query_intent: QueryIntentPayload = Field(default_factory=QueryIntentPayload)
-    domain_ids: list[str] = Field(default_factory=list, min_length=1)
     entities: list[QueryEntityPayload] = Field(default_factory=list)
     units: list[QueryUnitPayload] = Field(default_factory=list, min_length=1)
     requirements: list[QueryRequirementPayload] = Field(
@@ -106,13 +88,12 @@ class QueryAnalysisPayload(BaseModel):
     rationale: str = Field(min_length=1)
 
 
-def _response_schema(module_ids: list[str]) -> dict[str, Any]:
+def _response_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
         "required": [
             "query_intent",
-            "domain_ids",
             "entities",
             "units",
             "requirements",
@@ -134,10 +115,6 @@ def _response_schema(module_ids: list[str]) -> dict[str, Any]:
                         "items": {"type": "string"},
                     },
                 },
-            },
-            "domain_ids": {
-                "type": "array",
-                "items": {"type": "string", "enum": module_ids},
             },
             "entities": {
                 "type": "array",
@@ -161,7 +138,6 @@ def _response_schema(module_ids: list[str]) -> dict[str, Any]:
                         "id",
                         "objective",
                         "retrieval_query",
-                        "domain_ids",
                         "entity_ids",
                         "time_scope",
                     ],
@@ -169,11 +145,6 @@ def _response_schema(module_ids: list[str]) -> dict[str, Any]:
                         "id": {"type": "string", "minLength": 1},
                         "objective": {"type": "string", "minLength": 1},
                         "retrieval_query": {"type": "string", "minLength": 1},
-                        "domain_ids": {
-                            "type": "array",
-                            "items": {"type": "string", "enum": module_ids},
-                            "minItems": 1,
-                        },
                         "entity_ids": {
                             "type": "array",
                             "items": {"type": "string", "minLength": 1},
@@ -267,7 +238,6 @@ def _build_units(
     raw_units: list[QueryUnitPayload],
     *,
     entity_id_set: set[str],
-    domain_id_set: set[str],
 ) -> tuple[list[QueryUnit], dict[str, int]]:
     units: list[QueryUnit] = []
     unit_id_to_index: dict[str, int] = {}
@@ -275,19 +245,12 @@ def _build_units(
         if item.id in unit_id_to_index:
             raise ValueError(f"duplicate query unit id: {item.id}")
 
-        unit_domains = _dedupe_strings(item.domain_ids)
-        if not unit_domains:
-            raise ValueError(f"query unit missing domain_ids: {item.id}")
-        if set(unit_domains) - domain_id_set:
-            raise ValueError(f"query unit references unknown domain_ids: {item.id}")
-
         unit_id_to_index[item.id] = len(units)
         units.append(
             QueryUnit(
                 id=item.id,
                 objective=item.objective,
                 retrieval_query=item.retrieval_query,
-                domain_ids=unit_domains,
                 entity_ids=_dedupe_strings(
                     [
                         entity_id
@@ -405,16 +368,11 @@ def _build_query_analysis(
     payload: dict[str, Any],
     *,
     query: str,
-    valid_domain_ids: set[str],
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
     as_of_utc: str = "",
 ) -> QueryAnalysis:
     validation_ctx = {"as_of_utc": as_of_utc} if as_of_utc.strip() else None
     raw = QueryAnalysisPayload.model_validate(payload, context=validation_ctx)
-    domain_ids = _validated_domain_ids(
-        raw.domain_ids, valid_domain_ids=valid_domain_ids
-    )
-    domain_id_set = set(domain_ids)
     query_intent = _build_query_intent(
         raw.query_intent,
         query=query,
@@ -426,7 +384,6 @@ def _build_query_analysis(
     units, unit_id_to_index = _build_units(
         raw.units,
         entity_id_set=entity_id_set,
-        domain_id_set=domain_id_set,
     )
     requirements = _build_requirements(
         raw.requirements,
@@ -436,7 +393,6 @@ def _build_query_analysis(
     )
     return QueryAnalysis(
         as_of_utc=as_of_utc,
-        domain_ids=domain_ids,
         query_intent=query_intent,
         entities=entities,
         units=units,

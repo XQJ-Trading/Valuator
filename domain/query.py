@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from .company import Subject
 
-if TYPE_CHECKING:
-    from .types import DomainModule
-
-DomainId = str
 TaskId = str
 
 _COMMON_TOOLS = {"code_execute_tool", "web_search_tool"}
@@ -72,7 +67,6 @@ class QueryUnit:
     id: str
     objective: str
     retrieval_query: str
-    domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
     target_start: str = ""
@@ -99,7 +93,6 @@ class QueryAnalysis:
     """
 
     as_of_utc: str = ""
-    domain_ids: list[DomainId] = field(default_factory=list)
     query_intent: QueryIntent = field(default_factory=lambda: QueryIntent(query=""))
     entities: dict[str, str] = field(default_factory=dict)
     units: list[QueryUnit] = field(default_factory=list)
@@ -116,7 +109,6 @@ class QueryStep:
     id: str
     objective: str
     retrieval_query: str
-    domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
     target_start: str = ""
@@ -153,7 +145,6 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
             id=unit.id,
             objective=unit.objective,
             retrieval_query=unit.retrieval_query,
-            domain_ids=list(unit.domain_ids),
             entity_ids=list(unit.entity_ids),
             time_scope=unit.time_scope,
             target_start=unit.target_start,
@@ -190,7 +181,9 @@ def summarize_temporal_contract(
         return TemporalContract(as_of_utc=as_of_utc)
 
     scopes = list(dict.fromkeys(unit.time_scope for unit in units if unit.time_scope))
-    starts = list(dict.fromkeys(unit.target_start for unit in units if unit.target_start))
+    starts = list(
+        dict.fromkeys(unit.target_start for unit in units if unit.target_start)
+    )
     ends = list(dict.fromkeys(unit.target_end for unit in units if unit.target_end))
 
     time_scope = scopes[0] if len(scopes) == 1 else "mixed" if scopes else ""
@@ -209,10 +202,7 @@ def summarize_temporal_contract(
     )
 
 
-def fill_routing_defaults(
-    analysis: QueryAnalysis,
-    _modules: dict[str, DomainModule],
-) -> QueryAnalysis:
+def fill_routing_defaults(analysis: QueryAnalysis) -> QueryAnalysis:
     """Fill allowed_tools when the query analysis omitted them."""
     if analysis.allowed_tools:
         return analysis

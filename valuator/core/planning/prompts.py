@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -103,9 +102,6 @@ def build_system_prompt(
             "Use web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
             "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
-            "Identifier contract:",
-            "Do not pass ticker to OpenDART.",
-            "Use corp or stock_code for opendart_financial_tool; use market ticker or yahoo symbol for market-data tools.",
             "Prefer WAIT over inventing missing facts.",
             "",
             "[REQUIREMENTS]는 분석이 충족해야 할 조건이다.",
@@ -225,7 +221,9 @@ def build_step_prompt(
         sections.append(
             (
                 "[CURRENT_CHILDREN]",
-                "\n".join(task_summary_line(summary) for summary in ctx.current_children),
+                "\n".join(
+                    task_summary_line(summary) for summary in ctx.current_children
+                ),
             )
         )
         if failed:
@@ -257,10 +255,14 @@ def build_step_prompt(
     if subject_text:
         sections.append(("[SUBJECTS]", subject_text))
     if ctx.siblings:
-        sibling_lines = [task_summary_line(summary) for summary in ctx.siblings.values()]
+        sibling_lines = [
+            task_summary_line(summary) for summary in ctx.siblings.values()
+        ]
         sections.append(("[SIBLINGS]", "\n".join(sibling_lines)))
     if ctx.ancestry:
-        sections.append(("[ANCESTRY]", " -> ".join(summary.id for summary in ctx.ancestry)))
+        sections.append(
+            ("[ANCESTRY]", " -> ".join(summary.id for summary in ctx.ancestry))
+        )
 
     requirements = requirements_for_task(ctx)
     if requirements:
@@ -531,9 +533,7 @@ def render_prompt_value(value: Any, heading_level: int = 2) -> str:
     if isinstance(value, list):
         if all(not isinstance(item, (Mapping, list)) for item in value):
             return "\n".join(
-                f"- {text}"
-                for text in (str(item).strip() for item in value)
-                if text
+                f"- {text}" for text in (str(item).strip() for item in value) if text
             ).strip()
         lines = []
         for index, item in enumerate(value, start=1):

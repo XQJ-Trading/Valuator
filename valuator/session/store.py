@@ -150,18 +150,13 @@ class ValuatorSessionStore:
             self._session_payload["root_task_id"] = root_task.id
 
             unit_count = 0
-            default_domain_id = ""
             if self._analysis_payload is not None:
                 unit_count = len(self._analysis_payload.get("units", []))
-                domain_ids = self._analysis_payload.get("domain_ids", [])
-                if domain_ids:
-                    default_domain_id = domain_ids[0]
 
             snapshot = build_task_tree_snapshot(
                 root_task,
                 root_task_id=root_task.id,
                 unit_count=unit_count,
-                default_domain_id=default_domain_id,
                 session_dir=self.session_dir,
                 tasks_dir=self.tasks_dir,
                 task_created_at=self._task_created_at,
@@ -247,7 +242,6 @@ class ValuatorSessionStore:
                     "task_type": plan_task["task_type"],
                     "query_unit_ids": list(plan_task["query_unit_ids"]),
                     "tool_name": tool_name,
-                    "domain_id": plan_task["domain_id"],
                     "domain_summary": domain_summary,
                     "domain_key_values": {},
                     "tool_metadata": result.metadata,
@@ -316,17 +310,12 @@ class ValuatorSessionStore:
             )
             self._write_text(report_path, report_markdown)
 
-            domain_ids: list[str] = []
-            if self._analysis_payload is not None:
-                domain_ids = list(self._analysis_payload.get("domain_ids", []))
-
             self._write_json(
                 raw_results_path,
                 {
                     "task_id": task_id,
                     "task_type": plan_task["task_type"],
                     "query_unit_ids": list(plan_task["query_unit_ids"]),
-                    "domain_ids": domain_ids,
                     "source_task_ids": source_reports,
                     "child_results": [
                         {
@@ -377,10 +366,8 @@ class ValuatorSessionStore:
                 raise RuntimeError("root task id is not set")
 
             requirements: list[dict[str, Any]] = []
-            domain_ids: list[str] = []
             if self._analysis_payload is not None:
                 requirements = list(self._analysis_payload.get("requirements", []))
-                domain_ids = list(self._analysis_payload.get("domain_ids", []))
 
             final_path = self.output_dir / "final.md"
             meta_path = self.output_dir / "final.md.meta.json"
@@ -408,10 +395,6 @@ class ValuatorSessionStore:
                     ],
                     "covered_requirement_ids": [item["id"] for item in requirements],
                     "missing_requirement_ids": [],
-                    "domain_coverage": {
-                        "final_ids": domain_ids,
-                        "evidence_ids": domain_ids,
-                    },
                     "aspect_coverage": {},
                 },
             )

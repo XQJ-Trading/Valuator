@@ -179,7 +179,6 @@ def _root_context() -> TaskContext:
                 query="Amazon valuation analysis",
                 subjects=(subject,),
             ),
-            domain_ids=["us_equity"],
             intent_tags=["valuation", "fundamental"],
         ),
         available_tools=["web_search_tool", "sec_tool"],
@@ -235,8 +234,6 @@ async def test_root_prompt_includes_subject_context() -> None:
     assert "USA: AMZN" in prompt
     assert "[INTENT_TAGS]" in prompt
     assert "valuation" in prompt
-    assert "[ACTIVE_DOMAINS]" in prompt
-    assert "us_equity" in prompt
     assert "plan critic" in system
 
 
@@ -267,5 +264,4 @@ async def test_non_root_prompt_excludes_subject_context() -> None:
     system = llm.calls[0]["system_prompt"]
     assert "[SUBJECTS]" not in prompt
     assert "[INTENT_TAGS]" not in prompt
-    assert "[ACTIVE_DOMAINS]" not in prompt
     assert "decomposition gate critic" in system

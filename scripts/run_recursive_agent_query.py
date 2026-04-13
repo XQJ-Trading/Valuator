@@ -118,11 +118,10 @@ async def build_query_analysis(
     as_of_utc: str,
     usage_writer: object | None = None,
 ):
-    from domain import DomainLoader, DomainRouter, QueryAnalyzer, QueryIntent
+    from domain import DomainRouter, QueryAnalyzer, QueryIntent
 
     measurement = Measurement.start()
     try:
-        domain_index, modules = DomainLoader().load()
         from domain.boundary import combined_on_miss
 
         router = DomainRouter(
@@ -134,8 +133,6 @@ async def build_query_analysis(
         router.bind_usage_writer(usage_writer)
         _, analysis = await router.analyze(
             QueryIntent(query=query),
-            domain_index,
-            modules,
             as_of_utc=as_of_utc,
         )
     except Exception as exc:
@@ -163,7 +160,6 @@ async def build_query_analysis(
             method="query_analysis.analyze",
             status="success",
             summary=(
-                f"domains={len(analysis.domain_ids)} "
                 f"units={len(analysis.units)} "
                 f"requirements={len(analysis.requirements)}"
             ),

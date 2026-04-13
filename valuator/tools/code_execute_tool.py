@@ -35,7 +35,10 @@ class ExecuteCodeTool(ReActBaseTool):
         self._client_lock = threading.Lock()
 
     async def _execute_impl(
-        self, code: str, timeout: int | None = None, language: str | None = None
+        self,
+        code: str | list[str] | tuple[str, ...] | None,
+        timeout: int | None = None,
+        language: str | None = None,
     ) -> ToolResult:
         timeout_value = self._resolve_timeout(timeout)
         if language and language.lower() != "python":
@@ -98,8 +101,16 @@ class ExecuteCodeTool(ReActBaseTool):
                 self._client = None
 
     @staticmethod
-    def _normalize_code(code: str) -> str:
-        text = (code or "").strip()
+    def _normalize_code(
+        code: str | list[str] | tuple[str, ...] | None,
+    ) -> str:
+        if code is None:
+            raw = ""
+        elif isinstance(code, (list, tuple)):
+            raw = "\n".join(str(line) for line in code)
+        else:
+            raw = str(code)
+        text = raw.strip()
         if text.startswith("```"):
             lines = text.splitlines()
             if lines and lines[0].startswith("```"):

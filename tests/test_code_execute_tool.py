@@ -28,6 +28,19 @@ async def test_code_execute_tool_uses_preloaded_json(tool: ExecuteCodeTool) -> N
 
 
 @pytest.mark.asyncio
+async def test_code_execute_tool_accepts_code_as_line_list(tool: ExecuteCodeTool) -> None:
+    result = await tool.execute(
+        code=[
+            "import json",
+            "print(json.dumps({'ok': True}, sort_keys=True))",
+        ]
+    )
+
+    assert result.success is True
+    assert result.result["output"] == '{"ok": true}'
+
+
+@pytest.mark.asyncio
 async def test_code_execute_tool_allows_standard_import_syntax(
     tool: ExecuteCodeTool,
 ) -> None:

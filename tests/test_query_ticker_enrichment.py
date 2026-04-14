@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from domain.company import CompanySurfaceResolution, resolve_company_surfaces
-from domain.query_analysis import (
+from domain.boundary.query_analysis_payload import (
     QueryIntentPayload,
     _company_surfaces_fully_resolved,
     _merge_ticker_enrichment_payload,
@@ -17,7 +17,6 @@ def test_merge_ticker_enrichment_appends_tickers_and_canonical_names() -> None:
             "company_names": ["플래닝랩스"],
             "tickers": [],
         },
-        "domain_ids": ["dcf"],
         "entities": [],
         "units": [],
         "requirements": [],

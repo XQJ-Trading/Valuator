@@ -1,4 +1,4 @@
-"""Query -> domain-module routing."""
+"""Query analysis routing (subjects, tools, requirements)."""
 
 from __future__ import annotations
 
@@ -8,13 +8,10 @@ from .boundary import combined_on_miss
 from .company import merge_subjects
 from .query import QueryAnalysis, QueryIntent, QueryRequirement, fill_routing_defaults
 from .query_analysis import QueryAnalyzer
-from .types import DomainIndex, DomainModule
 
 
 async def analyze_query(
     intent: QueryIntent,
-    domain_index: DomainIndex,
-    modules: dict[str, DomainModule],
     analyzer: QueryAnalyzer | None = None,
     *,
     as_of_utc: str = "",
@@ -23,10 +20,7 @@ async def analyze_query(
     analysis = await _analyzer.analyze(
         query=intent.query or "",
         as_of_utc=as_of_utc,
-        index=domain_index,
-        modules=modules,
     )
-    domain_ids = analysis.domain_ids or list(domain_index.modules)
 
     analyzed_intent = analysis.query_intent
     updated_intent = QueryIntent(
@@ -37,18 +31,17 @@ async def analyze_query(
     intent_tags = _merged_intent_tags(analysis, updated_intent)
     routed_analysis = replace(
         analysis,
-        domain_ids=domain_ids,
         query_intent=updated_intent,
         intent_tags=intent_tags,
         primary_task_id=None,
     )
     routed_analysis = _append_recommendation_requirement(routed_analysis)
-    routed_analysis = fill_routing_defaults(routed_analysis, modules)
+    routed_analysis = fill_routing_defaults(routed_analysis)
     return updated_intent, routed_analysis
 
 
 class DomainRouter:
-    """Routes a user query to domain modules via Query Analysis."""
+    """Runs query analysis to produce a canonical QueryAnalysis."""
 
     def __init__(self, analyzer: QueryAnalyzer | None = None) -> None:
         self._analyzer = analyzer or QueryAnalyzer(on_miss=combined_on_miss)
@@ -59,15 +52,11 @@ class DomainRouter:
     async def analyze(
         self,
         intent: QueryIntent,
-        index: DomainIndex,
-        modules: dict[str, DomainModule],
         *,
         as_of_utc: str = "",
     ) -> tuple[QueryIntent, QueryAnalysis]:
         return await analyze_query(
             intent,
-            index,
-            modules,
             self._analyzer,
             as_of_utc=as_of_utc,
         )
@@ -89,7 +78,10 @@ def _append_recommendation_requirement(analysis: QueryAnalysis) -> QueryAnalysis
     existing_acceptance = " ".join(
         requirement.acceptance.lower() for requirement in analysis.requirements
     )
-    if any(keyword in existing_acceptance for keyword in ("recommend", "pick", "shortlist", "추천", "선정")):
+    if any(
+        keyword in existing_acceptance
+        for keyword in ("recommend", "pick", "shortlist", "추천", "선정")
+    ):
         return analysis
 
     requirement = QueryRequirement(
@@ -99,7 +91,6 @@ def _append_recommendation_requirement(analysis: QueryAnalysis) -> QueryAnalysis
             "including why each name is selected and the no-buy or trim triggers."
         ),
         unit_ids=list(range(len(analysis.units))),
-        domain_ids=list(dict.fromkeys(analysis.domain_ids)),
         entity_ids=[],
         provenance="Derived from recommendation/screening intent in the user query.",
     )

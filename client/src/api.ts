@@ -52,6 +52,12 @@ export interface ChatResetEvent {
   ts: string;
 }
 
+export type WebSearchProvider = "perplexity" | "tavily";
+
+export interface WebSearchProviderResponse {
+  available: WebSearchProvider[];
+}
+
 const CHAT_SESSION_STORAGE_KEY = "chat_session_id";
 
 export function getOrCreateChatSessionId(): string {
@@ -101,14 +107,27 @@ export async function fetchChatMessages(sessionId: string): Promise<ChatMessage[
 export async function postChatMessage(
   sessionId: string,
   text: string,
+  webSearchProvider: WebSearchProvider | "",
 ): Promise<ChatMessage> {
   const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(
+      webSearchProvider
+        ? { text, web_search_provider: webSearchProvider }
+        : { text },
+    ),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<ChatMessage>;
+}
+
+export async function fetchWebSearchProviders(): Promise<WebSearchProviderResponse> {
+  const res = await fetch("/api/chat/web-search-providers", {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<WebSearchProviderResponse>;
 }
 
 export async function clearChatMessages(sessionId: string): Promise<void> {

@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from valuator.utils.hangul_fuzzy_key import jamo_fuzzy_key
+
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 KRX_SECURITIES_PATH = DATA_DIR / "krx_securities.json"
@@ -60,8 +62,9 @@ class Listing:
         return self.vendor_symbols.get("yahoo", self.security_code)
 
     @property
-    def legacy_market(self) -> str:
-        return legacy_market_for_exchange(self.exchange)
+    def market(self) -> str:
+        return market_for_exchange(self.exchange)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +200,7 @@ def representative_listing(subject: Subject) -> Listing | None:
     return _representative_listing_for_company(subject.company.company_id)
 
 
-def legacy_market_for_exchange(exchange: str) -> str:
+def market_for_exchange(exchange: str) -> str:
     value = exchange.strip().upper()
     if value in _KRX_MARKETS:
         return "KRX"
@@ -266,19 +269,24 @@ def _company_from_name(
     if candidates:
         return _single_company(company_name, candidates)
 
-    return _fuzzy_company_by_name(index, key, company_name)
+    return _fuzzy_company_by_name(index, company_name)
 
 
 def _fuzzy_company_by_name(
     index: _EntityIndex,
-    name_key: str,
     company_name: str,
 ) -> Company | None:
+    query_key = jamo_fuzzy_key(company_name)
+    if not query_key:
+        return None
     best_score = 0.0
     best_matches: dict[str, Company] = {}
 
     for candidate_key, candidates in index.companies_by_name.items():
-        score = SequenceMatcher(None, name_key, candidate_key).ratio()
+        ck = jamo_fuzzy_key(candidate_key)
+        if not ck:
+            continue
+        score = SequenceMatcher(None, query_key, ck).ratio()
         if score < _FUZZY_NAME_THRESHOLD:
             continue
         if score > best_score:

@@ -153,11 +153,11 @@ def test_session_trace_writer_routes_diagnostic_records_to_events_log(
         category="analysis",
         method="query_analysis.analyze",
         status="success",
-        summary="domains=1 units=1 requirements=1",
+        summary="units=1 requirements=1",
         started_at="2026-03-21T02:31:05.582740Z",
         duration_ms=12.5,
         input_payload={"query": "alpha"},
-        result_payload={"domain_ids": ["dcf"]},
+        result_payload={"units": [{"id": "u0"}]},
     )
 
     session_dir = tmp_path / "session_S-method"

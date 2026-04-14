@@ -34,6 +34,7 @@ class Task(ABC):
         self.published_facts: dict[str, Any] = {}
         self.output: Any = None
         self.error: str | None = None
+        self.artifacts: dict[str, str | None] = {}
         self.last_tool_request: ToolRequest | None = None
         self.last_tool_success: bool | None = None
         self.failed_tool_request_signatures: set[str] = set()
@@ -66,6 +67,7 @@ class Task(ABC):
         target.published_facts = dict(self.published_facts)
         target.output = self.output
         target.error = self.error
+        target.artifacts = dict(self.artifacts)
         target.last_tool_request = self.last_tool_request
         target.last_tool_success = self.last_tool_success
         target.failed_tool_request_signatures = set(

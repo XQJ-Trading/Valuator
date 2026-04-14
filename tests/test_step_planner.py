@@ -4,12 +4,13 @@ from typing import Any
 
 import pytest
 
-from domain.query import QueryAnalysis, QueryRequirement, QueryUnit
+from domain.company import Company, Listing, Subject
+from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.shared_state import Fact, SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, TaskState
+from valuator.core.types import Action, TaskState, ToolResult
 from valuator.core.task import AtomicTask, ComplexTask
 
 
@@ -99,11 +100,11 @@ async def test_step_planner_salvages_tool_request_embedded_in_reason() -> None:
     llm = ScriptedLLM(
         [
             {
-                "action": "execute",
-                "reason": (
-                    "Search current market data.\n"
-                    '{"tool_name":"web_search_tool","args":{"query":"Amazon '
-                    'competitive strategy","search_mode":"web"}}'
+                    "action": "execute",
+                    "reason": (
+                        "Search current market data.\n"
+                        '{"tool_name":"web_search_tool","args":{"query":"Amazon '
+                    'competitive strategy","search_intent":"general"}}'
                 ),
             }
         ]
@@ -122,12 +123,12 @@ async def test_step_planner_salvages_tool_request_embedded_in_reason() -> None:
     assert decision.tool_request.tool_name == "web_search_tool"
     assert decision.tool_request.args == {
         "query": "Amazon competitive strategy",
-        "search_mode": "web",
+        "search_intent": "general",
     }
 
 
 @pytest.mark.asyncio
-async def test_step_planner_falls_back_invalid_web_search_mode_to_web() -> None:
+async def test_step_planner_falls_back_invalid_web_search_intent_to_general() -> None:
     llm = ScriptedLLM(
         [
             {
@@ -136,7 +137,7 @@ async def test_step_planner_falls_back_invalid_web_search_mode_to_web() -> None:
                     "tool_name": "web_search_tool",
                     "args": {
                         "query": "Amazon competitive strategy",
-                        "search_mode": "general",
+                        "search_intent": "web",
                     },
                 },
             },
@@ -155,7 +156,7 @@ async def test_step_planner_falls_back_invalid_web_search_mode_to_web() -> None:
     assert decision.tool_request is not None
     assert decision.tool_request.args == {
         "query": "Amazon competitive strategy",
-        "search_mode": "web",
+        "search_intent": "general",
     }
     assert len(llm.calls) == 1
 
@@ -438,7 +439,7 @@ async def test_step_planner_prompt_includes_current_children_and_done_sibling_ou
     assert "[CURRENT_CHILDREN]" in prompt
     assert "root.0: waiting - existing child" in prompt
     assert "[SIBLINGS]" in prompt
-    assert 'output={"summary": "finished"}' in prompt
+    assert "- **summary**: finished" in prompt
     assert "[THINKING_LEVEL]" not in llm.calls[0]["system_prompt"]
 
 
@@ -476,9 +477,9 @@ async def test_step_planner_finalize_prompt_preserves_unverified_gaps() -> None:
     prompt = llm.calls[0]["prompt"]
     system_prompt = llm.calls[0]["system_prompt"]
     assert "[FINALIZE_GUIDANCE]" in prompt
-    assert "facts_only, unverified, data gap, could not verify" in prompt
-    assert "확정 사실처럼 쓰지 마라" in prompt
-    assert "facts_only, unverified, data gap, could not verify" not in system_prompt
+    assert "facts_only, unverified, data gap, grounded=false" in prompt
+    assert "확정 사실로 쓰지 마라" in prompt
+    assert "facts_only, unverified, data gap, grounded=false" not in system_prompt
 
 
 @pytest.mark.asyncio
@@ -602,8 +603,8 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
     prompt = llm.calls[0]["prompt"]
     assert "FINALIZE" in system
     assert "Original query:" not in system
-    assert "Bull / Base / Bear" in prompt
-    assert "uncertainties" in prompt.lower()
+    assert "BULL / BASE / BEAR" in prompt
+    assert "gap" in prompt.lower()
     assert "INFORMATION GAPS" in prompt
 
 
@@ -673,7 +674,6 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
                     id="U-001",
                     objective="2024년 이란 상황 조사",
                     retrieval_query="Iran events in 2024",
-                    domain_ids=["macro"],
                     time_scope="historical",
                     target_start="2024-01-01",
                     target_end="2024-12-31",
@@ -684,7 +684,6 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
                     id="R-001",
                     acceptance="2024년 사건을 정리한다",
                     unit_ids=[0],
-                    domain_ids=["macro"],
                     provenance="user query",
                 )
             ],
@@ -694,7 +693,6 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
                 id="U-001",
                 objective="2024년 이란 상황 조사",
                 retrieval_query="Iran events in 2024",
-                domain_ids=["macro"],
                 time_scope="historical",
                 target_start="2024-01-01",
                 target_end="2024-12-31",
@@ -713,3 +711,164 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     assert "grounded=True" in prompt
     assert "sources=1" in prompt
     assert "As-of UTC timestamp: 2026-03-30T00:00:00Z" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_drops_low_priority_sections_before_child_outputs() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    sibling = TaskSummary(
+        id="root.1",
+        description="sibling task",
+        state=TaskState.DONE,
+        output={"summary": "x" * 170_000},
+    )
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=1,
+        child_outputs={
+            "root.0": {
+                "scenario_table": "| A | B |\n| --- | --- |\n| 1 | 2 |",
+                "summary": "preserve this table",
+            }
+        },
+        siblings={"root.1": sibling},
+        shared=SharedStateView({}, []),
+        query="Amazon analysis",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[CHILD_OUTPUTS]" in prompt
+    assert "| A | B |" in prompt
+    assert "[SIBLINGS]" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=1,
+        tool_results=[
+            ToolResult(
+                success=True,
+                result={"summary_table": "| A | B |\n| --- | --- |\n| 1 | 2 |"},
+                metadata={
+                    "artifacts": {
+                        "execution_result_path": "execution/result.md",
+                        "execution_meta_path": "execution/result.md.meta.json",
+                    }
+                },
+            )
+        ],
+        current_children=[
+            TaskSummary(
+                id="root.0",
+                description="existing child",
+                state=TaskState.DONE,
+                output={"summary": "finished"},
+                artifacts={
+                    "aggregation_report_path": "aggregation/report.md",
+                    "aggregation_raw_results_path": "aggregation/raw_results.json",
+                },
+            )
+        ],
+        shared=SharedStateView({}, []),
+        query="Amazon analysis",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[LAST_TOOL_RESULT_ARTIFACTS]" in prompt
+    assert "execution_result_path=execution/result.md" in prompt
+    assert "[OUTPUT_ARTIFACTS]" in prompt
+    assert "aggregation_report_path=aggregation/report.md" in prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="mixed market identifier task")
+    samsung = Subject(
+        company=Company(company_id="KRX:005930", company_name="삼성전자", aliases=("Samsung Electronics",)),
+        listing=Listing(
+            listing_id="KRX:005930",
+            company_id="KRX:005930",
+            security_code="005930",
+            exchange="KOSPI",
+            vendor_symbols={"yahoo": "005930.KS"},
+        ),
+    )
+    amazon = Subject(
+        company=Company(company_id="SEC:1018724", company_name="Amazon.com", aliases=("AMZN",)),
+        listing=Listing(
+            listing_id="USA:AMZN",
+            company_id="SEC:1018724",
+            security_code="AMZN",
+            exchange="USA",
+            vendor_symbols={"yahoo": "AMZN"},
+        ),
+    )
+    ctx = TaskContext(
+        task_id="root",
+        description="mixed market identifier task",
+        step_count=0,
+        as_of_utc="2026-03-30T00:00:00Z",
+        shared=SharedStateView({}, []),
+        query="삼성전자와 Amazon 재무 조회",
+        query_analysis=QueryAnalysis(
+            query_intent=QueryIntent(
+                query="삼성전자와 Amazon 재무 조회",
+                subjects=(samsung, amazon),
+            )
+        ),
+        available_tools=[
+            "opendart_financial_tool",
+            "yfinance_balance_sheet",
+            "sec_tool",
+        ],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    system_prompt = llm.calls[0]["system_prompt"]
+    assert "[SUBJECTS]" in prompt
+    assert "company_name=삼성전자; exchange=KOSPI; corp=삼성전자; stock_code=005930; yahoo_symbol=005930.KS" in prompt
+    assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
+    assert "opendart_financial_tool: args=corp, year, fs_div?" in prompt
+    assert "Korean issuer only." in prompt

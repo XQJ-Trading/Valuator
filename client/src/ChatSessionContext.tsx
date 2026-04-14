@@ -16,12 +16,14 @@ import {
   fetchChatMessages,
   fetchFile,
   fetchTree,
+  fetchWebSearchProviders,
   getOrCreateChatSessionId,
   postChatMessage,
   postChatStop,
   type ChatMessage,
   type ChatResetEvent,
   type DataSource,
+  type WebSearchProvider,
 } from "./api";
 import { parseProgressLine } from "./chatProgressParse";
 
@@ -51,6 +53,10 @@ export type ChatSessionContextValue = {
   stopAgent: () => Promise<void>;
   draftText: string;
   setDraftText: (s: string) => void;
+  webSearchProvider: WebSearchProvider | "";
+  setWebSearchProvider: (provider: WebSearchProvider | "") => void;
+  webSearchProviders: WebSearchProvider[];
+  webSearchProvidersLoading: boolean;
   /** Latest agent step line (gN/lN + task) for the center status bar. */
   lastStepFlow: StepFlowSnapshot | null;
 };
@@ -82,6 +88,9 @@ export function ChatSessionProvider({
   const [lastStepFlow, setLastStepFlow] = useState<StepFlowSnapshot | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [webSearchProvider, setWebSearchProvider] = useState<WebSearchProvider | "">("");
+  const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>([]);
+  const [webSearchProvidersLoading, setWebSearchProvidersLoading] = useState(true);
   const messageIdsRef = useRef<Set<string>>(new Set());
   const chatSessionIdRef = useRef<string>(getOrCreateChatSessionId());
 
@@ -125,6 +134,24 @@ export function ChatSessionProvider({
       })
       .catch(() => {
         /* ignore */
+      });
+
+    void fetchWebSearchProviders()
+      .then((providers) => {
+        if (cancelled) return;
+        setWebSearchProviders(providers.available);
+        setWebSearchProvider((current) => {
+          if (current !== "" && providers.available.includes(current)) {
+            return current;
+          }
+          return providers.available[0] ?? "";
+        });
+      })
+      .catch((error: Error) => {
+        if (!cancelled) console.error(error);
+      })
+      .finally(() => {
+        if (!cancelled) setWebSearchProvidersLoading(false);
       });
 
     // Authenticate session before establishing SSE connection
@@ -330,7 +357,7 @@ export function ChatSessionProvider({
       setPending(true);
       try {
         const expanded = await expandMentions(text);
-        const msg = await postChatMessage(chatSessionId, expanded);
+        const msg = await postChatMessage(chatSessionId, expanded, webSearchProvider);
         if (!messageIdsRef.current.has(msg.id)) {
           messageIdsRef.current.add(msg.id);
           setMessages((prev) => [...prev, msg]);
@@ -346,7 +373,7 @@ export function ChatSessionProvider({
         setPending(false);
       }
     },
-    [draftText, pending],
+    [draftText, pending, webSearchProvider],
   );
 
   const clearMessages = useCallback(async () => {
@@ -389,6 +416,10 @@ export function ChatSessionProvider({
       stopAgent,
       draftText,
       setDraftText,
+      webSearchProvider,
+      setWebSearchProvider,
+      webSearchProviders,
+      webSearchProvidersLoading,
       lastStepFlow,
     }),
     [
@@ -404,6 +435,9 @@ export function ChatSessionProvider({
       clearMessages,
       stopAgent,
       draftText,
+      webSearchProvider,
+      webSearchProviders,
+      webSearchProvidersLoading,
       lastStepFlow,
     ],
   );

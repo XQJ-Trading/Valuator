@@ -3,51 +3,45 @@
 from __future__ import annotations
 
 import asyncio
-import re
-from typing import Any, Literal
-
-try:
-    from langchain_core.messages import HumanMessage, SystemMessage
-except Exception:  # pragma: no cover - optional dependency at runtime
-    HumanMessage = None
-    SystemMessage = None
-
-try:
-    from langchain_perplexity import ChatPerplexity
-except Exception:  # pragma: no cover - optional dependency at runtime
-    ChatPerplexity = None
+from typing import Any
 
 from ..utils.config import config
 from ..utils.llm_usage import TokenUsage
 from ..utils.logger import logger
 from ..utils.time_utils import Measurement
 from .base import ReActBaseTool, ToolResult
+from .web_search_providers import SearchIntent, WebSearchProvider
+
+RAG_SOURCE_POLICY_MARKER = "[valuator_rag_source_policy]"
+_RAG_BROKER_EXCLUSION_TAIL = (
+    f"\n\n{RAG_SOURCE_POLICY_MARKER} "
+    "Exclude sell-side/broker equity research unless the user explicitly asks for it; "
+)
+_VALID_INTENTS = {"general", "deep", "financial"}
 
 
-class PerplexitySearchTool(ReActBaseTool):
-    def __init__(self, usage_writer: Any | None = None):
+def _effective_search_query_for_rag(raw: str) -> str:
+    """웹 검색 API에 넘길 문자열. 브로커 리서치 제외는 도구 경계에서 한 번만 붙인다."""
+    query = raw.strip()
+    if not config.web_search_rag_exclude_broker_research:
+        return query
+    if RAG_SOURCE_POLICY_MARKER in query:
+        return query
+    return query + _RAG_BROKER_EXCLUSION_TAIL
+
+
+class WebSearchTool(ReActBaseTool):
+    def __init__(self, provider: WebSearchProvider, usage_writer: Any | None = None):
         super().__init__(
             name="web_search_tool",
-            description="Search the web for current information using Perplexity AI. Provides real-time web results with citations.",
+            description=(
+                "Search the web for current information. "
+                "Provides real-time web results with citations."
+            ),
         )
+        self.provider = provider
         self.usage_writer = usage_writer
-        try:
-            if ChatPerplexity is None or HumanMessage is None or SystemMessage is None:
-                raise ValueError("langchain-perplexity dependency is unavailable")
-            api_key = config.perplexity_api_key
-            if not api_key:
-                raise ValueError("PPLX_API_KEY not found in config or environment")
-            self.chat = ChatPerplexity(
-                model="sonar",
-                temperature=0.1,
-                pplx_api_key=api_key,
-            )
-            self.available = True
-            logger.info("PerplexitySearchTool initialized successfully")
-        except Exception as e:
-            logger.warning(f"PerplexitySearchTool initialization failed: {e}")
-            self.chat = None
-            self.available = False
+        self.available = provider.available
 
     def bind_usage_writer(self, usage_writer: Any | None) -> None:
         self.usage_writer = usage_writer
@@ -56,190 +50,158 @@ class PerplexitySearchTool(ReActBaseTool):
         self,
         query: str | None = None,
         queries: list[str] | None = None,
-        search_mode: str | None = None,
-        **_kwargs,
+        search_intent: str | None = None,
+        **kwargs,
     ) -> ToolResult:
-        selected_search_mode = (search_mode or "web").strip().lower()
-        if selected_search_mode not in {"web", "academic", "sec"}:
+        del kwargs
+        intent = (search_intent or "general").strip().lower()
+        if intent not in _VALID_INTENTS:
             return ToolResult(
                 success=False,
                 result=None,
-                error="search_mode must be one of: web, academic, sec",
+                error=(
+                    "search_intent must be one of: " + ", ".join(sorted(_VALID_INTENTS))
+                ),
             )
-        if queries:
-            if not all(isinstance(q, str) and q.strip() for q in queries):
+        if queries is not None:
+            if not queries:
+                return ToolResult(
+                    success=False,
+                    result=None,
+                    error="queries must be a non-empty list",
+                )
+            if any(not isinstance(item, str) or not item.strip() for item in queries):
                 return ToolResult(
                     success=False,
                     result=None,
                     error="queries must be non-empty strings",
                 )
-            return await self._execute_batch_search(
-                queries,
-                search_mode=selected_search_mode,
-            )
-        if not query:
+            return await self._execute_batch_search(queries, intent=intent)
+        if not isinstance(query, str) or not query.strip():
             return ToolResult(
-                success=False, result=None, error="query or queries is required"
+                success=False,
+                result=None,
+                error="query or queries is required",
             )
-        return await self._execute_single_search(
-            query,
-            search_mode=selected_search_mode,
-        )
+        return await self._execute_single_search(query, intent=intent)
 
     async def _execute_single_search(
         self,
         query: str,
         *,
-        search_mode: Literal["web", "academic", "sec"],
+        intent: SearchIntent,
     ) -> ToolResult:
-        if not self.available or not self.chat:
+        if not self.available:
             return ToolResult(
                 success=False,
                 result=None,
-                error="Perplexity API not available. Check PPLX_API_KEY configuration or dependencies.",
+                error=f"{self.provider.name} provider not available.",
             )
 
-        writer = self.usage_writer
         max_retries = max(int(config.web_search_retry_count), 0)
         base_delay = float(config.web_search_retry_base_delay)
+        effective_query = _effective_search_query_for_rag(query)
 
         for attempt in range(max_retries + 1):
             measurement = Measurement.start()
             try:
                 logger.info(
-                    "Searching web with Perplexity for: %s (search_mode=%s)",
-                    query,
-                    search_mode,
+                    "Searching with %s: %s (intent=%s)",
+                    self.provider.name,
+                    effective_query,
+                    intent,
                 )
-
-                response = await self.chat.ainvoke(
-                    [
-                        SystemMessage(
-                            content=(
-                                "You are a comprehensive search assistant. "
-                                "Provide detailed, accurate, and up-to-date information with sources. "
-                                "Be thorough and analytical in your responses. "
-                                "Write the full answer in Korean (한국어), including headings and explanations; "
-                                "keep proper nouns, tickers, and direct quotes in their original form when needed."
-                            )
-                        ),
-                        HumanMessage(content=query),
-                    ],
-                    extra_body={"web_search_options": {"search_mode": search_mode}},
-                )
+                result = await self.provider.search(effective_query, intent=intent)
                 latency_seconds = measurement.latency_seconds()
-                answer = response.content
-                meta = getattr(response, "response_metadata", {}) or {}
-                extra = getattr(response, "additional_kwargs", {}) or {}
-                usage_meta = getattr(response, "usage_metadata", {}) or {}
-                if hasattr(usage_meta, "model_dump"):
-                    usage_meta = usage_meta.model_dump()
-                if not isinstance(usage_meta, dict):
-                    usage_meta = {}
-
-                if writer is not None:
-                    writer.append_call(
+                if self.usage_writer is not None:
+                    self.usage_writer.append_call(
                         method="web_search_tool._execute_single_search",
-                        model="sonar",
-                        usage=TokenUsage.from_raw(usage_meta),
+                        model=self.provider.model_name,
+                        usage=TokenUsage.from_raw(result.usage_meta),
                         latency_seconds=latency_seconds,
                         started_at=measurement.started_at,
                     )
-
-                sources = (
-                    meta.get("citations")
-                    or meta.get("sources")
-                    or extra.get("citations")
-                    or extra.get("sources")
-                    or re.findall(r"https?://[^\s)]+", answer)
-                    or [f"[{n}]" for n in sorted(set(re.findall(r"\[(\d+)\]", answer)))]
-                )
-
                 return ToolResult(
                     success=True,
                     result={
                         "query": query,
-                        "findings": answer,
-                        "sources": sources,
+                        "findings": result.answer,
+                        "sources": result.sources,
                     },
                     metadata={
-                        "search_type": "perplexity_web",
-                        "model": "sonar",
-                        "search_mode": search_mode,
-                        "usage": usage_meta,
+                        "search_type": f"{self.provider.name}_web",
+                        "model": self.provider.model_name,
+                        "search_intent": intent,
+                        "usage": result.usage_meta,
+                        "effective_query": effective_query,
                     },
                 )
-            except Exception as e:
+            except Exception as exc:
                 latency_seconds = measurement.latency_seconds()
                 if attempt < max_retries:
                     delay = base_delay * (2**attempt)
                     logger.warning(
-                        "Perplexity search attempt %s failed (%s), retrying in %ss",
+                        "%s search attempt %s failed (%s), retrying in %ss",
+                        self.provider.name,
                         attempt + 1,
-                        e,
+                        exc,
                         delay,
                     )
                     await asyncio.sleep(delay)
                     continue
-                if writer is not None:
-                    writer.append_call(
+                if self.usage_writer is not None:
+                    self.usage_writer.append_call(
                         method="web_search_tool._execute_single_search.error",
-                        model="sonar",
+                        model=self.provider.model_name,
                         usage=TokenUsage(),
                         latency_seconds=latency_seconds,
                         started_at=measurement.started_at,
                     )
-                logger.error(f"Perplexity search failed: {e}")
+                logger.error("%s search failed: %s", self.provider.name, exc)
                 return ToolResult(
-                    success=False, result=None, error=f"Search failed: {str(e)}"
+                    success=False,
+                    result=None,
+                    error=f"Search failed: {exc}",
                 )
 
     async def _execute_batch_search(
         self,
         queries: list[str],
         *,
-        search_mode: Literal["web", "academic", "sec"],
+        intent: SearchIntent,
     ) -> ToolResult:
-        if not self.available or not self.chat:
+        if not self.available:
             return ToolResult(
                 success=False,
                 result=None,
-                error="Perplexity API not available. Check PPLX_API_KEY configuration or dependencies.",
-            )
-        if not queries:
-            return ToolResult(
-                success=False, result=None, error="queries must be a non-empty list"
+                error=f"{self.provider.name} provider not available.",
             )
         results = await asyncio.gather(
-            *(self._execute_single_search(q, search_mode=search_mode) for q in queries)
+            *(self._execute_single_search(query, intent=intent) for query in queries)
         )
-        if any(not r.success for r in results):
+        if any(not result.success for result in results):
             return ToolResult(
                 success=False,
-                result=[r.model_dump() for r in results],
+                result=[result.model_dump() for result in results],
                 error="One or more searches failed",
             )
-        rows = [r.model_dump() for r in results]
-        findings_parts: list[str] = []
-        for row in rows:
-            result_payload = row.get("result")
-            if not isinstance(result_payload, dict):
-                continue
-            findings = result_payload.get("findings")
-            if isinstance(findings, str) and findings.strip():
-                findings_parts.append(findings.strip())
-        findings_text = "\n\n".join(findings_parts).strip()
+        findings_parts = [
+            result.result["findings"].strip()
+            for result in results
+            if result.result["findings"].strip()
+        ]
+        findings_text = "\n\n".join(findings_parts)
         if not findings_text:
-            findings_text = f"batch search completed: {len(rows)} queries"
+            findings_text = f"batch search completed: {len(results)} queries"
         return ToolResult(
             success=True,
             result={
                 "findings": findings_text,
-                "results": rows,
+                "results": [result.model_dump() for result in results],
             },
             metadata={
-                "search_type": "perplexity_web_batch",
+                "search_type": f"{self.provider.name}_web_batch",
                 "count": len(results),
-                "search_mode": search_mode,
+                "search_intent": intent,
             },
         )

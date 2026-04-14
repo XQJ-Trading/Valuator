@@ -70,6 +70,8 @@ def test_load_config_defaults_to_flash_preview(monkeypatch) -> None:
     monkeypatch.delenv("MONGODB_DATABASE", raising=False)
     monkeypatch.delenv("MONGODB_COLLECTION", raising=False)
     monkeypatch.delenv("AGENT_CONCURRENCY", raising=False)
+    monkeypatch.delenv("WEB_SEARCH_PROVIDER", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
     loaded = config_module.load_config()
 
@@ -83,6 +85,8 @@ def test_load_config_defaults_to_flash_preview(monkeypatch) -> None:
     assert loaded.agent_max_invalid_decisions_per_task == 5
     assert loaded.agent_max_steps_per_task == 30
     assert loaded.agent_concurrency == 10
+    assert loaded.web_search_provider == config_module.DEFAULT_WEB_SEARCH_PROVIDER
+    assert loaded.tavily_api_key is None
 
 
 def test_load_config_normalizes_supported_models(monkeypatch) -> None:
@@ -106,6 +110,8 @@ def test_load_config_normalizes_supported_models(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_MAX_INVALID_DECISIONS_PER_TASK", "7")
     monkeypatch.setenv("AGENT_MAX_STEPS_PER_TASK", "45")
     monkeypatch.setenv("AGENT_CONCURRENCY", "8")
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "tavily")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
 
     loaded = config_module.load_config()
 
@@ -123,3 +129,5 @@ def test_load_config_normalizes_supported_models(monkeypatch) -> None:
     assert loaded.agent_max_invalid_decisions_per_task == 7
     assert loaded.agent_max_steps_per_task == 45
     assert loaded.agent_concurrency == 8
+    assert loaded.web_search_provider == "tavily"
+    assert loaded.tavily_api_key == "tavily-key"

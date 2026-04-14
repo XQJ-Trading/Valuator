@@ -101,9 +101,9 @@ class ToolSpec:
             if (
                 selected is None
                 and self.name == "web_search_tool"
-                and key == "search_mode"
+                and key == "search_intent"
             ):
-                selected = "web"
+                selected = "general"
             if selected is None and isinstance(value, str):
                 selected = value.strip().lower()
             if selected not in choices:
@@ -120,18 +120,21 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "web_search_tool": ToolSpec(
         name="web_search_tool",
         required=("query",),
-        optional=("search_mode",),
-        arg_choices={"search_mode": ("web", "academic", "sec")},
-        capability="web/academic/sec grounded search",
+        optional=("search_intent",),
+        arg_choices={"search_intent": ("general", "deep", "financial")},
+        capability="general/deep/financial grounded search",
         llm_required=(),
         schema_extra_keys=("queries",),
         param_descriptions={
             "query": "Search query for current web information",
-            "search_mode": "Perplexity search corpus to query",
+            "search_intent": "Provider-neutral web search intent",
             "queries": "Parallel search queries",
         },
         param_properties={
-            "search_mode": {"type": "string", "enum": ["web", "academic", "sec"]},
+            "search_intent": {
+                "type": "string",
+                "enum": ["general", "deep", "financial"],
+            },
             "queries": {"type": "array", "items": {"type": "string"}},
         },
     ),
@@ -158,12 +161,27 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "Returns: balance sheet, income, cashflow, derived ratios, market data."
         ),
         param_descriptions={
-            "ticker": "Ticker symbol (e.g., 'AAPL' or '005930')",
+            "ticker": "Market ticker for the target listing. Use US tickers like 'AAPL' for US listings. For Korean listings use the market/vendor ticker understood by yfinance, not the OpenDART corp field.",
             "year": "Year (e.g., '2025') or 'latest' for the most recent available",
             "min_year": "Minimum acceptable year when using 'latest'",
         },
         param_properties={
             "min_year": {"type": "integer"},
+        },
+    ),
+    "opendart_financial_tool": ToolSpec(
+        name="opendart_financial_tool",
+        required=("corp", "year"),
+        optional=("fs_div",),
+        capability="Korean company financial statements (BS/IS/CF) from DART filings",
+        param_descriptions={
+            "corp": "Korean issuer only. Pass the Korean company name or the 6-digit KRX stock_code (e.g., '삼성전자', '005930'). Never pass a US ticker here.",
+            "year": "Target year (e.g., 2024)",
+            "fs_div": "'CFS' (consolidated, default) or 'OFS' (separate)",
+        },
+        param_properties={
+            "year": {"type": "integer"},
+            "fs_div": {"type": "string", "enum": ["CFS", "OFS"]},
         },
     ),
     "code_execute_tool": ToolSpec(
@@ -179,55 +197,6 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "timeout": {"type": "integer"},
         },
     ),
-    # "domain_tool": ToolSpec(
-    #     name="domain_tool",
-    #     optional=(
-    #         "corp",
-    #         "company_name",
-    #         "ticker",
-    #         "query",
-    #         "context",
-    #         "grounding_mode",
-    #         "as_of_utc",
-    #         "time_scope",
-    #         "target_start",
-    #         "target_end",
-    #         "domain_guide",
-    #         "domain_persona",
-    #         "domain_rubric",
-    #         "domain_format",
-    #         "domain_id",
-    #     ),
-    #     capability="aspect-guided domain analysis via persona/rubric/format",
-    #     llm_required=(),
-    #     param_descriptions={
-    #         "corp": "Company identifier",
-    #         "company_name": "Company legal name",
-    #         "ticker": "Listing ticker",
-    #         "query": "Task-specific query",
-    #         "context": "Contextual background",
-    #         "grounding_mode": "Grounded evidence vs synthesis-only",
-    #         "as_of_utc": "As-of timestamp (UTC)",
-    #         "time_scope": "Time horizon for the analysis",
-    #         "target_start": "Range start",
-    #         "target_end": "Range end",
-    #         "domain_id": "Domain preset identifier",
-    #         "domain_guide": "Domain guidance",
-    #         "domain_persona": "Analyst persona",
-    #         "domain_rubric": "Evaluation rubric",
-    #         "domain_format": "Output format",
-    #     },
-    #     param_properties={
-    #         "grounding_mode": {
-    #             "type": "string",
-    #             "enum": ["grounded_required", "synthesis_only"],
-    #         },
-    #         "time_scope": {
-    #             "type": "string",
-    #             "enum": ["current", "historical", "future", "mixed"],
-    #         },
-    #     },
-    # ),
 }
 
 

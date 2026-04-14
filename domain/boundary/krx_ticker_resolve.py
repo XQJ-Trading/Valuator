@@ -11,6 +11,7 @@ from typing import Any
 
 import requests
 
+from valuator.utils.hangul_fuzzy_key import jamo_fuzzy_key
 from domain.company import Listing, ListingSeed, normalized_name_key
 from valuator.utils.config import get_opendart_api_key
 
@@ -125,17 +126,18 @@ def _match_by_exact_name(
 
 
 def _match_by_fuzzy_name(
-    records: list[dict[str, str]], key: str
+    records: list[dict[str, str]], surface_form: str
 ) -> dict[str, Any] | None:
-    if not key:
+    query_key = jamo_fuzzy_key(surface_form)
+    if not query_key:
         return None
     best_score = 0.0
     best_rows: list[dict[str, Any]] = []
     for record in records:
-        candidate_key = normalized_name_key(record.get("corp_name", ""))
+        candidate_key = jamo_fuzzy_key(record.get("corp_name", ""))
         if not candidate_key:
             continue
-        score = SequenceMatcher(None, key, candidate_key).ratio()
+        score = SequenceMatcher(None, query_key, candidate_key).ratio()
         if score < _FUZZY_THRESHOLD:
             continue
         if score > best_score:
@@ -146,6 +148,30 @@ def _match_by_fuzzy_name(
     return best_rows[0] if len(best_rows) == 1 else None
 
 
+def resolve_krx_corp_record(surface_form: str) -> dict[str, str] | None:
+    """Resolve a KRX corp record from stock code or company name."""
+    surface = surface_form.strip()
+    if not surface:
+        return None
+    records = fetch_krx_corp_records()
+    surface_upper = surface.upper()
+
+    record = _match_by_stock_code(records, surface_upper)
+    if record is not None:
+        return record
+
+    key = normalized_name_key(surface)
+    record = _match_by_exact_name(records, key)
+    if record is not None:
+        return record
+
+    record = _match_by_fuzzy_name(records, surface)
+    if record is not None:
+        return record
+
+    return None
+
+
 def resolve_krx_listing_seeds(surface_form: str) -> tuple[ListingSeed, ...]:
     """Return listing seeds for a surface form using a live OpenDart corp code table."""
     surface = surface_form.strip()
@@ -154,23 +180,10 @@ def resolve_krx_listing_seeds(surface_form: str) -> tuple[ListingSeed, ...]:
     api_key = get_opendart_api_key()
     if not api_key:
         return ()
-    records = fetch_krx_corp_records()
-    surface_upper = surface.upper()
-
-    record = _match_by_stock_code(records, surface_upper)
-    if record is not None:
-        return _seed_from_record(record, api_key)
-
-    key = normalized_name_key(surface)
-    record = _match_by_exact_name(records, key)
-    if record is not None:
-        return _seed_from_record(record, api_key)
-
-    record = _match_by_fuzzy_name(records, key)
-    if record is not None:
-        return _seed_from_record(record, api_key)
-
-    return ()
+    record = resolve_krx_corp_record(surface)
+    if record is None:
+        return ()
+    return _seed_from_record(record, api_key)
 
 
 def krx_on_miss(surface_form: str) -> tuple[ListingSeed, ...]:

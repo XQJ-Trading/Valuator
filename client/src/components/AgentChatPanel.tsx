@@ -50,6 +50,10 @@ export default function AgentChatPanel() {
     clearMessages,
     draftText,
     setDraftText,
+    webSearchProvider,
+    setWebSearchProvider,
+    webSearchProviders,
+    webSearchProvidersLoading,
   } = useChatSession();
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -121,6 +125,36 @@ export default function AgentChatPanel() {
       </div>
 
       <div className={styles.inputBar}>
+        <div className={styles.controlsRow}>
+          <label className={styles.providerLabel}>
+            <span>Web Search</span>
+            <select
+              className={styles.providerSelect}
+              value={webSearchProvider}
+              disabled={
+                pending ||
+                loadingList ||
+                webSearchProvidersLoading ||
+                webSearchProviders.length === 0
+              }
+              onChange={(event) =>
+                setWebSearchProvider(
+                  event.target.value as "perplexity" | "tavily",
+                )
+              }
+            >
+              {webSearchProviders.length === 0 ? (
+                <option value="">Unavailable</option>
+              ) : null}
+              {webSearchProviders.includes("perplexity") ? (
+                <option value="perplexity">Perplexity</option>
+              ) : null}
+              {webSearchProviders.includes("tavily") ? (
+                <option value="tavily">Tavily</option>
+              ) : null}
+            </select>
+          </label>
+        </div>
         <div className={styles.inputRow}>
           <ChatEditor
             ref={chatEditorRef}

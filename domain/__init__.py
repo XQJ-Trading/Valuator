@@ -27,13 +27,8 @@ from .query import (
 )
 
 __all__ = [
-    "AcceptanceCheck",
     "Company",
     "CompanySurfaceResolution",
-    "DomainIndex",
-    "DomainLoader",
-    "DomainModule",
-    "DomainModuleContext",
     "DomainRouter",
     "Listing",
     "ListingSeed",
@@ -47,9 +42,7 @@ __all__ = [
     "QueryStep",
     "TemporalContract",
     "QueryUnit",
-    "RubricAspect",
     "Subject",
-    "expand",
     "analyze_query",
     "build_query_breakdown",
     "fill_routing_defaults",
@@ -59,15 +52,8 @@ __all__ = [
 ]
 
 _LAZY_EXPORTS = {
-    "AcceptanceCheck": (".types", "AcceptanceCheck"),
-    "DomainIndex": (".types", "DomainIndex"),
-    "DomainLoader": (".loader", "DomainLoader"),
-    "DomainModule": (".types", "DomainModule"),
-    "DomainModuleContext": (".types", "DomainModuleContext"),
     "DomainRouter": (".router", "DomainRouter"),
     "QueryAnalyzer": (".query_analysis", "QueryAnalyzer"),
-    "RubricAspect": (".types", "RubricAspect"),
-    "expand": (".expander", "expand"),
     "analyze_query": (".router", "analyze_query"),
 }
 

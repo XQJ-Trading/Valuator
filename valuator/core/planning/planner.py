@@ -19,9 +19,6 @@ class StepPlanner:
 
     _decision_max_response_chars = 100_000
     _decision_max_output_tokens = 8_192
-    _prompt_value_preview_chars = 600
-    _prompt_query_chars = 3_000
-    _prompt_child_output_budget_chars = 50_000
     _max_prompt_chars = 150_000
 
     def __init__(
@@ -64,9 +61,8 @@ class StepPlanner:
             ctx=ctx,
             allowed_actions=allowed,
             max_prompt_chars=self._max_prompt_chars,
-            prompt_child_output_budget_chars=self._prompt_child_output_budget_chars,
-            prompt_value_preview_chars=self._prompt_value_preview_chars,
-            prompt_query_chars=self._prompt_query_chars,
+            prompt_value_preview_chars=600,
+            prompt_query_chars=3_000,
         )
         return await self._generate_decision(
             task=task,
@@ -94,9 +90,8 @@ class StepPlanner:
             ctx=ctx,
             allowed_actions=allowed,
             max_prompt_chars=self._max_prompt_chars,
-            prompt_child_output_budget_chars=self._prompt_child_output_budget_chars,
-            prompt_value_preview_chars=self._prompt_value_preview_chars,
-            prompt_query_chars=self._prompt_query_chars,
+            prompt_value_preview_chars=600,
+            prompt_query_chars=3_000,
         )
         decision = await self._generate_decision(
             task=task,

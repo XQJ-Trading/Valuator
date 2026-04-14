@@ -74,8 +74,6 @@ class DecompositionCritic:
                 sections.append("[SUBJECTS]\n" + "\n".join(subject_lines))
             if qa.intent_tags:
                 sections.append("[INTENT_TAGS]\n" + ", ".join(qa.intent_tags))
-            if qa.domain_ids:
-                sections.append("[ACTIVE_DOMAINS]\n" + ", ".join(qa.domain_ids))
 
         child_lines = [
             f"{index}. description={child.description}; tool_hint={child.tool_hint or '-'}"

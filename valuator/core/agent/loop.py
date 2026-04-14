@@ -142,6 +142,72 @@ class Agent:
             )
         )
 
+        decided = await self._decide_step(task, query=query, task_seq=task_seq)
+        if decided is None:
+            return
+        ctx, decision, decision_started_at, decision_duration_ms = decided
+
+        if not await self._validate_step_decision(
+            task=task,
+            task_seq=task_seq,
+            ctx=ctx,
+            decision=decision,
+            started_at=decision_started_at,
+            duration_ms=decision_duration_ms,
+        ):
+            return
+
+        effective_decision = await self._effective_decision(
+            task=task,
+            task_seq=task_seq,
+            ctx=ctx,
+            decision=decision,
+            started_at=decision_started_at,
+            duration_ms=decision_duration_ms,
+        )
+        if effective_decision is None:
+            return
+
+        task.last_invalid_error = None
+        agent_trace.log_step_decision(
+            self._trace_writer,
+            task=task,
+            task_seq=task_seq,
+            ctx=ctx,
+            decision=effective_decision,
+            status="success",
+            started_at=decision_started_at,
+            duration_ms=decision_duration_ms,
+        )
+        conflict_count = len(self._shared.view().conflicts)
+
+        if (
+            effective_decision.action is Action.EXECUTE
+            and effective_decision.tool_request is not None
+        ):
+            await self._execute_tool_step(
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=effective_decision,
+            )
+            return
+
+        await self._complete_non_execute_step(
+            task=task,
+            task_seq=task_seq,
+            ctx=ctx,
+            decision=effective_decision,
+            conflict_count=conflict_count,
+        )
+
+    async def _decide_step(
+        self,
+        task: Task,
+        *,
+        query: str,
+        task_seq: int,
+    ) -> tuple[TaskContext, TaskDecision, str, float] | None:
         ctx = context_builder.build_task_context(
             task=task,
             query=query,
@@ -156,58 +222,68 @@ class Agent:
             and task.last_tool_success is True
             and task.tool_results
         ):
-            decision = TaskDecision(
-                action=Action.AGGREGATE,
-                output=task.tool_results[-1].result,
-                facts={},
-                children=[],
+            return (
+                ctx,
+                TaskDecision(
+                    action=Action.AGGREGATE,
+                    output=task.tool_results[-1].result,
+                    facts={},
+                    children=[],
+                ),
+                decision_measurement.started_at,
+                decision_measurement.latency_seconds() * 1000.0,
             )
-        else:
-            try:
-                decision = await task.step(ctx)
-                if decision.action is Action.DECOMPOSE:
-                    decision = await self._gate.gate(task, decision, ctx)
-            except ValueError as exc:
-                await self._reject_step(
-                    task=task,
-                    task_seq=task_seq,
-                    ctx=ctx,
-                    started_at=decision_measurement.started_at,
-                    duration_ms=decision_measurement.latency_seconds() * 1000.0,
-                    error=str(exc),
-                )
-                return
-            except Exception as exc:
-                agent_trace.log_step_decision(
-                    self._trace_writer,
-                    task=task,
-                    task_seq=task_seq,
-                    ctx=ctx,
-                    decision=None,
-                    status="failed",
-                    started_at=decision_measurement.started_at,
-                    duration_ms=decision_measurement.latency_seconds() * 1000.0,
-                    error=str(exc),
-                )
-                await self._fail_task(
-                    task, task_seq=task_seq, reason=f"step failed: {exc}"
-                )
-                return
 
-        decision_duration_ms = decision_measurement.latency_seconds() * 1000.0
-        if decision.action is Action.EXECUTE and decision.tool_request is None:
+        try:
+            decision = await task.step(ctx)
+            if decision.action is Action.DECOMPOSE:
+                decision = await self._gate.gate(task, decision, ctx)
+        except ValueError as exc:
             await self._reject_step(
                 task=task,
                 task_seq=task_seq,
                 ctx=ctx,
-                decision=decision,
                 started_at=decision_measurement.started_at,
-                duration_ms=decision_duration_ms,
-                error="execute action missing tool_request",
+                duration_ms=decision_measurement.latency_seconds() * 1000.0,
+                error=str(exc),
             )
-            return
+            return None
+        except Exception as exc:
+            agent_trace.log_step_decision(
+                self._trace_writer,
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=None,
+                status="failed",
+                started_at=decision_measurement.started_at,
+                duration_ms=decision_measurement.latency_seconds() * 1000.0,
+                error=str(exc),
+            )
+            await self._fail_task(task, task_seq=task_seq, reason=f"step failed: {exc}")
+            return None
 
-        if (
+        return (
+            ctx,
+            decision,
+            decision_measurement.started_at,
+            decision_measurement.latency_seconds() * 1000.0,
+        )
+
+    async def _validate_step_decision(
+        self,
+        *,
+        task: Task,
+        task_seq: int,
+        ctx: TaskContext,
+        decision: TaskDecision,
+        started_at: str,
+        duration_ms: float,
+    ) -> bool:
+        invalid_error: str | None = None
+        if decision.action is Action.EXECUTE and decision.tool_request is None:
+            invalid_error = "execute action missing tool_request"
+        elif (
             decision.tool_request is not None
             and ctx.available_tools
             and decision.tool_request.tool_name not in ctx.available_tools
@@ -220,194 +296,201 @@ class Agent:
                 ctx=ctx,
                 decision=decision,
                 status="failed",
-                started_at=decision_measurement.started_at,
-                duration_ms=decision_duration_ms,
+                started_at=started_at,
+                duration_ms=duration_ms,
                 error=error,
             )
             await self._fail_task(task, task_seq=task_seq, reason=error)
-            return
+            return False
+        elif decision.action is Action.EXECUTE and task.last_tool_success is True:
+            invalid_error = (
+                "execute action is not allowed after a successful tool result; "
+                "use aggregate, decompose, wait, or fail"
+            )
+        elif decision.action is Action.DECOMPOSE:
+            invalid_error = self._scheduler.validate_decomposition(
+                task,
+                decision.children,
+            )
+        elif decision.action is Action.WAIT:
+            invalid_error = self._scheduler.validate_wait(task.id, decision.wait_for)
 
-        if decision.action is Action.EXECUTE and task.last_tool_success is True:
+        if invalid_error is None:
+            return True
+
+        await self._reject_step(
+            task=task,
+            task_seq=task_seq,
+            ctx=ctx,
+            decision=decision,
+            started_at=started_at,
+            duration_ms=duration_ms,
+            error=invalid_error,
+        )
+        return False
+
+    async def _effective_decision(
+        self,
+        *,
+        task: Task,
+        task_seq: int,
+        ctx: TaskContext,
+        decision: TaskDecision,
+        started_at: str,
+        duration_ms: float,
+    ) -> TaskDecision | None:
+        if decision.action is not Action.EXECUTE or decision.tool_request is None:
+            return decision
+
+        effective_request = context_builder.enrich_tool_request(
+            tool_request=decision.tool_request,
+            ctx=ctx,
+        )
+        effective_decision = TaskDecision(
+            action=decision.action,
+            children=decision.children,
+            tool_request=effective_request,
+            wait_for=decision.wait_for,
+            output=decision.output,
+            facts=dict(decision.facts),
+        )
+        if effective_request.tool_name in task.blocked_tools:
             await self._reject_step(
                 task=task,
                 task_seq=task_seq,
                 ctx=ctx,
-                decision=decision,
-                started_at=decision_measurement.started_at,
-                duration_ms=decision_duration_ms,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
                 error=(
-                    "execute action is not allowed after a successful tool result; "
-                    "use aggregate, decompose, wait, or fail"
+                    "execute action uses a tool blocked after repeated consecutive "
+                    f"failures: {effective_request.tool_name}; "
+                    "choose another tool or decompose"
                 ),
             )
-            return
+            return None
 
-        if decision.action is Action.DECOMPOSE:
-            error = self._scheduler.validate_decomposition(task, decision.children)
-            if error is not None:
-                await self._reject_step(
-                    task=task,
-                    task_seq=task_seq,
-                    ctx=ctx,
-                    decision=decision,
-                    started_at=decision_measurement.started_at,
-                    duration_ms=decision_duration_ms,
-                    error=error,
-                )
-                return
-
-        if decision.action is Action.WAIT:
-            error = self._scheduler.validate_wait(task.id, decision.wait_for)
-            if error is not None:
-                await self._reject_step(
-                    task=task,
-                    task_seq=task_seq,
-                    ctx=ctx,
-                    decision=decision,
-                    started_at=decision_measurement.started_at,
-                    duration_ms=decision_duration_ms,
-                    error=error,
-                )
-                return
-
-        effective_decision = decision
-        if decision.action is Action.EXECUTE and decision.tool_request is not None:
-            effective_request = context_builder.enrich_tool_request(
-                tool_request=decision.tool_request,
-                ctx=ctx,
-            )
-            effective_decision = TaskDecision(
-                action=decision.action,
-                children=decision.children,
-                tool_request=effective_request,
-                wait_for=decision.wait_for,
-                output=decision.output,
-                facts=dict(decision.facts),
-            )
-            if effective_request.tool_name in task.blocked_tools:
-                await self._reject_step(
-                    task=task,
-                    task_seq=task_seq,
-                    ctx=ctx,
-                    decision=effective_decision,
-                    started_at=decision_measurement.started_at,
-                    duration_ms=decision_duration_ms,
-                    error=(
-                        "execute action uses a tool blocked after repeated consecutive "
-                        f"failures: {effective_request.tool_name}; "
-                        "choose another tool or decompose"
-                    ),
-                )
-                return
-
-            request_signature = _tool_request_signature(
-                tool_name=effective_request.tool_name,
-                args=effective_request.args,
-            )
-            if request_signature in task.failed_tool_request_signatures:
-                await self._reject_step(
-                    task=task,
-                    task_seq=task_seq,
-                    ctx=ctx,
-                    decision=effective_decision,
-                    started_at=decision_measurement.started_at,
-                    duration_ms=decision_duration_ms,
-                    error=(
-                        "execute action repeats a previously failed tool request; "
-                        "change the tool, change the args, or decompose"
-                    ),
-                )
-                return
-
-        task.last_invalid_error = None
-        agent_trace.log_step_decision(
-            self._trace_writer,
-            task=task,
-            task_seq=task_seq,
-            ctx=ctx,
-            decision=effective_decision,
-            status="success",
-            started_at=decision_measurement.started_at,
-            duration_ms=decision_duration_ms,
+        request_signature = _tool_request_signature(
+            tool_name=effective_request.tool_name,
+            args=effective_request.args,
         )
-        conflict_count = len(self._shared.view().conflicts)
-
-        if (
-            effective_decision.action is Action.EXECUTE
-            and effective_decision.tool_request is not None
-        ):
-            task.last_tool_request = effective_decision.tool_request
-            self._scheduler.apply_decision(
-                task, effective_decision, self._shared, ctx=ctx
-            )
-            tool_started_at = utc_isoformat()
-            started = perf_counter()
-            result = await self._tools.execute_tool(
-                effective_decision.tool_request.tool_name,
-                **effective_decision.tool_request.args,
-            )
-            duration_ms = (perf_counter() - started) * 1000.0
-            tool_name = effective_decision.tool_request.tool_name
-            if result.success:
-                task.tool_failure_counts.pop(tool_name, None)
-            else:
-                task.failed_tool_request_signatures.add(
-                    _tool_request_signature(
-                        tool_name=tool_name,
-                        args=effective_decision.tool_request.args,
-                    )
-                )
-                task.tool_failure_counts[tool_name] = (
-                    task.tool_failure_counts.get(tool_name, 0) + 1
-                )
-                if (
-                    task.tool_failure_counts[tool_name]
-                    >= self._max_consecutive_tool_failures
-                ):
-                    task.blocked_tools.add(tool_name)
-            self._scheduler.mark_tool_complete(task, result)
-            self._write_execution_result(
-                task_id=task.id,
-                tool_name=effective_decision.tool_request.tool_name,
-                args=effective_decision.tool_request.args,
-                result=result,
-                started_at=tool_started_at,
-                duration_ms=duration_ms,
-            )
-            self._sync_session_tree()
-            agent_trace.log_tool_execution(
-                self._trace_writer,
-                task_id=task.id,
+        if request_signature in task.failed_tool_request_signatures:
+            await self._reject_step(
+                task=task,
                 task_seq=task_seq,
-                tool_name=effective_decision.tool_request.tool_name,
-                args=effective_decision.tool_request.args,
+                ctx=ctx,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
+                error=(
+                    "execute action repeats a previously failed tool request; "
+                    "change the tool, change the args, or decompose"
+                ),
+            )
+            return None
+
+        return effective_decision
+
+    async def _execute_tool_step(
+        self,
+        *,
+        task: Task,
+        task_seq: int,
+        ctx: TaskContext,
+        decision: TaskDecision,
+    ) -> None:
+        assert decision.tool_request is not None
+        task.last_tool_request = decision.tool_request
+        self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
+        tool_started_at = utc_isoformat()
+        started = perf_counter()
+        result = await self._tools.execute_tool(
+            decision.tool_request.tool_name,
+            **decision.tool_request.args,
+        )
+        duration_ms = (perf_counter() - started) * 1000.0
+        tool_name = decision.tool_request.tool_name
+        if result.success:
+            task.tool_failure_counts.pop(tool_name, None)
+        else:
+            task.failed_tool_request_signatures.add(
+                _tool_request_signature(
+                    tool_name=tool_name,
+                    args=decision.tool_request.args,
+                )
+            )
+            task.tool_failure_counts[tool_name] = (
+                task.tool_failure_counts.get(tool_name, 0) + 1
+            )
+            if (
+                task.tool_failure_counts[tool_name]
+                >= self._max_consecutive_tool_failures
+            ):
+                task.blocked_tools.add(tool_name)
+        self._scheduler.mark_tool_complete(task, result)
+        if self._session_store is not None:
+            artifact_refs = self._session_store.write_execution_result(
+                task_id=task.id,
+                tool_name=decision.tool_request.tool_name,
+                args=decision.tool_request.args,
                 result=result,
                 started_at=tool_started_at,
                 duration_ms=duration_ms,
             )
-            await self._emit(
-                AgentEvent(
-                    type=EventType.TOOL_EXECUTED,
-                    task_id=task.id,
-                    detail={
-                        "tool": effective_decision.tool_request.tool_name,
-                        "args": effective_decision.tool_request.args,
-                        "duration_ms": round(duration_ms, 3),
-                        "tool_result": result.model_dump(),
-                        "task_name": task.task_name,
-                    },
-                )
-            )
-            return
-
-        self._scheduler.apply_decision(task, effective_decision, self._shared, ctx=ctx)
-        self._write_task_report(task, effective_decision)
+            task.artifacts.update(artifact_refs)
+            result.metadata["artifacts"] = artifact_refs
         self._sync_session_tree()
-        if effective_decision.action is Action.DECOMPOSE:
-            self._save_decomposition_snapshot(task)
-        if effective_decision.action is Action.AGGREGATE and self._gate.has_prediction(
-            task.id
+        agent_trace.log_tool_execution(
+            self._trace_writer,
+            task_id=task.id,
+            task_seq=task_seq,
+            tool_name=decision.tool_request.tool_name,
+            args=decision.tool_request.args,
+            result=result,
+            started_at=tool_started_at,
+            duration_ms=duration_ms,
+        )
+        await self._emit(
+            AgentEvent(
+                type=EventType.TOOL_EXECUTED,
+                task_id=task.id,
+                detail={
+                    "tool": decision.tool_request.tool_name,
+                    "args": decision.tool_request.args,
+                    "duration_ms": round(duration_ms, 3),
+                    "tool_result": result.model_dump(),
+                    "task_name": task.task_name,
+                },
+            )
+        )
+
+    async def _complete_non_execute_step(
+        self,
+        *,
+        task: Task,
+        task_seq: int,
+        ctx: TaskContext,
+        decision: TaskDecision,
+        conflict_count: int,
+    ) -> None:
+        self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
+        if (
+            self._session_store is not None
+            and decision.action in (Action.AGGREGATE, Action.FINALIZE)
         ):
+            artifact_refs = self._session_store.write_aggregation_report(
+                task_id=task.id,
+                output=task.completion_payload(),
+            )
+            task.artifacts.update(artifact_refs)
+        self._sync_session_tree()
+        if decision.action is Action.DECOMPOSE and self._session_store is not None:
+            current = self._scheduler.get_task(task.id) or task
+            self._session_store.save_decomposition_snapshot(
+                current,
+                current.children(),
+            )
+        if decision.action is Action.AGGREGATE and self._gate.has_prediction(task.id):
             self._gate.observe_outcome(task.id, task.children())
         for conflict in self._shared.view().conflicts[conflict_count:]:
             await self._emit(
@@ -423,9 +506,9 @@ class Agent:
                 )
             )
 
-        if effective_decision.action is Action.DECOMPOSE:
+        if decision.action is Action.DECOMPOSE:
             parent = self._scheduler.get_task(task.id) or task
-            n = len(effective_decision.children)
+            n = len(decision.children)
             new_children = parent.children()[-n:] if n else []
             children_detail = [
                 {
@@ -440,32 +523,31 @@ class Agent:
                     type=EventType.DECOMPOSED,
                     task_id=task.id,
                     detail={
-                        "child_count": len(effective_decision.children),
+                        "child_count": len(decision.children),
                         "children": children_detail,
                         "task_name": parent.task_name,
                     },
                 )
             )
-        elif effective_decision.action not in (
-            Action.AGGREGATE,
-            Action.FINALIZE,
-            Action.FAIL,
-        ):
+            return
+
+        if decision.action is Action.WAIT:
             await self._emit(
                 AgentEvent(
                     type=EventType.STEP_COMPLETED,
                     task_id=task.id,
-                    detail={"action": effective_decision.action.value},
+                    detail={"action": decision.action.value},
                 )
             )
+            return
 
-        if effective_decision.action in (Action.AGGREGATE, Action.FINALIZE):
+        if decision.action in (Action.AGGREGATE, Action.FINALIZE):
             completion_payload = task.completion_payload()
             agent_trace.log_task_result(
                 self._trace_writer,
                 task,
                 task_seq=task.step_count,
-                action=effective_decision.action.value,
+                action=decision.action.value,
                 status="success",
                 output=completion_payload,
             )
@@ -473,7 +555,7 @@ class Agent:
                 AgentEvent(
                     type=(
                         EventType.AGGREGATED
-                        if effective_decision.action is Action.AGGREGATE
+                        if decision.action is Action.AGGREGATE
                         else EventType.FINALIZED
                     ),
                     task_id=task.id,
@@ -483,21 +565,19 @@ class Agent:
                     },
                 )
             )
-        elif effective_decision.action is Action.FAIL:
+            return
+
+        if decision.action is Action.FAIL:
             error = (
                 task.error
-                or (
-                    str(effective_decision.output)
-                    if effective_decision.output is not None
-                    else None
-                )
+                or (str(decision.output) if decision.output is not None else None)
                 or "task failed"
             )
             agent_trace.log_task_result(
                 self._trace_writer,
                 task,
                 task_seq=task.step_count,
-                action=effective_decision.action.value,
+                action=decision.action.value,
                 status="failed",
                 error=error,
             )
@@ -508,6 +588,7 @@ class Agent:
                     detail={"error": error, "task_name": task.task_name},
                 )
             )
+            return
 
     async def _emit(self, event: AgentEvent) -> None:
         if self._on_event is None:
@@ -588,22 +669,28 @@ class Agent:
             children=[],
         )
         self._scheduler.apply_decision(task, decision, self._shared)
-        self._write_task_report(task, decision)
+        if self._session_store is not None:
+            artifact_refs = self._session_store.write_aggregation_report(
+                task_id=task.id,
+                output=task.completion_payload(),
+            )
+            task.artifacts.update(artifact_refs)
         self._sync_session_tree()
+        completion_payload = task.completion_payload()
         agent_trace.log_task_result(
             self._trace_writer,
             task,
             task_seq=task.step_count,
             action=Action.FINALIZE.value,
             status="success",
-            output=task.completion_payload(),
+            output=completion_payload,
         )
         await self._emit(
             AgentEvent(
                 type=EventType.FINALIZED,
                 task_id=task.id,
                 detail={
-                    "output": task.completion_payload(),
+                    "output": completion_payload,
                     "task_name": task.task_name,
                     "reason": "max_steps_reached",
                 },
@@ -641,40 +728,3 @@ class Agent:
             return
         self._session_store.sync_task_tree(self._root_task)
         self._session_store.build_browse_tree()
-
-    def _save_decomposition_snapshot(self, task: Task) -> None:
-        if self._session_store is None:
-            return
-        current = self._scheduler.get_task(task.id) or task
-        self._session_store.save_decomposition_snapshot(current, current.children())
-
-    def _write_execution_result(
-        self,
-        *,
-        task_id: str,
-        tool_name: str,
-        args: dict[str, Any],
-        result: Any,
-        started_at: str,
-        duration_ms: float,
-    ) -> None:
-        if self._session_store is None:
-            return
-        self._session_store.write_execution_result(
-            task_id=task_id,
-            tool_name=tool_name,
-            args=args,
-            result=result,
-            started_at=started_at,
-            duration_ms=duration_ms,
-        )
-
-    def _write_task_report(self, task: Task, decision: TaskDecision) -> None:
-        if self._session_store is None:
-            return
-        if decision.action not in (Action.AGGREGATE, Action.FINALIZE):
-            return
-        self._session_store.write_aggregation_report(
-            task_id=task.id,
-            output=task.completion_payload(),
-        )

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from valuator.runtime import create_tool_registry, final_output_text, finalize_trace  # noqa: E402
+from valuator.runtime import create_tool_registry, finalize_trace  # noqa: E402
 from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
 from valuator.session.browse_tree import (  # noqa: E402
@@ -24,6 +24,7 @@ from valuator.session.browse_tree import (  # noqa: E402
     to_slug,
 )
 from valuator.utils.config import session_files_root  # noqa: E402
+from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
 from valuator.utils.time_utils import Measurement  # noqa: E402
 from valuator.core.types import EventType  # noqa: E402
@@ -66,6 +67,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Maximum number of ready tasks processed per round. Defaults to project config.",
+    )
+    parser.add_argument(
+        "--web-search-provider",
+        choices=WEB_SEARCH_PROVIDER_NAMES,
+        default=None,
+        help="Override web search backend. Defaults to WEB_SEARCH_PROVIDER / project config.",
     )
     parser.add_argument(
         "--show-query",
@@ -118,11 +125,10 @@ async def build_query_analysis(
     as_of_utc: str,
     usage_writer: object | None = None,
 ):
-    from domain import DomainLoader, DomainRouter, QueryAnalyzer, QueryIntent
+    from domain import DomainRouter, QueryAnalyzer, QueryIntent
 
     measurement = Measurement.start()
     try:
-        domain_index, modules = DomainLoader().load()
         from domain.boundary import combined_on_miss
 
         router = DomainRouter(
@@ -134,8 +140,6 @@ async def build_query_analysis(
         router.bind_usage_writer(usage_writer)
         _, analysis = await router.analyze(
             QueryIntent(query=query),
-            domain_index,
-            modules,
             as_of_utc=as_of_utc,
         )
     except Exception as exc:
@@ -163,7 +167,6 @@ async def build_query_analysis(
             method="query_analysis.analyze",
             status="success",
             summary=(
-                f"domains={len(analysis.domain_ids)} "
                 f"units={len(analysis.units)} "
                 f"requirements={len(analysis.requirements)}"
             ),
@@ -365,6 +368,7 @@ async def run(args: argparse.Namespace) -> int:
             tool_registry = create_tool_registry(
                 model,
                 usage_writer=trace_writer,
+                web_search_provider=args.web_search_provider,
             )
 
             agent = Agent(
@@ -384,7 +388,6 @@ async def run(args: argparse.Namespace) -> int:
                 trace_writer=trace_writer,
             )
             output = await agent.run(effective_query, root_task)
-            final_text = final_output_text(output)
             final_text = await asyncio.to_thread(
                 session_store.final_output_markdown, output
             )
@@ -449,7 +452,9 @@ async def run(args: argparse.Namespace) -> int:
             raise
         finally:
             if tool_registry is not None:
-                tool_registry.close()
+                close = getattr(tool_registry, "close", None)
+                if callable(close):
+                    close()
             close_session_log_file(runtime_log_path)
 
 

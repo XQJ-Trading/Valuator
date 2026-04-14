@@ -5,6 +5,7 @@ from pathlib import Path
 
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.core.types import TaskState
+from valuator.runtime import final_output_text
 from valuator.session import ValuatorSessionStore
 from valuator.tools.base import ToolResult
 
@@ -350,6 +351,28 @@ def test_write_final_output_prefers_root_report_when_output_is_structured(
     assert final_markdown.startswith("# Final")
     assert "루트 요약" in final_markdown
     assert "price uplift" not in final_markdown
+
+
+def test_runtime_final_output_text_matches_store_render_without_root_report(
+    tmp_path: Path,
+) -> None:
+    store = ValuatorSessionStore(
+        session_id="S-runtime-parity",
+        query="runtime parity",
+        model="stub-model",
+        created_at="2026-03-29T00:00:00Z",
+        root_dir=tmp_path,
+    )
+    root = ComplexTask(id="root", description="root task")
+    root.state = TaskState.DONE
+    store.sync_task_tree(root)
+    output = {
+        "status": "facts_only",
+        "facts": {"price_uplift": "could not verify"},
+        "source_task_id": "root",
+    }
+
+    assert store.final_output_markdown(output) == final_output_text(output)
 
 
 def test_build_browse_tree_uses_execution_fallback_and_failure_stub(

@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from .company import Subject
 
-if TYPE_CHECKING:
-    from .types import DomainModule
-
-DomainId = str
 TaskId = str
 
-DEFAULT_GENERIC_TOOLS = [
-    "web_search_tool",
-    "sec_tool",
-    "yfinance_balance_sheet",
-    "code_execute_tool",
-]
+_COMMON_TOOLS = {"code_execute_tool", "web_search_tool"}
+_KRX_TOOLS = {"opendart_financial_tool"}
+_USA_TOOLS = {"sec_tool", "yfinance_balance_sheet"}
+_ALL_MARKET_TOOLS = _COMMON_TOOLS | _KRX_TOOLS | _USA_TOOLS
+
+DEFAULT_GENERIC_TOOLS = sorted(_ALL_MARKET_TOOLS)
 
 CONCRETE_SUBJECT_KINDS = frozenset(
     {
@@ -72,7 +67,6 @@ class QueryUnit:
     id: str
     objective: str
     retrieval_query: str
-    domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
     target_start: str = ""
@@ -85,7 +79,6 @@ class QueryRequirement:
     id: str
     acceptance: str
     unit_ids: list[int] = field(default_factory=list)
-    domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     provenance: str = ""
     required: bool = True
@@ -100,7 +93,6 @@ class QueryAnalysis:
     """
 
     as_of_utc: str = ""
-    domain_ids: list[DomainId] = field(default_factory=list)
     query_intent: QueryIntent = field(default_factory=lambda: QueryIntent(query=""))
     entities: dict[str, str] = field(default_factory=dict)
     units: list[QueryUnit] = field(default_factory=list)
@@ -117,7 +109,6 @@ class QueryStep:
     id: str
     objective: str
     retrieval_query: str
-    domain_ids: list[DomainId] = field(default_factory=list)
     entity_ids: list[str] = field(default_factory=list)
     time_scope: str = ""
     target_start: str = ""
@@ -154,7 +145,6 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
             id=unit.id,
             objective=unit.objective,
             retrieval_query=unit.retrieval_query,
-            domain_ids=list(unit.domain_ids),
             entity_ids=list(unit.entity_ids),
             time_scope=unit.time_scope,
             target_start=unit.target_start,
@@ -191,7 +181,9 @@ def summarize_temporal_contract(
         return TemporalContract(as_of_utc=as_of_utc)
 
     scopes = list(dict.fromkeys(unit.time_scope for unit in units if unit.time_scope))
-    starts = list(dict.fromkeys(unit.target_start for unit in units if unit.target_start))
+    starts = list(
+        dict.fromkeys(unit.target_start for unit in units if unit.target_start)
+    )
     ends = list(dict.fromkeys(unit.target_end for unit in units if unit.target_end))
 
     time_scope = scopes[0] if len(scopes) == 1 else "mixed" if scopes else ""
@@ -210,25 +202,27 @@ def summarize_temporal_contract(
     )
 
 
-def fill_routing_defaults(
-    analysis: QueryAnalysis,
-    _modules: dict[str, DomainModule],
-) -> QueryAnalysis:
+def fill_routing_defaults(analysis: QueryAnalysis) -> QueryAnalysis:
     """Fill allowed_tools when the query analysis omitted them."""
-    if not analysis.domain_ids:
-        analysis.allowed_tools = list(DEFAULT_GENERIC_TOOLS)
-        return analysis
-
     if analysis.allowed_tools:
         return analysis
 
-    analysis.allowed_tools = sorted(
-        {
-            "code_execute_tool",
-            # "domain_tool",
-            "sec_tool",
-            "web_search_tool",
-            "yfinance_balance_sheet",
-        }
-    )
+    analysis.allowed_tools = sorted(_tools_for_subjects(analysis.query_intent.subjects))
     return analysis
+
+
+def _tools_for_subjects(subjects: tuple[Subject, ...]) -> set[str]:
+    markets: set[str] = set()
+    for subject in subjects:
+        if subject.listing is not None:
+            markets.add(subject.listing.market)
+
+    if not markets:
+        return set(_ALL_MARKET_TOOLS)
+
+    tools = set(_COMMON_TOOLS)
+    if "KRX" in markets:
+        tools |= _KRX_TOOLS
+    if markets - {"KRX"}:
+        tools |= _USA_TOOLS
+    return tools

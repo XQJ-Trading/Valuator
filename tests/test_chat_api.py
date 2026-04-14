@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from server import chat_api
+from server import auth as auth_module
 from server.main import create_app
 
 
@@ -43,6 +44,9 @@ class _FakeProcess:
 def _reset_chat_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("SESSION_DATA_ROOT", str(tmp_path / "session"))
     monkeypatch.setenv("GUIDE_DATA_ROOT", str(tmp_path / "guide"))
+    monkeypatch.setattr(auth_module, "_KEY", "")
+    monkeypatch.setattr(auth_module, "_SECRET", "")
+    auth_module._authenticated_sessions.clear()
     chat_api._subscribers_by_session.clear()
     chat_api._agent_processes.clear()
     chat_api._agent_tasks.clear()
@@ -53,6 +57,7 @@ def _reset_chat_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     chat_api._subscribers_by_session.clear()
     chat_api._agent_processes.clear()
     chat_api._agent_tasks.clear()
+    auth_module._authenticated_sessions.clear()
 
 
 def _wait_until(predicate, *, timeout: float = 1.0) -> None:
@@ -66,6 +71,58 @@ def _wait_until(predicate, *, timeout: float = 1.0) -> None:
 
 def _chat_params(session_id: str) -> dict[str, str]:
     return {"session_id": session_id}
+
+
+def test_web_search_providers_endpoint_returns_available_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_api, "available_web_search_providers", lambda: ["perplexity"])
+
+    with TestClient(create_app()) as client:
+        response = client.get("/api/chat/web-search-providers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": ["perplexity"],
+    }
+
+
+def test_post_message_passes_web_search_provider_to_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = str(uuid.uuid4())
+    commands: list[tuple[object, ...]] = []
+    release = asyncio.Event()
+    release.set()
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        del kwargs
+        commands.append(args)
+        return _FakeProcess(release)
+
+    monkeypatch.setattr(
+        chat_api.asyncio,
+        "create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/chat/messages",
+            params=_chat_params(session_id),
+            json={"text": "hello", "web_search_provider": "tavily"},
+        )
+        assert response.status_code == 200
+        _wait_until(lambda: bool(commands))
+
+    assert commands[0][:6] == (
+        sys.executable,
+        str(chat_api.AGENT_ENTRYPOINT),
+        "--query",
+        "hello",
+        "--web-search-provider",
+        "tavily",
+    )
 
 
 def test_post_message_rejects_while_starting_and_stop_cancels_pending_run(

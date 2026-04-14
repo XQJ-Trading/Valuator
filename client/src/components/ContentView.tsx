@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import {
   fetchFile,
@@ -23,6 +24,7 @@ import styles from "./ContentView.module.css";
 
 type MdViewMode = "preview" | "render-everything" | "raw";
 type JsonViewMode = "preview" | "markdown-style" | "render-everything" | "raw";
+type FilePanelMode = MdViewMode | JsonViewMode;
 
 type PanelHandle = { persist: () => Promise<void>; dirty: boolean };
 
@@ -75,6 +77,167 @@ function TabBar({
   );
 }
 
+type EditableFilePanelProps = {
+  dataSource: DataSource;
+  filePath: string;
+  content: string;
+  onFileUpdated: (f: FileResponse) => void;
+  activeMode: FilePanelMode;
+  onModeChange: (mode: FilePanelMode) => void;
+  modes: Array<{ value: FilePanelMode; label: string }>;
+  ariaLabel: string;
+  mobileLayout?: boolean;
+  children: (args: {
+    draft: string;
+    saving: boolean;
+    setDraft: (value: string) => void;
+  }) => ReactNode;
+};
+
+const EditableFilePanel = forwardRef<PanelHandle, EditableFilePanelProps>(
+  function EditableFilePanel(
+    {
+      dataSource,
+      filePath,
+      content,
+      onFileUpdated,
+      activeMode,
+      onModeChange,
+      modes,
+      ariaLabel,
+      mobileLayout,
+      children,
+    },
+    ref,
+  ) {
+    const [draft, setDraft] = useState(content);
+    const [savedContent, setSavedContent] = useState(content);
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [draftSaved, setDraftSaved] = useState(false);
+
+    const localKey = `valuator.draft.${dataSource}.${filePath}`;
+    const draftRestoredRef = useRef(false);
+
+    useEffect(() => {
+      if (draftRestoredRef.current) {
+        // A localStorage draft is active — only track what the server has, don't overwrite local edits
+        setSavedContent(content);
+        return;
+      }
+      setDraft(content);
+      setSavedContent(content);
+    }, [content]);
+
+    // Restore draft from localStorage on mount
+    useEffect(() => {
+      const stored = localStorage.getItem(localKey);
+      if (stored !== null && stored !== content) {
+        setDraft(stored);
+        setDraftSaved(true);
+        draftRestoredRef.current = true;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const dirty = draft !== savedContent;
+
+    const persist = useCallback(async () => {
+      if (draft === savedContent || saving) return;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const updated = await saveFile(filePath, dataSource, draft);
+        setSavedContent(updated.content);
+        setDraftSaved(false);
+        localStorage.removeItem(localKey);
+        draftRestoredRef.current = false;
+        onFileUpdated(updated);
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : "Save failed");
+      } finally {
+        setSaving(false);
+      }
+    }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
+
+    // 1s debounce save to localStorage; reset draftSaved immediately on each draft change
+    useEffect(() => {
+      setDraftSaved(false);
+      const id = setTimeout(() => {
+        localStorage.setItem(localKey, draft);
+        setDraftSaved(true);
+      }, 1000);
+      return () => clearTimeout(id);
+    }, [draft, localKey]);
+
+    // Save to localStorage immediately on unmount (captures last edits when switching tabs)
+    const draftRef = useRef(draft);
+    draftRef.current = draft;
+    const savedContentRef = useRef(savedContent);
+    savedContentRef.current = savedContent;
+    useEffect(() => {
+      return () => {
+        if (draftRef.current !== savedContentRef.current) {
+          localStorage.setItem(localKey, draftRef.current);
+        }
+      };
+    }, [localKey]);
+
+    // 30s API auto-save interval
+    useEffect(() => {
+      const id = setInterval(() => void persist(), 30_000);
+      return () => clearInterval(id);
+    }, [persist]);
+
+    useImperativeHandle(ref, () => ({ persist, dirty }), [persist, dirty]);
+
+    const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
+    const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
+
+    return (
+      <div className={rootCls}>
+        <div className={styles.toolbar}>
+          <div className={styles.toolbarStatus} aria-live="polite">
+            {saveError ? (
+              <span className={styles.toolbarError} title={saveError}>
+                {saveError}
+              </span>
+            ) : saving ? (
+              <span>Saving…</span>
+            ) : dirty ? (
+              <>
+                <span className={styles.toolbarDirtyDot} aria-hidden />
+                <span aria-label={draftSaved ? "Saved as draft" : "Unsaved changes"}>
+                  {draftSaved ? "Saved as draft" : "Modified"}
+                </span>
+              </>
+            ) : null}
+          </div>
+          <div className={styles.segment} role="tablist" aria-label={ariaLabel}>
+            {modes.map((mode) => (
+              <button
+                key={mode.value}
+                type="button"
+                role="tab"
+                aria-selected={activeMode === mode.value}
+                className={
+                  activeMode === mode.value
+                    ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
+                    : styles.segmentBtn
+                }
+                onClick={() => onModeChange(mode.value)}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={bodyCls}>{children({ draft, saving, setDraft })}</div>
+      </div>
+    );
+  },
+);
+
 const MarkdownFilePanel = forwardRef<
   PanelHandle,
   {
@@ -89,153 +252,26 @@ const MarkdownFilePanel = forwardRef<
   ref,
 ) {
   const [mdMode, setMdMode] = useState<MdViewMode>("preview");
-  const [draft, setDraft] = useState(content);
-  const [savedContent, setSavedContent] = useState(content);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [draftSaved, setDraftSaved] = useState(false);
-
-  const localKey = `valuator.draft.${dataSource}.${filePath}`;
-  const draftRestoredRef = useRef(false);
-
-  useEffect(() => {
-    if (draftRestoredRef.current) {
-      // A localStorage draft is active — only track what the server has, don't overwrite local edits
-      setSavedContent(content);
-      return;
-    }
-    setDraft(content);
-    setSavedContent(content);
-  }, [content]);
-
-  // Restore draft from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem(localKey);
-    if (stored !== null && stored !== content) {
-      setDraft(stored);
-      setDraftSaved(true);
-      draftRestoredRef.current = true;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const dirty = draft !== savedContent;
-
-  const persist = useCallback(async () => {
-    if (draft === savedContent || saving) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const updated = await saveFile(filePath, dataSource, draft);
-      setSavedContent(updated.content);
-      setDraftSaved(false);
-      localStorage.removeItem(localKey);
-      draftRestoredRef.current = false;
-      onFileUpdated(updated);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
-
-  // 1s debounce save to localStorage; reset draftSaved immediately on each draft change
-  useEffect(() => {
-    setDraftSaved(false);
-    const id = setTimeout(() => {
-      localStorage.setItem(localKey, draft);
-      setDraftSaved(true);
-    }, 1000);
-    return () => clearTimeout(id);
-  }, [draft, localKey]);
-
-  // Save to localStorage immediately on unmount (captures last edits when switching tabs)
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const savedContentRef = useRef(savedContent);
-  savedContentRef.current = savedContent;
-  useEffect(() => {
-    return () => {
-      if (draftRef.current !== savedContentRef.current) {
-        localStorage.setItem(localKey, draftRef.current);
-      }
-    };
-  }, [localKey]);
-
-  // 30s API auto-save interval
-  useEffect(() => {
-    const id = setInterval(() => void persist(), 30_000);
-    return () => clearInterval(id);
-  }, [persist]);
-
-  useImperativeHandle(ref, () => ({ persist, dirty }), [persist, dirty]);
-
-  const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
-  const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
 
   return (
-    <div className={rootCls}>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarStatus} aria-live="polite">
-          {saveError ? (
-            <span className={styles.toolbarError} title={saveError}>
-              {saveError}
-            </span>
-          ) : saving ? (
-            <span>Saving…</span>
-          ) : dirty ? (
-            <>
-              <span className={styles.toolbarDirtyDot} aria-hidden />
-              <span aria-label={draftSaved ? "Saved as draft" : "Unsaved changes"}>
-                {draftSaved ? "Saved as draft" : "Modified"}
-              </span>
-            </>
-          ) : null}
-        </div>
-        <div className={styles.segment} role="tablist" aria-label="Markdown view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mdMode === "preview"}
-            className={
-              mdMode === "preview"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setMdMode("preview")}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mdMode === "render-everything"}
-            className={
-              mdMode === "render-everything"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setMdMode("render-everything")}
-          >
-            Render Everything
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mdMode === "raw"}
-            className={
-              mdMode === "raw"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setMdMode("raw")}
-          >
-            Markdown
-          </button>
-        </div>
-      </div>
-      <div className={bodyCls}>
-        {mdMode === "preview" ? (
+    <EditableFilePanel
+      ref={ref}
+      dataSource={dataSource}
+      filePath={filePath}
+      content={content}
+      onFileUpdated={onFileUpdated}
+      activeMode={mdMode}
+      onModeChange={(mode) => setMdMode(mode as MdViewMode)}
+      modes={[
+        { value: "preview", label: "Preview" },
+        { value: "render-everything", label: "Render Everything" },
+        { value: "raw", label: "Markdown" },
+      ]}
+      ariaLabel="Markdown view"
+      mobileLayout={mobileLayout}
+    >
+      {({ draft, saving, setDraft }) =>
+        mdMode === "preview" ? (
           <MarkdownView content={draft} />
         ) : mdMode === "render-everything" ? (
           <RenderEverythingView content={draft} ext=".md" />
@@ -246,9 +282,9 @@ const MarkdownFilePanel = forwardRef<
             readOnly={saving}
             ariaLabel={`Markdown source, ${filePath}`}
           />
-        )}
-      </div>
-    </div>
+        )
+      }
+    </EditableFilePanel>
   );
 });
 
@@ -267,166 +303,27 @@ const JsonFilePanel = forwardRef<
   ref,
 ) {
   const [jsonMode, setJsonMode] = useState<JsonViewMode>("preview");
-  const [draft, setDraft] = useState(content);
-  const [savedContent, setSavedContent] = useState(content);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [draftSaved, setDraftSaved] = useState(false);
-
-  const localKey = `valuator.draft.${dataSource}.${filePath}`;
-  const draftRestoredRef = useRef(false);
-
-  useEffect(() => {
-    if (draftRestoredRef.current) {
-      // A localStorage draft is active — only track what the server has, don't overwrite local edits
-      setSavedContent(content);
-      return;
-    }
-    setDraft(content);
-    setSavedContent(content);
-  }, [content]);
-
-  // Restore draft from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem(localKey);
-    if (stored !== null && stored !== content) {
-      setDraft(stored);
-      setDraftSaved(true);
-      draftRestoredRef.current = true;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const dirty = draft !== savedContent;
-
-  const persist = useCallback(async () => {
-    if (draft === savedContent || saving) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const updated = await saveFile(filePath, dataSource, draft);
-      setSavedContent(updated.content);
-      setDraftSaved(false);
-      localStorage.removeItem(localKey);
-      draftRestoredRef.current = false;
-      onFileUpdated(updated);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
-
-  // 1s debounce save to localStorage; reset draftSaved immediately on each draft change
-  useEffect(() => {
-    setDraftSaved(false);
-    const id = setTimeout(() => {
-      localStorage.setItem(localKey, draft);
-      setDraftSaved(true);
-    }, 1000);
-    return () => clearTimeout(id);
-  }, [draft, localKey]);
-
-  // Save to localStorage immediately on unmount (captures last edits when switching tabs)
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const savedContentRef = useRef(savedContent);
-  savedContentRef.current = savedContent;
-  useEffect(() => {
-    return () => {
-      if (draftRef.current !== savedContentRef.current) {
-        localStorage.setItem(localKey, draftRef.current);
-      }
-    };
-  }, [localKey]);
-
-  // 30s API auto-save interval
-  useEffect(() => {
-    const id = setInterval(() => void persist(), 30_000);
-    return () => clearInterval(id);
-  }, [persist]);
-
-  useImperativeHandle(ref, () => ({ persist, dirty }), [persist, dirty]);
-
-  const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
-  const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
 
   return (
-    <div className={rootCls}>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarStatus} aria-live="polite">
-          {saveError ? (
-            <span className={styles.toolbarError} title={saveError}>
-              {saveError}
-            </span>
-          ) : saving ? (
-            <span>Saving…</span>
-          ) : dirty ? (
-            <>
-              <span className={styles.toolbarDirtyDot} aria-hidden />
-              <span aria-label={draftSaved ? "Saved as draft" : "Unsaved changes"}>
-                {draftSaved ? "Saved as draft" : "Modified"}
-              </span>
-            </>
-          ) : null}
-        </div>
-        <div className={styles.segment} role="tablist" aria-label="JSON view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "preview"}
-            className={
-              jsonMode === "preview"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("preview")}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "markdown-style"}
-            className={
-              jsonMode === "markdown-style"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("markdown-style")}
-          >
-            Markdown-style
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "render-everything"}
-            className={
-              jsonMode === "render-everything"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("render-everything")}
-          >
-            Render Everything
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={jsonMode === "raw"}
-            className={
-              jsonMode === "raw"
-                ? `${styles.segmentBtn} ${styles.segmentBtnActive}`
-                : styles.segmentBtn
-            }
-            onClick={() => setJsonMode("raw")}
-          >
-            Raw
-          </button>
-        </div>
-      </div>
-      <div className={bodyCls}>
-        {jsonMode === "preview" ? (
+    <EditableFilePanel
+      ref={ref}
+      dataSource={dataSource}
+      filePath={filePath}
+      content={content}
+      onFileUpdated={onFileUpdated}
+      activeMode={jsonMode}
+      onModeChange={(mode) => setJsonMode(mode as JsonViewMode)}
+      modes={[
+        { value: "preview", label: "Preview" },
+        { value: "markdown-style", label: "Markdown-style" },
+        { value: "render-everything", label: "Render Everything" },
+        { value: "raw", label: "Raw" },
+      ]}
+      ariaLabel="JSON view"
+      mobileLayout={mobileLayout}
+    >
+      {({ draft, saving, setDraft }) =>
+        jsonMode === "preview" ? (
           <JsonTreeView content={draft} ext={ext} />
         ) : jsonMode === "markdown-style" ? (
           <JsonMarkdownStyleView content={draft} ext={ext} />
@@ -439,9 +336,9 @@ const JsonFilePanel = forwardRef<
             readOnly={saving}
             ariaLabel={`JSON source, ${filePath}`}
           />
-        )}
-      </div>
-    </div>
+        )
+      }
+    </EditableFilePanel>
   );
 });
 

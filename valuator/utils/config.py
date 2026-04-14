@@ -22,6 +22,8 @@ DEFAULT_OPENROUTER_AUTO_ALLOWED_MODELS = (
     "deepseek/deepseek-v3.2",
     "moonshotai/kimi-k2.5",
 )
+DEFAULT_WEB_SEARCH_PROVIDER = "perplexity"
+WEB_SEARCH_PROVIDER_NAMES = ("perplexity", "tavily")
 
 
 def resolve_llm_model_name(value: str, *, openrouter_backend: bool) -> str:
@@ -72,7 +74,9 @@ class Config:
     openrouter_auto_allowed_models: tuple[str, ...]
     opendart_api_key: str | None
     perplexity_api_key: str | None
+    tavily_api_key: str | None
     supported_models: tuple[str, ...]
+    web_search_provider: str
     log_level: str
     mongodb_enabled: bool
     mongodb_uri: str | None
@@ -90,6 +94,7 @@ class Config:
     agent_llm_retry_base_delay: float
     web_search_retry_count: int
     web_search_retry_base_delay: float
+    web_search_rag_exclude_broker_research: bool
 
 
 def normalize_supported_models(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -141,6 +146,13 @@ def load_config() -> Config:
     )
     if llm_backend not in {"google_genai", "openrouter"}:
         raise ValueError("LLM_BACKEND must be one of: google_genai, openrouter")
+    web_search_provider = (
+        read_env("WEB_SEARCH_PROVIDER", DEFAULT_WEB_SEARCH_PROVIDER)
+        or DEFAULT_WEB_SEARCH_PROVIDER
+    ).strip().lower()
+    if web_search_provider not in WEB_SEARCH_PROVIDER_NAMES:
+        allowed = ", ".join(WEB_SEARCH_PROVIDER_NAMES)
+        raise ValueError(f"WEB_SEARCH_PROVIDER must be one of: {allowed}")
     openrouter_api_key = read_env("OPENROUTER_API_KEY")
     openrouter_enabled = llm_backend == "openrouter" and bool(openrouter_api_key)
 
@@ -191,7 +203,9 @@ def load_config() -> Config:
         or DEFAULT_OPENROUTER_AUTO_ALLOWED_MODELS,
         opendart_api_key=read_env("OPENDART_API_KEY"),
         perplexity_api_key=read_env("PPLX_API_KEY"),
+        tavily_api_key=read_env("TAVILY_API_KEY"),
         supported_models=supported,
+        web_search_provider=web_search_provider,
         log_level=(read_env("LOG_LEVEL", "INFO") or "INFO").upper(),
         mongodb_enabled=_as_bool(read_env("MONGODB_ENABLED"), default=False),
         mongodb_uri=read_env("MONGODB_URI"),
@@ -224,6 +238,9 @@ def load_config() -> Config:
         web_search_retry_count=_as_int(read_env("WEB_SEARCH_RETRY_COUNT"), default=2),
         web_search_retry_base_delay=_as_float(
             read_env("WEB_SEARCH_RETRY_BASE_DELAY"), default=2.0
+        ),
+        web_search_rag_exclude_broker_research=_as_bool(
+            read_env("WEB_SEARCH_RAG_EXCLUDE_BROKER_RESEARCH"), default=True
         ),
     )
 

@@ -6,7 +6,7 @@
 
 | 도구 | 용도 | 입력 (Schema) | 출력 |
 | :--- | :--- | :--- | :--- |
-| **PerplexitySearchTool** | 실시간 웹 검색 | `query: str` | 검색 결과 텍스트 |
+| **WebSearchTool** | 실시간 웹 검색 | `query: str`, `search_intent: str` | 검색 결과 텍스트 |
 | **YFinanceBalanceSheetTool** | 기업 재무 데이터 조회 | `ticker: str` | 잔액표(JSON) |
 | **SECTool** | 미국 증시 공시 문서 조회 | `ticker: str`, `form_type: str` | 10-K, 8-K 등 원문 |
 | **ExecuteCodeTool** | 파이썬 코드 실행 | `code: str` | 실행 결과 (Stdout) |
@@ -42,28 +42,32 @@ class Tool(ABC):
         """도구의 실제 비즈니스 로직 실행"""
 ```
 
-### 구현 예시: PerplexitySearchTool
+### 구현 예시: WebSearchTool
 ```python
-class PerplexitySearchTool(Tool):
+class WebSearchTool(Tool):
     @property
     def name(self) -> str:
-        return "web_search"
+        return "web_search_tool"
     
     def get_spec(self) -> ToolSpec:
         return ToolSpec(
-            name="web_search",
+            name="web_search_tool",
             description="검색 쿼리로 최신 웹 정보를 검색합니다.",
             input_schema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "검색어"},
+                    "search_intent": {
+                        "type": "string",
+                        "enum": ["general", "deep", "financial"],
+                    },
                 },
                 "required": ["query"],
             },
         )
     
-    async def execute(self, query: str) -> str:
-        response = await self._api_client.search(query)
+    async def execute(self, query: str, search_intent: str = "general") -> str:
+        response = await self.provider.search(query, intent=search_intent)
         return response.text
 ```
 
@@ -84,7 +88,7 @@ def create_tool_registry(model: str, usage_writer=None):
     
     # 레지스트리에 도구 일괄 등록
     tools_to_register = [
-        PerplexitySearchTool(),
+        WebSearchTool(provider=create_web_search_provider()),
         code_tool,
         YFinanceBalanceSheetTool(),
         SECTool(model=model),

@@ -40,7 +40,6 @@ export default function TaskTreeOutline({
   selectedDirectoryPath,
   outlineChatTick,
   outlineFolderEnsureTick,
-  rootEntries,
 }: {
   dataSource: DataSource;
   enabled: boolean;

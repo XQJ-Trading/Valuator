@@ -99,7 +99,7 @@ def build_system_prompt(
     lines.extend(
         [
             "",
-            "Use web_search_tool with search_mode='sec' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
+            "Use web_search_tool with search_intent='financial' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
             "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
             "Prefer WAIT over inventing missing facts.",
@@ -117,6 +117,9 @@ def build_system_prompt(
             "  - 비용 구조: SBC, CapEx, 영업 레버리지",
             "  - 경쟁 포지셔닝: 동종업체 비교, 시장 점유율, 상대 멀티플",
             "  - 매출 세분화: 제품/지역별, 부문별 성장률",
+            "  - 재무·현금흐름 리스크: 레버리지, 유동성, 이자·부채 만기, FCF 전환·품질",
+            "  - 지배구조·거버넌스 리스크: 통제·의결권, 이사회 독립성, 특수관계자·이해상충",
+            "  - 하방·전이: 규제·매크로·경쟁 충격이 손익·현금흐름으로 이어지는 경로와 주요 downside 촉매",
         ]
     )
     if task.last_tool_success is True:
@@ -269,7 +272,7 @@ def build_step_prompt(
         req_lines = [f"  {req.id}: {req.acceptance}" for req in requirements]
         sections.append(("[REQUIREMENTS]", "\n".join(req_lines)))
     if Action.FINALIZE in allowed_actions and ctx.child_outputs:
-        sections.append(("[FINALIZE_GUIDANCE]", finalize_guidance_text()))
+        sections.append(("[FINALIZE_GUIDANCE]", finalize_guidance_text(ctx)))
 
     sections.append(("[AVAILABLE_TOOLS]", available_tools_text(ctx)))
     sections.append(("", "Return valid JSON only."))
@@ -301,14 +304,15 @@ def build_step_prompt(
     return prompt
 
 
-def finalize_guidance_text() -> str:
+def finalize_guidance_text(ctx: TaskContext) -> str:
+    as_of = ctx.as_of_utc.strip() or "(unknown)"
     return "\n".join(
         [
             "Child outputs are your structured data layer. FINALIZE must deliver a trading- and investment-actionable conclusion first, then layered evidence.",
             "",
             "[PRIORITY — TRADING / INVESTMENT DECISION FIRST]",
-            "- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_utc, only when child outputs support it; otherwise state uncertainty explicitly.",
-            "- Near the top, include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
+            f"- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_utc={as_of}, only when child outputs support it; otherwise state uncertainty explicitly.",
+            f"- Near the top (as_of_utc={as_of}), include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
             "- Do not lead with DCF alone or end on intrinsic value only. DCF/fair value is supporting evidence, not the sole headline.",
             "",
             "[DATA PRESERVATION]",
@@ -332,7 +336,7 @@ def finalize_guidance_text() -> str:
             "[INFORMATION GAPS — investment impact]",
             "- For each gap, state what investment conclusion it blocks or weakens.",
             "- Distinguish between gaps that are resolvable (with more data) and structural unknowns.",
-            "- facts_only, unverified, data gap, could not verify 성격의 정보는 확정 사실처럼 쓰지 마라.",
+            "- facts_only, unverified, data gap, grounded=false, could not verify 성격의 정보는 확정 사실로 쓰지 마라.",
             "",
             "[TEMPORAL SEPARATION]",
             "- Separate historical facts, current assessment, and future scenarios into distinct sentences or sections.",
@@ -352,7 +356,7 @@ def finalize_guidance_text() -> str:
             "- 충족 불가한 항목은 [INFORMATION GAPS]에서 사유와 투자 판단에 미치는 영향을 명시하라.",
             "- 섹션 구조는 분석 흐름에 따라 자유롭게 구성하라 (requirement별 섹션 강제 아님).",
             "",
-            "Be comprehensive — length is not a constraint.",
+            "Be comprehensive — Soften the overall tone and simplify the language while maintaining the original meaning.",
             "Write the final report markdown in Korean.",
         ]
     )

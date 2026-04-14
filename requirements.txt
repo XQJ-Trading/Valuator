@@ -18,3 +18,4 @@ yfinance>=0.2.40
 pandas>=2.0.0
 scipy>=1.11.0
 langchain-perplexity >= 0.1.1
+tavily-python>=0.5.0

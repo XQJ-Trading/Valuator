@@ -14,6 +14,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
+from valuator.tools.web_search_providers import available_web_search_providers
+from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES
+
 from .auth import register_session
 from .session_viewer_api import session_data_root
 
@@ -128,7 +131,11 @@ async def _clear_and_broadcast_reset(session_id: str) -> dict:
     return event
 
 
-async def _run_agent_for_message(session_id: str, text: str) -> None:
+async def _run_agent_for_message(
+    session_id: str,
+    text: str,
+    web_search_provider: str | None = None,
+) -> None:
     process: asyncio.subprocess.Process | None = None
 
     _PROGRESS_PREFIXES = (
@@ -149,11 +156,16 @@ async def _run_agent_for_message(session_id: str, text: str) -> None:
 
     await _broadcast(session_id, {"type": "agent_started", "ts": _utc_now_iso()})
     try:
-        process = await asyncio.create_subprocess_exec(
+        command = [
             sys.executable,
             str(AGENT_ENTRYPOINT),
             "--query",
             text,
+        ]
+        if web_search_provider:
+            command.extend(["--web-search-provider", web_search_provider])
+        process = await asyncio.create_subprocess_exec(
+            *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -234,6 +246,7 @@ async def _run_agent_for_message(session_id: str, text: str) -> None:
 
 class PostChatMessageRequest(BaseModel):
     text: str
+    web_search_provider: str | None = None
 
     @field_validator("text")
     @classmethod
@@ -244,6 +257,19 @@ class PostChatMessageRequest(BaseModel):
         if len(stripped) > MAX_TEXT_LEN:
             raise ValueError("text too long")
         return stripped
+
+    @field_validator("web_search_provider")
+    @classmethod
+    def validate_web_search_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        selected = value.strip().lower()
+        if not selected:
+            return None
+        if selected not in WEB_SEARCH_PROVIDER_NAMES:
+            allowed = ", ".join(WEB_SEARCH_PROVIDER_NAMES)
+            raise ValueError(f"web_search_provider must be one of: {allowed}")
+        return selected
 
 
 @router.get("/messages")
@@ -266,9 +292,20 @@ async def post_message(body: PostChatMessageRequest, session_id: uuid.UUID):
             text=body.text,
         )
         _agent_tasks[session_key] = asyncio.create_task(
-            _run_agent_for_message(session_key, body.text)
+            _run_agent_for_message(
+                session_key,
+                body.text,
+                body.web_search_provider,
+            )
         )
     return msg
+
+
+@router.get("/web-search-providers")
+async def get_web_search_providers() -> dict[str, object]:
+    return {
+        "available": available_web_search_providers(),
+    }
 
 
 async def _stop_running_agent(session_id: str) -> bool:

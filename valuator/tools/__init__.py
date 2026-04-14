@@ -10,7 +10,7 @@ from importlib import import_module
 __all__ = [
     "ExecuteCodeTool",
     "OpenDartFinancialTool",
-    "PerplexitySearchTool",
+    "WebSearchTool",
     "SECTool",
     "YFinanceBalanceSheetTool",
     "TOOL_SPECS",
@@ -21,7 +21,7 @@ __all__ = [
 _LAZY_EXPORTS = {
     "ExecuteCodeTool": (".code_execute_tool", "ExecuteCodeTool"),
     "OpenDartFinancialTool": (".opendart_financial_tool", "OpenDartFinancialTool"),
-    "PerplexitySearchTool": (".web_search_tool", "PerplexitySearchTool"),
+    "WebSearchTool": (".web_search_tool", "WebSearchTool"),
     "SECTool": (".sec_tool", "SECTool"),
     "YFinanceBalanceSheetTool": (".yfinance_tool", "YFinanceBalanceSheetTool"),
     "TOOL_SPECS": (".specs", "TOOL_SPECS"),

@@ -24,6 +24,7 @@ from valuator.session.browse_tree import (  # noqa: E402
     to_slug,
 )
 from valuator.utils.config import session_files_root  # noqa: E402
+from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
 from valuator.utils.time_utils import Measurement  # noqa: E402
 from valuator.core.types import EventType  # noqa: E402
@@ -66,6 +67,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Maximum number of ready tasks processed per round. Defaults to project config.",
+    )
+    parser.add_argument(
+        "--web-search-provider",
+        choices=WEB_SEARCH_PROVIDER_NAMES,
+        default=None,
+        help="Override web search backend. Defaults to WEB_SEARCH_PROVIDER / project config.",
     )
     parser.add_argument(
         "--show-query",
@@ -361,6 +368,7 @@ async def run(args: argparse.Namespace) -> int:
             tool_registry = create_tool_registry(
                 model,
                 usage_writer=trace_writer,
+                web_search_provider=args.web_search_provider,
             )
 
             agent = Agent(

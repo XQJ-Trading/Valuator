@@ -100,11 +100,11 @@ async def test_step_planner_salvages_tool_request_embedded_in_reason() -> None:
     llm = ScriptedLLM(
         [
             {
-                "action": "execute",
-                "reason": (
-                    "Search current market data.\n"
-                    '{"tool_name":"web_search_tool","args":{"query":"Amazon '
-                    'competitive strategy","search_mode":"web"}}'
+                    "action": "execute",
+                    "reason": (
+                        "Search current market data.\n"
+                        '{"tool_name":"web_search_tool","args":{"query":"Amazon '
+                    'competitive strategy","search_intent":"general"}}'
                 ),
             }
         ]
@@ -123,12 +123,12 @@ async def test_step_planner_salvages_tool_request_embedded_in_reason() -> None:
     assert decision.tool_request.tool_name == "web_search_tool"
     assert decision.tool_request.args == {
         "query": "Amazon competitive strategy",
-        "search_mode": "web",
+        "search_intent": "general",
     }
 
 
 @pytest.mark.asyncio
-async def test_step_planner_falls_back_invalid_web_search_mode_to_web() -> None:
+async def test_step_planner_falls_back_invalid_web_search_intent_to_general() -> None:
     llm = ScriptedLLM(
         [
             {
@@ -137,7 +137,7 @@ async def test_step_planner_falls_back_invalid_web_search_mode_to_web() -> None:
                     "tool_name": "web_search_tool",
                     "args": {
                         "query": "Amazon competitive strategy",
-                        "search_mode": "general",
+                        "search_intent": "web",
                     },
                 },
             },
@@ -156,7 +156,7 @@ async def test_step_planner_falls_back_invalid_web_search_mode_to_web() -> None:
     assert decision.tool_request is not None
     assert decision.tool_request.args == {
         "query": "Amazon competitive strategy",
-        "search_mode": "web",
+        "search_intent": "general",
     }
     assert len(llm.calls) == 1
 

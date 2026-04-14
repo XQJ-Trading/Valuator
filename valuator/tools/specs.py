@@ -101,9 +101,9 @@ class ToolSpec:
             if (
                 selected is None
                 and self.name == "web_search_tool"
-                and key == "search_mode"
+                and key == "search_intent"
             ):
-                selected = "web"
+                selected = "general"
             if selected is None and isinstance(value, str):
                 selected = value.strip().lower()
             if selected not in choices:
@@ -120,18 +120,21 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "web_search_tool": ToolSpec(
         name="web_search_tool",
         required=("query",),
-        optional=("search_mode",),
-        arg_choices={"search_mode": ("web", "academic", "sec")},
-        capability="web/academic/sec grounded search",
+        optional=("search_intent",),
+        arg_choices={"search_intent": ("general", "deep", "financial")},
+        capability="general/deep/financial grounded search",
         llm_required=(),
         schema_extra_keys=("queries",),
         param_descriptions={
             "query": "Search query for current web information",
-            "search_mode": "Perplexity search corpus to query",
+            "search_intent": "Provider-neutral web search intent",
             "queries": "Parallel search queries",
         },
         param_properties={
-            "search_mode": {"type": "string", "enum": ["web", "academic", "sec"]},
+            "search_intent": {
+                "type": "string",
+                "enum": ["general", "deep", "financial"],
+            },
             "queries": {"type": "array", "items": {"type": "string"}},
         },
     ),

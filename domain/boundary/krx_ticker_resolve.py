@@ -11,6 +11,7 @@ from typing import Any
 
 import requests
 
+from valuator.utils.hangul_fuzzy_key import jamo_fuzzy_key
 from domain.company import Listing, ListingSeed, normalized_name_key
 from valuator.utils.config import get_opendart_api_key
 
@@ -125,17 +126,18 @@ def _match_by_exact_name(
 
 
 def _match_by_fuzzy_name(
-    records: list[dict[str, str]], key: str
+    records: list[dict[str, str]], surface_form: str
 ) -> dict[str, Any] | None:
-    if not key:
+    query_key = jamo_fuzzy_key(surface_form)
+    if not query_key:
         return None
     best_score = 0.0
     best_rows: list[dict[str, Any]] = []
     for record in records:
-        candidate_key = normalized_name_key(record.get("corp_name", ""))
+        candidate_key = jamo_fuzzy_key(record.get("corp_name", ""))
         if not candidate_key:
             continue
-        score = SequenceMatcher(None, key, candidate_key).ratio()
+        score = SequenceMatcher(None, query_key, candidate_key).ratio()
         if score < _FUZZY_THRESHOLD:
             continue
         if score > best_score:
@@ -163,7 +165,7 @@ def resolve_krx_corp_record(surface_form: str) -> dict[str, str] | None:
     if record is not None:
         return record
 
-    record = _match_by_fuzzy_name(records, key)
+    record = _match_by_fuzzy_name(records, surface)
     if record is not None:
         return record
 

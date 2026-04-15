@@ -16,6 +16,7 @@ from valuator.utils.config import ROOT_DIR
 from valuator.utils.time_utils import kst_isoformat
 
 from .browse_tree import build_browse_tree
+from .citation_links import apply_citation_links_to_tool_payload
 from .markdown import (
     render_final_markdown,
     strip_markdown_title,
@@ -216,8 +217,14 @@ class ValuatorSessionStore:
             result_json_path = task_dir / "result.json"
             meta_path = task_dir / "result.md.meta.json"
 
+            display_payload = (
+                apply_citation_links_to_tool_payload(result.result, result.metadata)
+                if result.success
+                else result.result
+            )
+
             domain_summary = ""
-            if isinstance(result.result, dict):
+            if isinstance(display_payload, dict):
                 for key in (
                     "domain_summary",
                     "summary",
@@ -225,15 +232,15 @@ class ValuatorSessionStore:
                     "result",
                     "content",
                 ):
-                    candidate = result.result.get(key)
+                    candidate = display_payload.get(key)
                     if isinstance(candidate, str) and candidate.strip():
                         domain_summary = candidate.strip()
                         break
-            elif isinstance(result.result, str) and result.result.strip():
-                domain_summary = result.result.strip()
+            elif isinstance(display_payload, str) and display_payload.strip():
+                domain_summary = display_payload.strip()
 
             self._write_text(
-                result_path, artifact_text(result.result, result.error)
+                result_path, artifact_text(display_payload, result.error)
             )
             self._write_json(
                 result_json_path,

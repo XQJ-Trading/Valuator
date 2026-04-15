@@ -20,21 +20,14 @@ def _strip_fs_invalid(text: str) -> str:
     return s or "unknown"
 
 
-def primary_ticker_corp_segment(analysis: QueryAnalysis) -> str:
+def primary_company_name_segment(analysis: QueryAnalysis) -> str:
     subjects = analysis.query_intent.subjects
     if not subjects:
         return ""
-    subj = subjects[0]
-    corp = (subj.company.company_name or "").strip()
-    ticker = ""
-    if subj.listing is not None:
-        ticker = (subj.listing.security_code or "").strip()
-        if not ticker:
-            ticker = (subj.listing.yahoo_symbol or "").strip()
-    if not ticker:
-        ticker = "NA"
-    raw = f"{ticker}({corp})" if corp else ticker
-    return _strip_fs_invalid(raw)
+    name = (subjects[0].company.company_name or "").strip()
+    if not name:
+        return ""
+    return _strip_fs_invalid(name)
 
 
 def build_unique_root_session_id(
@@ -44,7 +37,7 @@ def build_unique_root_session_id(
     root: Path,
 ) -> str:
     ts = created_at_kst.astimezone(KST).strftime("%Y%m%d-%H%M")
-    segment = primary_ticker_corp_segment(analysis)
+    segment = primary_company_name_segment(analysis)
     if not segment:
         segment = to_slug(raw_query, max_length=48) or "query"
     if len(segment) > 120:

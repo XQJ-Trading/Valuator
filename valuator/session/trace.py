@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from valuator.utils.config import session_files_root
 from valuator.utils.llm_usage import LLMUsageWriter, TokenUsage
-from valuator.utils.time_utils import compact_utc_timestamp, utc_isoformat
+from valuator.utils.time_utils import compact_kst_timestamp, kst_isoformat
 
 from .trace_markdown import timeline_summary, write_task_markdown
 
@@ -136,7 +136,7 @@ class SessionTraceWriter:
         self._global_step_index = 0
         self._event_index = 0
         self._llm_call_index = 0
-        session_started_at = utc_isoformat(created_at)
+        session_started_at = kst_isoformat(created_at)
 
         for path in (
             self.session_dir,
@@ -203,7 +203,7 @@ class SessionTraceWriter:
             self._event_index += 1
             payload = {
                 "sequence": self._event_index,
-                "timestamp": utc_isoformat(),
+                "timestamp": kst_isoformat(),
                 **json_ready(dict(event)),
             }
             self._append_jsonl(self.events_path, payload)
@@ -229,7 +229,7 @@ class SessionTraceWriter:
                 "method": method,
                 "status": status,
                 "summary": summary,
-                "started_at": utc_isoformat(started_at) if started_at else None,
+                "started_at": kst_isoformat(started_at) if started_at else None,
                 "duration_ms": (
                     round(duration_ms, 3) if duration_ms is not None else None
                 ),
@@ -263,7 +263,7 @@ class SessionTraceWriter:
         with self._lock:
             self._global_step_index += 1
             global_seq = self._global_step_index
-            timestamp = utc_isoformat(started_at)
+            timestamp = kst_isoformat(started_at)
             task_dir = self._task_dir(task_id)
             steps_path = self._task_steps_path(task_id)
             steps_path.parent.mkdir(parents=True, exist_ok=True)
@@ -340,7 +340,7 @@ class SessionTraceWriter:
                 "session_id": self.session_id,
                 "llm_call_index": self._llm_call_index,
                 "started_at": started_at,
-                "timestamp": compact_utc_timestamp(started_at),
+                "timestamp": compact_kst_timestamp(started_at),
                 "trace_method": trace_method,
                 "task_id": task_id,
                 "model": model,

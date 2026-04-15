@@ -152,7 +152,7 @@ class Scheduler:
                 task.output = decision.output
                 temporal = (
                     summarize_temporal_contract(
-                        as_of_utc=ctx.as_of_utc,
+                        as_of_kst=ctx.as_of_kst,
                         units=ctx.query_units,
                     )
                     if ctx is not None
@@ -165,7 +165,7 @@ class Scheduler:
                         fact_value,
                         task.id,
                         grounded=grounded,
-                        as_of_utc=ctx.as_of_utc if ctx is not None else "",
+                        as_of_kst=ctx.as_of_kst if ctx is not None else "",
                         time_scope=temporal.time_scope if temporal is not None else "",
                         target_start=(
                             temporal.target_start if temporal is not None else ""

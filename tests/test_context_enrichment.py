@@ -13,7 +13,7 @@ def test_enrich_web_search_injects_temporal_contract() -> None:
         task_id="t",
         description="d",
         step_count=0,
-        as_of_utc="2026-03-30T00:00:00Z",
+        as_of_kst="2026-03-30T09:00:00+09:00",
         shared=SharedStateView({}, []),
         query_units=[
             QueryUnit(
@@ -33,7 +33,7 @@ def test_enrich_web_search_injects_temporal_contract() -> None:
         ),
         ctx=ctx,
     )
-    assert req.args["as_of_utc"] == "2026-03-30T00:00:00Z"
+    assert req.args["as_of_kst"] == "2026-03-30T09:00:00+09:00"
     assert req.args["time_scope"] == "historical"
     assert req.args["target_start"] == "2020-01-01"
     assert req.args["target_end"] == "2023-12-31"

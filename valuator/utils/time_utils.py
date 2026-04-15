@@ -1,33 +1,43 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone as dt_timezone
 from time import perf_counter
+from zoneinfo import ZoneInfo
+
+KST = ZoneInfo("Asia/Seoul")
 
 
-def utc_isoformat(value: datetime | str | None = None) -> str:
+def kst_isoformat(value: datetime | str | None = None) -> str:
     if isinstance(value, str):
-        if value.endswith("Z"):
+        s = value.strip()
+        if not s:
             return value
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return value
-        return utc_isoformat(parsed)
+        if s.endswith("Z"):
+            parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            try:
+                parsed = datetime.fromisoformat(s)
+            except ValueError:
+                return value
+        return kst_isoformat(parsed)
 
     if value is None:
-        value = datetime.now(timezone.utc)
+        dt = datetime.now(KST)
     elif value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        dt = value.replace(tzinfo=dt_timezone.utc)
     else:
-        value = value.astimezone(timezone.utc)
-    return value.isoformat().replace("+00:00", "Z")
+        dt = value
+    return dt.astimezone(KST).isoformat(timespec="milliseconds")
 
 
-def compact_utc_timestamp(value: datetime | str | None = None) -> str:
-    text = utc_isoformat(value)
-    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    return parsed.strftime("%Y%m%d_%H%M%S_%f")
+def compact_kst_timestamp(value: datetime | str | None = None) -> str:
+    text = kst_isoformat(value)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return "".join(ch for ch in text if ch.isdigit())[:20]
+    return parsed.astimezone(KST).strftime("%Y%m%d_%H%M%S_%f")
 
 
 @dataclass(frozen=True)
@@ -37,7 +47,7 @@ class Measurement:
 
     @classmethod
     def start(cls) -> Measurement:
-        return cls(started_at=utc_isoformat(), started_perf=perf_counter())
+        return cls(started_at=kst_isoformat(), started_perf=perf_counter())
 
     def latency_seconds(self) -> float:
         return perf_counter() - self.started_perf

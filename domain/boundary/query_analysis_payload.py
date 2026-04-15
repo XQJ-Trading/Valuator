@@ -54,13 +54,13 @@ class QueryUnitPayload(BaseModel):
     @model_validator(mode="after")
     def _normalize_temporal_bounds(self, info: ValidationInfo) -> "QueryUnitPayload":
         ctx = info.context or {}
-        as_of = ctx.get("as_of_utc")
+        as_of = ctx.get("as_of_kst")
         as_of_s = as_of if isinstance(as_of, str) else None
         self.target_start = normalize_target_date_token(
-            self.target_start, as_of_utc=as_of_s
+            self.target_start, as_of_kst=as_of_s
         )
         self.target_end = normalize_target_date_token(
-            self.target_end, as_of_utc=as_of_s
+            self.target_end, as_of_kst=as_of_s
         )
         return self
 
@@ -369,9 +369,9 @@ def _build_query_analysis(
     *,
     query: str,
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
-    as_of_utc: str = "",
+    as_of_kst: str = "",
 ) -> QueryAnalysis:
-    validation_ctx = {"as_of_utc": as_of_utc} if as_of_utc.strip() else None
+    validation_ctx = {"as_of_kst": as_of_kst} if as_of_kst.strip() else None
     raw = QueryAnalysisPayload.model_validate(payload, context=validation_ctx)
     query_intent = _build_query_intent(
         raw.query_intent,
@@ -392,7 +392,7 @@ def _build_query_analysis(
         unit_count=len(units),
     )
     return QueryAnalysis(
-        as_of_utc=as_of_utc,
+        as_of_kst=as_of_kst,
         query_intent=query_intent,
         entities=entities,
         units=units,

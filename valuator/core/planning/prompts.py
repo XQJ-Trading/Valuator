@@ -22,18 +22,18 @@ def build_system_prompt(
     allowed = set(allowed_actions)
     root_only = "yes" if task.parent_id is None else "no"
     temporal = summarize_temporal_contract(
-        as_of_utc=ctx.as_of_utc,
+        as_of_kst=ctx.as_of_kst,
         units=ctx.query_units,
     )
-    as_of_utc = temporal.as_of_utc or "(unknown)"
+    as_of_kst = temporal.as_of_kst or "(unknown)"
     lines = [
-        f"As-of UTC timestamp: {as_of_utc}",
+        f"As-of KST timestamp: {as_of_kst}",
         "",
         "You are the step function of a recursive valuation agent.",
         "Write markdown in Korean for output and facts. Keep numbers, tickers, proper nouns, and quotes as in sources.",
         "Return JSON for the next step. Fill only the structural fields needed for the next transition.",
         "Do not include action. The runtime infers the transition from tool_request, children, wait_for, output, or facts.",
-        "Treat [QUERY_UNITS] as the execution contract. Preserve as_of_utc and target period exactly.",
+        "Treat [QUERY_UNITS] as the execution contract. Preserve as_of_kst and target period exactly.",
         "",
     ]
     if Action.EXECUTE in allowed:
@@ -101,7 +101,7 @@ def build_system_prompt(
             "",
             "Use web_search_tool with search_intent='financial' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
             "Use sec_tool only for extracting data from a specific year's 10-K.",
-            "For web_search_tool, pass query only; the runtime will inject as_of_utc/time_scope/target period.",
+            "For web_search_tool, pass query only; the runtime will inject as_of_kst/time_scope/target period.",
             "Prefer WAIT over inventing missing facts.",
             "",
             "[REQUIREMENTS]는 분석이 충족해야 할 조건이다.",
@@ -297,14 +297,14 @@ def build_step_prompt(
 
 
 def finalize_guidance_text(ctx: TaskContext) -> str:
-    as_of = ctx.as_of_utc.strip() or "(unknown)"
+    as_of = ctx.as_of_kst.strip() or "(unknown)"
     return "\n".join(
         [
             "Child outputs are your structured data layer. FINALIZE must deliver a trading- and investment-actionable conclusion first, then layered evidence.",
             "",
             "[PRIORITY — TRADING / INVESTMENT DECISION FIRST]",
-            f"- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_utc={as_of}, only when child outputs support it; otherwise state uncertainty explicitly.",
-            f"- Near the top (as_of_utc={as_of}), include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
+            f"- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_kst={as_of}, only when child outputs support it; otherwise state uncertainty explicitly.",
+            f"- Near the top (as_of_kst={as_of}), include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
             "- Do not lead with DCF alone or end on intrinsic value only. DCF/fair value is supporting evidence, not the sole headline.",
             "",
             "[DATA PRESERVATION]",
@@ -332,7 +332,7 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
             "",
             "[TEMPORAL SEPARATION]",
             "- Separate historical facts, current assessment, and future scenarios into distinct sentences or sections.",
-            "- Use absolute dates: historical claims should stay inside the target period, and current claims should be anchored to as_of_utc.",
+            "- Use absolute dates: historical claims should stay inside the target period, and current claims should be anchored to as_of_kst.",
             "- grounded=false or unverified information must remain uncertainty, not present-tense fact.",
             "",
             "[SCENARIOS — BULL / BASE / BEAR + TRADING HOOKS]",
@@ -419,10 +419,10 @@ def requirements_for_task(ctx: TaskContext) -> list[Any]:
 
 def temporal_contract_text(ctx: TaskContext) -> str:
     temporal = summarize_temporal_contract(
-        as_of_utc=ctx.as_of_utc,
+        as_of_kst=ctx.as_of_kst,
         units=ctx.query_units,
     )
-    lines = [f"as_of_utc={temporal.as_of_utc or '(unknown)'}"]
+    lines = [f"as_of_kst={temporal.as_of_kst or '(unknown)'}"]
     if temporal.time_scope:
         lines.append(f"time_scope={temporal.time_scope}")
     if temporal.target_start or temporal.target_end:

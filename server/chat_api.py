@@ -6,7 +6,6 @@ import signal
 import sys
 import uuid
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +15,7 @@ from pydantic import BaseModel, field_validator
 
 from valuator.tools.web_search_providers import available_web_search_providers
 from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES
+from valuator.utils.time_utils import kst_isoformat
 
 from .auth import register_session
 from .session_viewer_api import session_data_root
@@ -35,8 +35,8 @@ _agent_tasks: dict[str, asyncio.Task[None]] = {}
 _agent_lock = asyncio.Lock()
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _kst_now_iso() -> str:
+    return kst_isoformat()
 
 
 def _chat_file(session_id: str) -> Path:
@@ -113,7 +113,7 @@ async def _append_and_broadcast_message(*, session_id: str, role: str, text: str
         "id": str(uuid.uuid4()),
         "role": role,
         "text": text,
-        "ts": _utc_now_iso(),
+        "ts": _kst_now_iso(),
     }
     async with _lock:
         messages = _load_messages(session_id)
@@ -124,7 +124,7 @@ async def _append_and_broadcast_message(*, session_id: str, role: str, text: str
 
 
 async def _clear_and_broadcast_reset(session_id: str) -> dict:
-    event = {"type": "reset", "ts": _utc_now_iso()}
+    event = {"type": "reset", "ts": _kst_now_iso()}
     async with _lock:
         _save_messages(session_id, [])
     await _broadcast(session_id, event)
@@ -154,7 +154,7 @@ async def _run_agent_for_message(
         if stripped.startswith(_PROGRESS_PREFIXES):
             await _broadcast(session_id, {"type": "task_progress", "line": stripped})
 
-    await _broadcast(session_id, {"type": "agent_started", "ts": _utc_now_iso()})
+    await _broadcast(session_id, {"type": "agent_started", "ts": _kst_now_iso()})
     try:
         command = [
             sys.executable,
@@ -241,7 +241,7 @@ async def _run_agent_for_message(
                 _agent_processes.pop(session_id, None)
             if current_task is not None and _agent_tasks.get(session_id) is current_task:
                 _agent_tasks.pop(session_id, None)
-        await _broadcast(session_id, {"type": "agent_finished", "ts": _utc_now_iso()})
+        await _broadcast(session_id, {"type": "agent_finished", "ts": _kst_now_iso()})
 
 
 class PostChatMessageRequest(BaseModel):

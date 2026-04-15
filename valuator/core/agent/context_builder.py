@@ -26,7 +26,7 @@ def build_task_context(
         task_id=task.id,
         description=task.description,
         step_count=task.step_count,
-        as_of_utc=analysis.as_of_utc,
+        as_of_kst=analysis.as_of_kst,
         tool_results=list(task.tool_results),
         child_outputs=dict(task.child_outputs),
         current_children=[
@@ -122,11 +122,11 @@ def query_units_for_task(*, task: Task, analysis: QueryAnalysis) -> list[QueryUn
 def enrich_tool_request(*, tool_request: Any, ctx: TaskContext) -> ToolRequest:
     args = dict(tool_request.args)
     temporal = summarize_temporal_contract(
-        as_of_utc=ctx.as_of_utc,
+        as_of_kst=ctx.as_of_kst,
         units=ctx.query_units,
     )
     if tool_request.tool_name == "web_search_tool":
-        for key in ("as_of_utc", "time_scope", "target_start", "target_end"):
+        for key in ("as_of_kst", "time_scope", "target_start", "target_end"):
             value = getattr(temporal, key)
             if value:
                 args.setdefault(key, value)

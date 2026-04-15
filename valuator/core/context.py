@@ -23,7 +23,7 @@ class TaskContext:
     task_id: str
     description: str
     step_count: int
-    as_of_utc: str = ""
+    as_of_kst: str = ""
     tool_results: list[ToolResult] = field(default_factory=list)
     child_outputs: dict[str, Any] = field(default_factory=dict)
     current_children: list[TaskSummary] = field(default_factory=list)

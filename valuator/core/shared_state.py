@@ -10,7 +10,7 @@ class Fact:
     value: Any
     source_task_id: str
     grounded: bool = False
-    as_of_utc: str = ""
+    as_of_kst: str = ""
     time_scope: str = ""
     target_start: str = ""
     target_end: str = ""
@@ -49,7 +49,7 @@ class SharedState:
         source_task_id: str,
         *,
         grounded: bool = False,
-        as_of_utc: str = "",
+        as_of_kst: str = "",
         time_scope: str = "",
         target_start: str = "",
         target_end: str = "",
@@ -60,7 +60,7 @@ class SharedState:
             value=value,
             source_task_id=source_task_id,
             grounded=grounded,
-            as_of_utc=as_of_utc,
+            as_of_kst=as_of_kst,
             time_scope=time_scope,
             target_start=target_start,
             target_end=target_end,

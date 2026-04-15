@@ -12,7 +12,7 @@ from domain.boundary.query_analysis_payload import (
 
 def test_merge_ticker_enrichment_appends_tickers_and_canonical_names() -> None:
     payload = {
-        "as_of_utc": "2026-01-01T00:00:00Z",
+        "as_of_kst": "2026-01-01T09:00:00+09:00",
         "query_intent": {
             "company_names": ["플래닝랩스"],
             "tickers": [],

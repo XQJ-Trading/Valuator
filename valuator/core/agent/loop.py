@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from domain.query import QueryAnalysis
 from valuator.tools.base import ToolRegistry
-from valuator.utils.time_utils import Measurement, utc_isoformat
+from valuator.utils.time_utils import Measurement, kst_isoformat
 
 from ..context import TaskContext
 from ..decomposition import DecompositionCritic, GateConfig, GateController
@@ -402,7 +402,7 @@ class Agent:
         assert decision.tool_request is not None
         task.last_tool_request = decision.tool_request
         self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
-        tool_started_at = utc_isoformat()
+        tool_started_at = kst_isoformat()
         started = perf_counter()
         result = await self._tools.execute_tool(
             decision.tool_request.tool_name,

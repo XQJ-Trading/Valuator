@@ -179,6 +179,7 @@ async def test_run_writes_cli_trace_files(
         thinking_level="high",
         max_steps=1,
         concurrency=1,
+        web_search_provider=None,
         show_query=False,
         dump_analysis=False,
         jsonl_events=False,

@@ -32,7 +32,7 @@ def is_concrete_subject_kind(kind: str) -> bool:
 
 @dataclass(slots=True)
 class TemporalContract:
-    as_of_utc: str = ""
+    as_of_kst: str = ""
     time_scope: str = ""
     target_start: str = ""
     target_end: str = ""
@@ -92,7 +92,7 @@ class QueryAnalysis:
     participation derived from ``QueryUnit.entity_ids``.
     """
 
-    as_of_utc: str = ""
+    as_of_kst: str = ""
     query_intent: QueryIntent = field(default_factory=lambda: QueryIntent(query=""))
     entities: dict[str, str] = field(default_factory=dict)
     units: list[QueryUnit] = field(default_factory=list)
@@ -174,11 +174,11 @@ def build_query_breakdown(analysis: QueryAnalysis) -> QueryBreakdown:
 
 def summarize_temporal_contract(
     *,
-    as_of_utc: str,
+    as_of_kst: str,
     units: list[QueryUnit],
 ) -> TemporalContract:
     if not units:
-        return TemporalContract(as_of_utc=as_of_utc)
+        return TemporalContract(as_of_kst=as_of_kst)
 
     scopes = list(dict.fromkeys(unit.time_scope for unit in units if unit.time_scope))
     starts = list(
@@ -195,7 +195,7 @@ def summarize_temporal_contract(
         target_end = ""
 
     return TemporalContract(
-        as_of_utc=as_of_utc,
+        as_of_kst=as_of_kst,
         time_scope=time_scope,
         target_start=target_start,
         target_end=target_end,

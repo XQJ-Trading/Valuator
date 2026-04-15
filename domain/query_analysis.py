@@ -87,7 +87,7 @@ class QueryAnalyzer:
         self,
         *,
         query: str,
-        as_of_utc: str = "",
+        as_of_kst: str = "",
     ) -> QueryAnalysis:
         payload = await self.client.generate_json(
             prompt=_analysis_prompt(query=query),
@@ -99,5 +99,5 @@ class QueryAnalyzer:
             payload,
             query=query,
             on_miss=self._on_miss,
-            as_of_utc=as_of_utc,
+            as_of_kst=as_of_kst,
         )

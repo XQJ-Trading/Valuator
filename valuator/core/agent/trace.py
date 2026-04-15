@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from valuator.utils.time_utils import utc_isoformat
+from valuator.utils.time_utils import kst_isoformat
 
 from ..context import TaskContext, TaskSummary
 from ..task import Task
@@ -125,7 +125,7 @@ def log_task_result(
         status=status,
         action=action,
         summary=summary,
-        started_at=utc_isoformat(),
+        started_at=kst_isoformat(),
         duration_ms=0.0,
         input_payload=task_runtime_payload(task),
         result_payload={

@@ -14,12 +14,12 @@ async def analyze_query(
     intent: QueryIntent,
     analyzer: QueryAnalyzer | None = None,
     *,
-    as_of_utc: str = "",
+    as_of_kst: str = "",
 ) -> tuple[QueryIntent, QueryAnalysis]:
     _analyzer = analyzer or QueryAnalyzer(on_miss=combined_on_miss)
     analysis = await _analyzer.analyze(
         query=intent.query or "",
-        as_of_utc=as_of_utc,
+        as_of_kst=as_of_kst,
     )
 
     analyzed_intent = analysis.query_intent
@@ -53,12 +53,12 @@ class DomainRouter:
         self,
         intent: QueryIntent,
         *,
-        as_of_utc: str = "",
+        as_of_kst: str = "",
     ) -> tuple[QueryIntent, QueryAnalysis]:
         return await analyze_query(
             intent,
             self._analyzer,
-            as_of_utc=as_of_utc,
+            as_of_kst=as_of_kst,
         )
 
 

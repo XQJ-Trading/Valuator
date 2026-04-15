@@ -126,7 +126,6 @@ class WebSearchTool(ReActBaseTool):
                     result={
                         "query": query,
                         "findings": result.answer,
-                        "sources": result.sources,
                     },
                     metadata={
                         "search_type": f"{self.provider.name}_web",
@@ -134,6 +133,7 @@ class WebSearchTool(ReActBaseTool):
                         "search_intent": intent,
                         "usage": result.usage_meta,
                         "effective_query": effective_query,
+                        "sources": result.sources,
                     },
                 )
             except Exception as exc:

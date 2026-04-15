@@ -59,7 +59,9 @@ async def test_perplexity_provider_maps_financial_intent_to_sec(
         self._SystemMessage = _Message
         return chat
 
-    monkeypatch.setattr(config_module, "config", SimpleNamespace(perplexity_api_key="test-key"))
+    monkeypatch.setattr(
+        config_module, "config", SimpleNamespace(perplexity_api_key="test-key")
+    )
     monkeypatch.setattr(module.PerplexityProvider, "_init_client", fake_init_client)
 
     provider = PerplexityProvider()
@@ -80,8 +82,12 @@ async def test_tavily_provider_maps_deep_intent_to_advanced_general(
     from valuator.tools import web_search_providers as module
 
     client = _FakeTavilyClient()
-    monkeypatch.setattr(config_module, "config", SimpleNamespace(tavily_api_key="test-key"))
-    monkeypatch.setattr(module.TavilyProvider, "_init_client", lambda self, api_key: client)
+    monkeypatch.setattr(
+        config_module, "config", SimpleNamespace(tavily_api_key="test-key")
+    )
+    monkeypatch.setattr(
+        module.TavilyProvider, "_init_client", lambda self, api_key: client
+    )
 
     provider = TavilyProvider()
     result = await provider.search("market share", intent="deep")
@@ -93,6 +99,37 @@ async def test_tavily_provider_maps_deep_intent_to_advanced_general(
     assert client.calls[0]["search_depth"] == "advanced"
     assert client.calls[0]["chunks_per_source"] == 3
     assert client.calls[0]["time_range"] == "month"
+
+
+@pytest.mark.asyncio
+async def test_tavily_provider_truncates_duplicate_sources_heading_from_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_module = importlib.import_module("valuator.utils.config")
+    from valuator.tools import web_search_providers as module
+
+    class _Client:
+        async def search(self, **kwargs):
+            return {
+                "answer": (
+                    "본문입니다.\n\n## sources\n\n"
+                    "- https://duplicate.example/from-prose"
+                ),
+                "results": [{"url": "https://structured.example", "content": "c"}],
+            }
+
+    monkeypatch.setattr(
+        config_module, "config", SimpleNamespace(tavily_api_key="test-key")
+    )
+    monkeypatch.setattr(
+        module.TavilyProvider, "_init_client", lambda self, api_key: _Client()
+    )
+
+    provider = TavilyProvider()
+    result = await provider.search("q", intent="general")
+
+    assert result.answer == "본문입니다."
+    assert result.sources == ["https://structured.example"]
 
 
 @pytest.mark.asyncio
@@ -120,8 +157,12 @@ async def test_tavily_provider_sorts_by_published_date_when_present(
                 ],
             }
 
-    monkeypatch.setattr(config_module, "config", SimpleNamespace(tavily_api_key="test-key"))
-    monkeypatch.setattr(module.TavilyProvider, "_init_client", lambda self, api_key: _Client())
+    monkeypatch.setattr(
+        config_module, "config", SimpleNamespace(tavily_api_key="test-key")
+    )
+    monkeypatch.setattr(
+        module.TavilyProvider, "_init_client", lambda self, api_key: _Client()
+    )
 
     provider = TavilyProvider()
     result = await provider.search("q", intent="general")
@@ -167,6 +208,8 @@ async def test_web_search_tool_appends_rag_source_policy_by_default(
 
     assert result.success is True
     assert result.metadata["search_intent"] == "general"
+    assert result.result == {"query": "Samsung revenue", "findings": "answer"}
+    assert result.metadata["sources"] == ["https://example.com"]
     assert RAG_SOURCE_POLICY_MARKER in calls[0]["query"]
     assert "sell-side" in calls[0]["query"].lower()
 

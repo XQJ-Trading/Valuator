@@ -39,7 +39,6 @@ def build_task_context(
                     if child.state is TaskState.DONE
                     else None
                 ),
-                artifacts=dict(child.artifacts),
             )
             for child in task.children()
         ],
@@ -70,7 +69,6 @@ def build_ancestry(*, task: Task, scheduler: Scheduler) -> list[TaskSummary]:
                     if parent.state is TaskState.DONE
                     else None
                 ),
-                artifacts=dict(parent.artifacts),
             )
         )
         parent_id = parent.parent_id
@@ -93,7 +91,6 @@ def build_siblings(*, task: Task, scheduler: Scheduler) -> dict[str, TaskSummary
                 if sibling.state is TaskState.DONE
                 else None
             ),
-            artifacts=dict(sibling.artifacts),
         )
         for sibling in parent.children()
         if sibling.id != task.id

@@ -757,7 +757,7 @@ async def test_step_planner_drops_low_priority_sections_before_child_outputs() -
 
 
 @pytest.mark.asyncio
-async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval() -> None:
+async def test_step_planner_prompt_excludes_artifact_refs_and_keeps_results() -> None:
     llm = ScriptedLLM(
         [
             {
@@ -790,10 +790,6 @@ async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval()
                 description="existing child",
                 state=TaskState.DONE,
                 output={"summary": "finished"},
-                artifacts={
-                    "aggregation_report_path": "aggregation/report.md",
-                    "aggregation_raw_results_path": "aggregation/raw_results.json",
-                },
             )
         ],
         shared=SharedStateView({}, []),
@@ -805,10 +801,11 @@ async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval()
     await planner.decide(task, ctx)
 
     prompt = llm.calls[0]["prompt"]
-    assert "[LAST_TOOL_RESULT_ARTIFACTS]" in prompt
-    assert "execution_result_path=execution/result.md" in prompt
-    assert "[OUTPUT_ARTIFACTS]" in prompt
-    assert "aggregation_report_path=aggregation/report.md" in prompt
+    assert "[LAST_TOOL_RESULT]" in prompt
+    assert "| A | B |" in prompt
+    assert "root.0: done - existing child" in prompt
+    assert "execution/result.md" not in prompt
+    assert "aggregation/report.md" not in prompt
 
 
 @pytest.mark.asyncio

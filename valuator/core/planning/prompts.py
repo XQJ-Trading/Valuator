@@ -200,9 +200,6 @@ def build_step_prompt(
                 f"success={latest.success}\n{render_prompt_value(latest.result)}",
             )
         )
-        last_tool_artifacts = render_artifact_refs(latest.metadata.get("artifacts"))
-        if last_tool_artifacts:
-            sections.append(("[LAST_TOOL_RESULT_ARTIFACTS]", last_tool_artifacts))
     if task.last_tool_request is not None:
         sections.append(
             (
@@ -237,9 +234,6 @@ def build_step_prompt(
                     + "\nSome children failed. Aggregate available results and note gaps.",
                 )
             )
-    output_artifacts = output_artifact_blocks(ctx)
-    if output_artifacts:
-        sections.append(("[OUTPUT_ARTIFACTS]", output_artifacts))
     if ctx.shared.facts:
         fact_lines = [
             shared_fact_line(key=key, fact=fact)
@@ -290,8 +284,6 @@ def build_step_prompt(
         "[LAST_TOOL_REQUEST]",
         "[BLOCKED_TOOLS]",
         "[PREVIOUS_REJECTION]",
-        "[OUTPUT_ARTIFACTS]",
-        "[LAST_TOOL_RESULT_ARTIFACTS]",
         "[FINALIZE_GUIDANCE]",
     ):
         filtered = [section for section in sections if section[0] != title]
@@ -502,9 +494,6 @@ def task_summary_line(summary: TaskSummary) -> str:
     line = f"{summary.id}: {summary.state.value} - {summary.description}"
     if summary.output is not None:
         line += f" | output={render_prompt_value(summary.output)}"
-    artifact_refs = render_artifact_refs(summary.artifacts)
-    if artifact_refs:
-        line += f" | artifacts={artifact_refs.replace(chr(10), '; ')}"
     return line
 
 
@@ -546,28 +535,3 @@ def render_prompt_value(value: Any, heading_level: int = 2) -> str:
                 lines.extend([f"{'#' * heading_level} Item {index}", "", rendered, ""])
         return "\n".join(lines).strip()
     return str(value).strip()
-
-
-def render_artifact_refs(artifacts: Any) -> str:
-    if not isinstance(artifacts, Mapping):
-        return ""
-    lines = [
-        f"{key}={value}"
-        for key, value in artifacts.items()
-        if value is not None and str(value).strip()
-    ]
-    return "\n".join(lines)
-
-
-def output_artifact_blocks(ctx: TaskContext) -> str:
-    blocks: list[str] = []
-    seen: set[str] = set()
-    related = [*ctx.current_children, *ctx.siblings.values(), *ctx.ancestry]
-    for summary in related:
-        if summary.id in seen:
-            continue
-        seen.add(summary.id)
-        artifact_refs = render_artifact_refs(summary.artifacts)
-        if artifact_refs:
-            blocks.append(f"{summary.id}\n{artifact_refs}")
-    return "\n\n".join(blocks)

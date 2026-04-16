@@ -25,24 +25,14 @@ class GateConfig:
     static_weight: float = 0.4
     critic_weight: float = 0.6
 
-
-def validate_gate_config(
-    *,
-    accept_bound: float,
-    reject_bound: float,
-    static_weight: float,
-    critic_weight: float,
-    max_depth: int,
-    max_children: int,
-    **_ignored: float,
-) -> None:
-    if accept_bound <= reject_bound:
-        raise ValueError("decomposition gate requires accept_bound > reject_bound")
-    if static_weight + critic_weight <= 0:
-        raise ValueError(
-            "decomposition gate requires static_weight + critic_weight > 0"
-        )
-    if max_depth < 1:
-        raise ValueError("decomposition gate requires max_depth >= 1")
-    if max_children < 2:
-        raise ValueError("decomposition gate requires max_children >= 2")
+    def __post_init__(self) -> None:
+        if self.accept_bound <= self.reject_bound:
+            raise ValueError("decomposition gate requires accept_bound > reject_bound")
+        if self.static_weight + self.critic_weight <= 0:
+            raise ValueError(
+                "decomposition gate requires static_weight + critic_weight > 0"
+            )
+        if self.max_depth < 1:
+            raise ValueError("decomposition gate requires max_depth >= 1")
+        if self.max_children < 2:
+            raise ValueError("decomposition gate requires max_children >= 2")

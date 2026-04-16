@@ -22,6 +22,13 @@ from valuator.core.task import AtomicTask, ComplexTask
 from valuator.core.types import TaskSpec, TaskState
 
 
+def test_gate_config_rejects_invalid_combinations() -> None:
+    with pytest.raises(ValueError, match="accept_bound"):
+        GateConfig(accept_bound=-0.5, reject_bound=-0.45)
+    with pytest.raises(ValueError, match="max_depth"):
+        GateConfig(max_depth=0, max_children=8)
+
+
 def test_depth_cost_matches_spec_curve() -> None:
     assert depth_cost(0, 4) == pytest.approx(0.0)
     assert depth_cost(1, 4) == pytest.approx(0.00390625)
@@ -64,7 +71,7 @@ def test_pre_filter_returns_reject_with_unresolvable_children() -> None:
             TaskSpec(description="beta"),
         ],
         max_steps_per_task=10,
-        config=GateConfig(reject_bound=-0.05),
+        config=GateConfig(reject_bound=-0.05, max_children=8),
     )
 
     assert result.verdict is FilterVerdict.REJECT

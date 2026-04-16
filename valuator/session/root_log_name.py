@@ -20,7 +20,30 @@ def _strip_fs_invalid(text: str) -> str:
     return s or "unknown"
 
 
+def _is_six_digit_numeric_label(value: str) -> bool:
+    """Unit entity values that are only a 6-digit code are tickers, not display names."""
+    s = value.strip()
+    return len(s) == 6 and s.isdigit()
+
+
+def _segment_from_unit_entities(analysis: QueryAnalysis) -> str:
+    """Prefer labels bound to plan units (same graph as QueryUnit.entity_ids)."""
+    for unit in analysis.units:
+        for eid in unit.entity_ids:
+            raw = (analysis.entities.get(eid) or "").strip()
+            if not raw or _is_six_digit_numeric_label(raw):
+                continue
+            cleaned = _strip_fs_invalid(raw)
+            if cleaned == "unknown":
+                continue
+            return cleaned
+    return ""
+
+
 def primary_company_name_segment(analysis: QueryAnalysis) -> str:
+    from_units = _segment_from_unit_entities(analysis)
+    if from_units:
+        return from_units
     subjects = analysis.query_intent.subjects
     if not subjects:
         return ""

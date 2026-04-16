@@ -11,6 +11,14 @@ from ..context import TaskContext, TaskSummary
 from ..task import Task
 from ..types import Action, TaskState
 
+_TEMPORAL_ARG_KEYS = frozenset(
+    {"as_of_kst", "time_scope", "target_start", "target_end"}
+)
+
+
+def _compact_tool_args_for_prompt(args: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in args.items() if k not in _TEMPORAL_ARG_KEYS}
+
 
 def build_system_prompt(
     *,
@@ -87,6 +95,8 @@ def build_system_prompt(
                 "  - child output에 status='facts_only'가 있거나 미검증/공백이 표시되면, 그 불확실성을 유지하라.",
                 "  - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.",
                 "  - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.",
+                "  - [CONFLICTS]가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.",
+                "  - 동일 신뢰도에서 값이 다르면 [INFORMATION GAPS]로 분류하라.",
             ]
         )
     if Action.FINALIZE in allowed:
@@ -127,8 +137,13 @@ def build_system_prompt(
         ]
     )
     if task.last_tool_success is True:
-        lines.append(
-            "This task already has a successful tool result. You must not return EXECUTE."
+        lines.extend(
+            [
+                "This task already has a successful tool result. You must not return EXECUTE.",
+                "Extract key numeric values from the tool result into the facts dict as key-value pairs.",
+                "Use keys of the form '{company}:{metric}:{fiscal_period}'.",
+                "Put interpretation and context in output; keep facts to numbers (and minimal labels) only.",
+            ]
         )
     elif task.last_tool_success is False and Action.EXECUTE in allowed:
         lines.append(
@@ -207,15 +222,14 @@ def build_step_prompt(
             )
         )
     if task.last_tool_request is not None:
+        compact_args = _compact_tool_args_for_prompt(task.last_tool_request.args)
         sections.append(
             (
                 "[LAST_TOOL_REQUEST]",
                 f"{task.last_tool_request.tool_name}\n"
-                f"{render_prompt_value(task.last_tool_request.args)}",
+                f"{render_prompt_value(compact_args)}",
             )
         )
-    if task.last_tool_success is not None:
-        sections.append(("[LAST_TOOL_SUCCESS]", str(task.last_tool_success)))
     if ctx.child_outputs:
         child_blocks = [
             f"{child_id}\n{render_prompt_value(output)}"
@@ -247,7 +261,7 @@ def build_step_prompt(
         ]
         sections.append(("[SHARED_FACTS]", "\n".join(fact_lines)))
     if ctx.evidence:
-        sections.append(("[EVIDENCE]", evidence_text(ctx)))
+        sections.append(("[EVIDENCE]", evidence_text(ctx, task_id=task.id)))
     if ctx.shared.conflicts:
         conflict_lines = [
             f"{conflict.key}:\n"
@@ -259,16 +273,6 @@ def build_step_prompt(
     subject_text = subject_context_text(ctx)
     if subject_text:
         sections.append(("[SUBJECTS]", subject_text))
-    if ctx.siblings:
-        sibling_lines = [
-            task_summary_line(summary) for summary in ctx.siblings.values()
-        ]
-        sections.append(("[SIBLINGS]", "\n".join(sibling_lines)))
-    if ctx.ancestry:
-        sections.append(
-            ("[ANCESTRY]", " -> ".join(summary.id for summary in ctx.ancestry))
-        )
-
     requirements = requirements_for_task(ctx)
     if requirements:
         req_lines = [f"  {req.id}: {req.acceptance}" for req in requirements]
@@ -276,7 +280,14 @@ def build_step_prompt(
     if Action.FINALIZE in allowed_actions and ctx.child_outputs:
         sections.append(("[FINALIZE_GUIDANCE]", finalize_guidance_text(ctx)))
 
-    sections.append(("[AVAILABLE_TOOLS]", available_tools_text(ctx)))
+    sections.append(
+        (
+            "[AVAILABLE_TOOLS]",
+            available_tools_text(
+                ctx, compact=Action.EXECUTE not in allowed_actions
+            ),
+        )
+    )
     sections.append(("", "Return valid JSON only."))
     prompt = render_sections(sections)
     if len(prompt) <= max_prompt_chars:
@@ -284,10 +295,10 @@ def build_step_prompt(
 
     for title in (
         "[AVAILABLE_TOOLS]",
+        "[EVIDENCE]",
+        "[SUBJECTS]",
         "[FAILED_CHILDREN]",
         "[CURRENT_CHILDREN]",
-        "[SIBLINGS]",
-        "[ANCESTRY]",
         "[CONFLICTS]",
         "[LAST_TOOL_REQUEST]",
         "[FAILED_ATTEMPTS]",
@@ -363,9 +374,11 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
     )
 
 
-def available_tools_text(ctx: TaskContext) -> str:
+def available_tools_text(ctx: TaskContext, *, compact: bool = False) -> str:
     if not ctx.available_tools:
         return "(none)"
+    if compact:
+        return ", ".join(ctx.available_tools)
     lines: list[str] = []
     for tool_name in ctx.available_tools:
         try:
@@ -418,12 +431,11 @@ def requirements_for_task(ctx: TaskContext) -> list[Any]:
         for index, unit in enumerate(ctx.query_analysis.units)
         if unit in ctx.query_units
     }
-    requirements = [
+    return [
         requirement
         for requirement in ctx.query_analysis.requirements
         if relevant_unit_ids.intersection(requirement.unit_ids)
     ]
-    return requirements or list(ctx.query_analysis.requirements)
 
 
 def temporal_contract_text(ctx: TaskContext) -> str:
@@ -450,30 +462,17 @@ def query_units_text(task: Task, ctx: TaskContext) -> str:
             continue
         if unit not in ctx.query_units and ctx.query_units:
             continue
-        lines.append(
-            f"{index}: id={unit.id}; objective={unit.objective}; "
-            f"retrieval_query={unit.retrieval_query}; "
-            f"time_scope={unit.time_scope or '(none)'}; "
-            f"target_start={unit.target_start or '(none)'}; "
-            f"target_end={unit.target_end or '(none)'}"
-        )
+        lines.append(f"{index}: {unit.objective}")
     return "\n".join(lines) or "(none)"
 
 
 def shared_fact_line(*, key: str, fact: Any) -> str:
-    meta = [f"from {fact.source_task_id}", f"grounded={fact.grounded}"]
-    if fact.time_scope:
-        meta.append(f"time_scope={fact.time_scope}")
-    if fact.target_start or fact.target_end:
-        meta.append(
-            "target=" f"{fact.target_start or '(open)'}..{fact.target_end or '(open)'}"
-        )
-    if fact.source_urls:
-        meta.append(f"sources={len(fact.source_urls)}")
-    return f"{key}: {render_prompt_value(fact.value)} ({', '.join(meta)})"
+    return f"{key}: {render_prompt_value(fact.value)}"
 
 
-def evidence_text(ctx: TaskContext, *, max_items: int = 20) -> str:
+def evidence_text(
+    ctx: TaskContext, *, task_id: str, max_items: int = 8
+) -> str:
     grouped = [
         row
         for status in ("satisfied", "failed", "empty")
@@ -481,21 +480,20 @@ def evidence_text(ctx: TaskContext, *, max_items: int = 20) -> str:
         if row.status == status
     ]
     selected = grouped[:max_items]
-    lines = [evidence_line(row) for row in selected]
+    lines = [evidence_line(row, current_task_id=task_id) for row in selected]
     remaining = len(grouped) - len(selected)
     if remaining > 0:
         lines.append(f"... and {remaining} more evidence rows")
     return "\n".join(lines)
 
 
-def evidence_line(row: Any) -> str:
-    args_text = ", ".join(
-        f"{key}={json_arg(row.stable_args[key])}" for key in sorted(row.stable_args)
-    )
+def evidence_line(row: Any, *, current_task_id: str = "") -> str:
+    args = _compact_tool_args_for_prompt(row.stable_args)
+    args_text = ", ".join(f"{key}={json_arg(args[key])}" for key in sorted(args))
     line = f"{row.tool_name}({args_text}): {row.status}"
     if row.value_summary:
         line += f' - "{row.value_summary}"'
-    if row.task_id:
+    if row.task_id and row.task_id != current_task_id:
         line += f" [task={row.task_id}]"
     return line
 

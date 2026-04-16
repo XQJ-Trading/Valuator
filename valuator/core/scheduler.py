@@ -164,6 +164,7 @@ class Scheduler:
                         key,
                         fact_value,
                         task.id,
+                        query_unit_ids=tuple(task.query_unit_ids),
                         grounded=grounded,
                         as_of_kst=ctx.as_of_kst if ctx is not None else "",
                         time_scope=temporal.time_scope if temporal is not None else "",

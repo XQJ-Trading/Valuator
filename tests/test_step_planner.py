@@ -439,8 +439,7 @@ async def test_step_planner_prompt_includes_current_children_and_done_sibling_ou
     prompt = llm.calls[0]["prompt"]
     assert "[CURRENT_CHILDREN]" in prompt
     assert "root.0: waiting - existing child" in prompt
-    assert "[SIBLINGS]" in prompt
-    assert "- **summary**: finished" in prompt
+    assert "[SIBLINGS]" not in prompt
     assert "[THINKING_LEVEL]" not in llm.calls[0]["system_prompt"]
 
 
@@ -707,10 +706,12 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     prompt = llm.calls[0]["prompt"]
     system_prompt = llm.calls[0]["system_prompt"]
     assert "[QUERY_UNITS]" in prompt
+    assert "2024년 이란 상황 조사" in prompt
+    assert "[TEMPORAL_CONTRACT]" in prompt
     assert "time_scope=historical" in prompt
     assert "target_period=2024-01-01..2024-12-31" in prompt
-    assert "grounded=True" in prompt
-    assert "sources=1" in prompt
+    assert "iran_enrichment_level@2024-01-01:2024-12-31" in prompt
+    assert "60" in prompt
     assert "As-of KST timestamp: 2026-03-30T09:00:00+09:00" in system_prompt
 
 
@@ -864,7 +865,6 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
     await planner.decide(task, ctx)
 
     prompt = llm.calls[0]["prompt"]
-    system_prompt = llm.calls[0]["system_prompt"]
     assert "[SUBJECTS]" in prompt
     assert "company_name=삼성전자; exchange=KOSPI; corp=삼성전자; stock_code=005930; yahoo_symbol=005930.KS" in prompt
     assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt

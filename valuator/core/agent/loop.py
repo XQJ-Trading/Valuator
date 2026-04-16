@@ -21,7 +21,7 @@ from ..decomposition import (
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
-from ..task import AtomicTask, Task
+from ..task import Task
 from ..types import (
     Action,
     AgentEvent,
@@ -297,23 +297,6 @@ class Agent:
             evidence_session_id=self._evidence_session_id,
         )
         decision_measurement = Measurement.start()
-        if (
-            isinstance(task, AtomicTask)
-            and task.last_tool_success is True
-            and task.tool_results
-        ):
-            return (
-                ctx,
-                TaskDecision(
-                    action=Action.AGGREGATE,
-                    output=task.tool_results[-1].result,
-                    facts={},
-                    children=[],
-                ),
-                decision_measurement.started_at,
-                decision_measurement.latency_seconds() * 1000.0,
-            )
-
         try:
             decision = await task.step(ctx)
             if decision.action is Action.DECOMPOSE:
@@ -846,7 +829,12 @@ class Agent:
         output, facts = task.implicit_aggregate_payload()
         if facts:
             for key, value in facts.items():
-                self._shared.publish(key, value, source_task_id=task.id)
+                self._shared.publish(
+                    key,
+                    value,
+                    source_task_id=task.id,
+                    query_unit_ids=tuple(task.query_unit_ids),
+                )
         decision = TaskDecision(
             action=Action.FINALIZE,
             output=output,

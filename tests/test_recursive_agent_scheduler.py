@@ -460,6 +460,7 @@ def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
     assert "iran_enrichment_level" in view.facts
     fact = view.facts["iran_enrichment_level"]
     assert fact.value == 60
+    assert fact.query_unit_ids == (0,)
     assert fact.grounded is True
     assert fact.time_scope == "historical"
     assert fact.target_start == "2024-01-01"

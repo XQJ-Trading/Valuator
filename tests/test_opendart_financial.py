@@ -38,7 +38,7 @@ def test_fetch_opendart_financial_maps_response_and_caches(
     def fake_get(url: str, *, params: dict[str, str], timeout: int) -> FakeResponse:
         calls.append(params)
         assert url.endswith("fnlttSinglAcntAll.json")
-        assert timeout == 30
+        assert timeout == 5
         return FakeResponse()
 
     monkeypatch.setattr(

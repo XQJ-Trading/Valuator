@@ -173,6 +173,7 @@ def map_intent_to_task_decision(
     if intent.action is Action.EXECUTE:
         if not has_tool:
             raise _invalid_task_decision("execute action requires tool_request", raw_for_error)
+        _ensure_allowed(Action.EXECUTE)
         tr = intent.tool_request
         assert tr is not None
         return TaskDecision(
@@ -285,6 +286,7 @@ def map_intent_to_task_decision(
         )
 
     if has_tool:
+        _ensure_allowed(Action.EXECUTE)
         tr = intent.tool_request
         assert tr is not None
         return TaskDecision(

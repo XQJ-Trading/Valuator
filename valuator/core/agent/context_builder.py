@@ -39,7 +39,10 @@ def build_task_context(
                 state=child.state,
                 output=(
                     child.completion_payload()
-                    if child.state is TaskState.DONE
+                    if (
+                        child.state is TaskState.DONE
+                        and child.id not in task.child_outputs
+                    )
                     else None
                 ),
             )
@@ -47,13 +50,16 @@ def build_task_context(
         ],
         ancestry=build_ancestry(task=task, scheduler=scheduler),
         siblings=build_siblings(task=task, scheduler=scheduler),
-        shared=shared.view(),
+        shared=shared.view_for(
+            task_id=task.id,
+            query_unit_ids=task.query_unit_ids,
+        ),
         query=query,
         query_analysis=analysis,
         query_units=query_units,
         available_tools=analysis.allowed_tools or registered_tools(tools),
         evidence=(
-            evidence_store.list_for_session(evidence_session_id)
+            evidence_store.list_for_session_task(evidence_session_id, task.id)
             if evidence_store is not None and evidence_session_id
             else []
         ),

@@ -211,6 +211,54 @@ class SqliteEvidenceStore:
             ).fetchall()
         return [self._row_to_evidence(row) for row in rows]
 
+    def list_for_session_task(self, session_id: str, task_id: str) -> list[EvidenceRow]:
+        """Evidence rows for this task or its descendants; root sees the full session."""
+        with self._lock:
+            if task_id == "root":
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        session_id,
+                        tool_name,
+                        stable_args_hash,
+                        stable_args_json,
+                        status,
+                        value_summary,
+                        value_ref,
+                        task_id,
+                        unit_objective,
+                        created_at,
+                        updated_at
+                    FROM evidence
+                    WHERE session_id = ?
+                    ORDER BY updated_at DESC, tool_name ASC
+                    """,
+                    (session_id,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        session_id,
+                        tool_name,
+                        stable_args_hash,
+                        stable_args_json,
+                        status,
+                        value_summary,
+                        value_ref,
+                        task_id,
+                        unit_objective,
+                        created_at,
+                        updated_at
+                    FROM evidence
+                    WHERE session_id = ?
+                      AND (task_id = ? OR task_id LIKE ? || '.%')
+                    ORDER BY updated_at DESC, tool_name ASC
+                    """,
+                    (session_id, task_id, task_id),
+                ).fetchall()
+        return [self._row_to_evidence(row) for row in rows]
+
     @staticmethod
     def _row_to_evidence(row: sqlite3.Row) -> EvidenceRow:
         return EvidenceRow(

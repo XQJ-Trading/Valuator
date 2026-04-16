@@ -150,7 +150,7 @@ async def test_agent_run_decomposes_waits_and_finalizes() -> None:
     assert root.state is TaskState.DONE
     assert root.step_count == 3
     assert root.child_outputs == {
-        "root.0": {"findings": "value=alpha"},
+        "root.0": "alpha collected",
         "root.1": "alpha consumed",
     }
 
@@ -350,7 +350,8 @@ async def test_agent_blocks_duplicate_execute_after_successful_tool() -> None:
     child_calls = [
         call for call in llm.calls if call["trace_method"] == "agent.step.root.0"
     ]
-    assert len(child_calls) == 1
+    # After tool success: first LLM attempt returns invalid EXECUTE; repair retry returns AGGREGATE.
+    assert len(child_calls) == 3
 
 
 @pytest.mark.asyncio
@@ -870,7 +871,11 @@ async def test_agent_rejects_cross_task_duplicate_tool_request_from_evidence(tmp
                         "tool_name": "dummy_tool",
                         "args": {"value": "alpha"},
                     },
-                }
+                },
+                {
+                    "action": "aggregate",
+                    "output": "alpha collected once",
+                },
             ],
             "root.1": [
                 {

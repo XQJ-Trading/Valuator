@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from valuator.core.shared_state import SharedState
 from valuator.core.task import Task
 from valuator.core.types import ToolResult
 from valuator.utils.config import ROOT_DIR
@@ -502,6 +503,17 @@ class ValuatorSessionStore:
 
     def _rel(self, path: Path) -> str:
         return str(path.relative_to(self.session_dir))
+
+    def write_shared_facts(self, shared: SharedState) -> None:
+        view = shared.view()
+        payload = {
+            "facts": {
+                key: asdict(fact) for key, fact in view.facts.items()
+            },
+            "conflicts": [asdict(c) for c in view.conflicts],
+            "exposures": [asdict(e) for e in shared.exposures],
+        }
+        self._write_json(self.session_dir / "shared_facts.json", payload)
 
     @staticmethod
     def _args_hash(args: dict[str, Any]) -> str:

@@ -79,10 +79,17 @@ def _is_relevant(
     return False
 
 
+@dataclass(frozen=True)
+class FactExposure:
+    task_id: str
+    fact_keys: tuple[str, ...]
+
+
 class SharedState:
     def __init__(self) -> None:
         self._facts: dict[str, Fact] = {}
         self._conflicts: list[Conflict] = []
+        self._exposures: list[FactExposure] = []
 
     def publish(
         self,
@@ -128,6 +135,10 @@ class SharedState:
     def conflict_count(self) -> int:
         return len(self._conflicts)
 
+    @property
+    def exposures(self) -> list[FactExposure]:
+        return list(self._exposures)
+
     def view(self) -> SharedStateView:
         return SharedStateView(
             facts=dict(self._facts),
@@ -141,6 +152,9 @@ class SharedState:
         query_unit_ids: list[int],
     ) -> SharedStateView:
         if task_id == "root":
+            exposed_keys = tuple(self._facts.keys())
+            if exposed_keys:
+                self._exposures.append(FactExposure(task_id=task_id, fact_keys=exposed_keys))
             return SharedStateView(
                 facts=dict(self._facts),
                 conflicts=list(self._conflicts),
@@ -151,4 +165,6 @@ class SharedState:
             for k, f in self._facts.items()
             if _is_relevant(f, task_id=task_id, unit_set=unit_set)
         }
+        if relevant:
+            self._exposures.append(FactExposure(task_id=task_id, fact_keys=tuple(relevant.keys())))
         return SharedStateView(facts=relevant, conflicts=list(self._conflicts))

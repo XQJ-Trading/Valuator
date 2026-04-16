@@ -198,6 +198,8 @@ class Agent:
         final_root = self._scheduler.get_task(root_task.id) or root_task
         if final_root.state is TaskState.FAILED:
             raise RuntimeError(f"root task failed: {final_root.error}")
+        if self._session_store is not None:
+            self._session_store.write_shared_facts(self._shared)
         return final_root.completion_payload()
 
     async def _step_one(self, task: Task, query: str) -> None:

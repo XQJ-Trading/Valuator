@@ -14,7 +14,7 @@ from .gate_config import GateConfig
 from .types import DecompositionOutcome, FilterVerdict, GateDecision
 
 
-class GateController:
+class MCTSGateController:
     def __init__(
         self,
         *,
@@ -43,9 +43,6 @@ class GateController:
         decision: TaskDecision,
         ctx: TaskContext,
     ) -> TaskDecision:
-        if not self._config.enabled:
-            return decision
-
         threshold = self._tracker.current_threshold()
         filter_result = pre_filter(
             task_depth=len(ctx.ancestry),

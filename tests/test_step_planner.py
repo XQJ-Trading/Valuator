@@ -10,8 +10,9 @@ from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.shared_state import Fact, SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, TaskState, ToolResult
+from valuator.core.types import Action, FailedAttempt, TaskState, ToolResult
 from valuator.core.task import AtomicTask, ComplexTask
+from valuator.evidence import EvidenceRow
 
 
 class ScriptedLLM:
@@ -869,3 +870,73 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
     assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
     assert "opendart_financial_tool: args=corp, year, fs_div?" in prompt
     assert "Korean issuer only." in prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    task.failed_attempts = [
+        FailedAttempt(
+            tool_name="web_search_tool",
+            args={"query": "LS전선 경쟁사"},
+            error="Search failed",
+            kind="tool_error",
+        )
+    ]
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=0,
+        shared=SharedStateView({}, []),
+        query="LS전선 분석",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool", "opendart_financial_tool"],
+        evidence=[
+            EvidenceRow(
+                session_id="session-1",
+                tool_name="opendart_financial_tool",
+                stable_args_hash="opendart_financial_tool:{}",
+                status="satisfied",
+                value_summary="연결 재무제표 확보",
+                value_ref="tasks/root.0/execution/result.md",
+                task_id="root.0",
+                unit_objective="2024 재무제표 수집",
+                created_at="2026-04-16T10:00:00+09:00",
+                updated_at="2026-04-16T10:00:00+09:00",
+                stable_args={"corp": "LS전선", "year": 2024, "fs_div": "CFS"},
+            ),
+            EvidenceRow(
+                session_id="session-1",
+                tool_name="web_search_tool",
+                stable_args_hash='web_search_tool:{"query":"LS전선 경쟁사"}',
+                status="failed",
+                value_summary="Search failed",
+                value_ref="",
+                task_id="root.1",
+                unit_objective="경쟁사 확인",
+                created_at="2026-04-16T10:01:00+09:00",
+                updated_at="2026-04-16T10:01:00+09:00",
+                stable_args={"query": "LS전선 경쟁사"},
+            ),
+        ],
+    )
+
+    decision = await planner.decide(task, ctx)
+
+    assert decision.action is Action.AGGREGATE
+    prompt = llm.calls[0]["prompt"]
+    system_prompt = llm.calls[0]["system_prompt"]
+    assert "[EVIDENCE]" in prompt
+    assert "opendart_financial_tool(corp=\"LS전선\", fs_div=\"CFS\", year=2024): satisfied" in prompt
+    assert "[FAILED_ATTEMPTS]" in prompt
+    assert "web_search_tool(query=\"LS전선 경쟁사\"): tool_error - Search failed" in prompt
+    assert "Do not create children that re-collect satisfied evidence" in system_prompt

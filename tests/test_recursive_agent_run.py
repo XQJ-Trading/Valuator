@@ -10,6 +10,7 @@ import pytest
 from domain.query import QueryAnalysis
 from valuator.core.decomposition.gate_config import GateConfig
 from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, SharedState, StepPlanner, TaskState
+from valuator.evidence import SqliteEvidenceStore
 from valuator.tools.base import BaseTool, ToolRegistry, ToolResult
 from valuator.session import SessionTraceWriter
 
@@ -831,6 +832,83 @@ async def test_agent_falls_back_to_static_score_when_critic_fails() -> None:
     # initial_threshold=-0.03; critic fails → net_score static -0.025; efficiency=1 → ≈ -0.05625
     assert agent._gate._tracker.current_threshold() == pytest.approx(-0.05625)
     assert not any(event.type == "decomposition_gated" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_agent_rejects_cross_task_duplicate_tool_request_from_evidence(tmp_path) -> None:
+    registry = ToolRegistry()
+    tool = DummyTool()
+    registry.register(tool)
+
+    llm = ScriptedLLM(
+        {
+            "root": [
+                {
+                    "action": "decompose",
+                    "children": [
+                        {
+                            "description": "collect alpha once",
+                            "task_name": "collect_alpha_once",
+                            "tool_hint": "dummy_tool",
+                        },
+                        {
+                            "description": "collect alpha again",
+                            "task_name": "collect_alpha_again",
+                            "tool_hint": "dummy_tool",
+                        },
+                    ],
+                },
+                {
+                    "action": "finalize",
+                    "output": "done",
+                },
+            ],
+            "root.0": [
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "dummy_tool",
+                        "args": {"value": "alpha"},
+                    },
+                }
+            ],
+            "root.1": [
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "dummy_tool",
+                        "args": {"value": "alpha"},
+                    },
+                },
+                {
+                    "action": "aggregate",
+                    "output": "reuse sibling evidence",
+                },
+            ],
+        }
+    )
+
+    agent = Agent(
+        scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
+        shared_state=SharedState(),
+        tool_registry=registry,
+        llm_client=llm,  # type: ignore[arg-type]
+        query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
+        gate_config=GateConfig(enabled=False),
+        evidence_store=SqliteEvidenceStore(tmp_path / "evidence.db"),
+        evidence_session_id="session-1",
+    )
+
+    root = ComplexTask(id="root", description="root valuation task")
+    output = await agent.run("alpha query", root)
+    duplicate_child = agent._scheduler.get_task("root.1")
+
+    assert output == "done"
+    assert len(tool.calls) == 1
+    assert duplicate_child is not None
+    assert duplicate_child.invalid_decision_count == 1
+    assert duplicate_child.failed_attempts[-1].kind == "decision_rejected"
+    assert "already collected in task root.0" in duplicate_child.failed_attempts[-1].error
 
 
 @pytest.mark.asyncio

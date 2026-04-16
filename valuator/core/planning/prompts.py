@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from typing import Any
 
 from domain.query import summarize_temporal_contract
@@ -48,6 +49,9 @@ def build_system_prompt(
             [
                 "DECOMPOSE: break the task into smaller children. Requires at least one child.",
                 "  - Use when the task is too broad for a single tool call.",
+                "  - Check [EVIDENCE] before creating children.",
+                "  - Do not create children that re-collect satisfied evidence already available in [EVIDENCE].",
+                "  - Do not repeat failed requests listed in [EVIDENCE] or [FAILED_ATTEMPTS].",
                 "  - Each child MUST include description.",
                 f"  - task_name is optional; if you provide it, keep it concise, <= {task_name_max_chars} chars, and use only letters/digits/underscores.",
                 "  - If a likely execution tool is obvious, include tool_hint.",
@@ -192,6 +196,8 @@ def build_step_prompt(
                 f"{task.invalid_decision_count}\n{task.last_invalid_error}",
             )
         )
+    if task.failed_attempts:
+        sections.append(("[FAILED_ATTEMPTS]", failed_attempts_text(task)))
     if ctx.tool_results:
         latest = ctx.tool_results[-1]
         sections.append(
@@ -240,6 +246,8 @@ def build_step_prompt(
             for key, fact in ctx.shared.facts.items()
         ]
         sections.append(("[SHARED_FACTS]", "\n".join(fact_lines)))
+    if ctx.evidence:
+        sections.append(("[EVIDENCE]", evidence_text(ctx)))
     if ctx.shared.conflicts:
         conflict_lines = [
             f"{conflict.key}:\n"
@@ -282,6 +290,7 @@ def build_step_prompt(
         "[ANCESTRY]",
         "[CONFLICTS]",
         "[LAST_TOOL_REQUEST]",
+        "[FAILED_ATTEMPTS]",
         "[BLOCKED_TOOLS]",
         "[PREVIOUS_REJECTION]",
         "[FINALIZE_GUIDANCE]",
@@ -462,6 +471,51 @@ def shared_fact_line(*, key: str, fact: Any) -> str:
     if fact.source_urls:
         meta.append(f"sources={len(fact.source_urls)}")
     return f"{key}: {render_prompt_value(fact.value)} ({', '.join(meta)})"
+
+
+def evidence_text(ctx: TaskContext, *, max_items: int = 20) -> str:
+    grouped = [
+        row
+        for status in ("satisfied", "failed", "empty")
+        for row in ctx.evidence
+        if row.status == status
+    ]
+    selected = grouped[:max_items]
+    lines = [evidence_line(row) for row in selected]
+    remaining = len(grouped) - len(selected)
+    if remaining > 0:
+        lines.append(f"... and {remaining} more evidence rows")
+    return "\n".join(lines)
+
+
+def evidence_line(row: Any) -> str:
+    args_text = ", ".join(
+        f"{key}={json_arg(row.stable_args[key])}" for key in sorted(row.stable_args)
+    )
+    line = f"{row.tool_name}({args_text}): {row.status}"
+    if row.value_summary:
+        line += f' - "{row.value_summary}"'
+    if row.task_id:
+        line += f" [task={row.task_id}]"
+    return line
+
+
+def failed_attempts_text(task: Task, *, max_items: int = 8) -> str:
+    selected = task.failed_attempts[-max_items:]
+    lines = [
+        (
+            f"{attempt.tool_name}({', '.join(f'{key}={json_arg(attempt.args[key])}' for key in sorted(attempt.args))})"
+            f": {attempt.kind} - {attempt.error}"
+        )
+        for attempt in selected
+    ]
+    if len(task.failed_attempts) > len(selected):
+        lines.insert(0, f"... {len(task.failed_attempts) - len(selected)} older attempts omitted ...")
+    return "\n".join(lines)
+
+
+def json_arg(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
 def preview_json(value: Any, *, max_chars: int) -> str:

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from domain.query import QueryAnalysis, QueryUnit
+from valuator.evidence import EvidenceRow
 from valuator.tools.base import ToolResult
 
 from .shared_state import SharedStateView
@@ -34,3 +35,4 @@ class TaskContext:
     query_analysis: QueryAnalysis = field(default_factory=QueryAnalysis)
     query_units: list[QueryUnit] = field(default_factory=list)
     available_tools: list[str] = field(default_factory=list)
+    evidence: list[EvidenceRow] = field(default_factory=list)

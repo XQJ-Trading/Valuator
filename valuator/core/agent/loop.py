@@ -6,21 +6,83 @@ from time import perf_counter
 from typing import Any, Awaitable, Callable
 
 from domain.query import QueryAnalysis
+from valuator.evidence import EvidenceRow, SqliteEvidenceStore, stable_args_hash
 from valuator.tools.base import ToolRegistry
 from valuator.utils.time_utils import Measurement, kst_isoformat
 
 from ..context import TaskContext
-from ..decomposition import DecompositionCritic, GateConfig, GateController
+from ..decomposition import (
+    DecompositionCritic,
+    DecompositionGate,
+    GateConfig,
+    MCTSGateController,
+    PassthroughGate,
+)
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
 from ..task import AtomicTask, Task
-from ..types import Action, AgentEvent, EventType, TaskDecision, TaskState
+from ..types import (
+    Action,
+    AgentEvent,
+    EventType,
+    FailedAttempt,
+    TaskDecision,
+    TaskState,
+)
 from . import context_builder, trace as agent_trace
 
 
 def _tool_request_signature(*, tool_name: str, args: dict[str, Any]) -> str:
     return f"{tool_name}:{json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)}"
+
+
+def _tool_result_status(*, tool_name: str, result: Any) -> str:
+    if not result.success:
+        return "failed"
+    if _is_empty_tool_result(tool_name=tool_name, result=result):
+        return "empty"
+    return "satisfied"
+
+
+def _is_empty_tool_result(*, tool_name: str, result: Any) -> bool:
+    payload = result.result
+    if payload in (None, "", [], {}):
+        return True
+    if tool_name == "web_search_tool":
+        findings = payload.get("findings") if isinstance(payload, dict) else None
+        return not (isinstance(findings, str) and findings.strip())
+    if tool_name == "sec_tool":
+        if result.metadata.get("selected_count") == 0:
+            return True
+        findings = payload.get("findings") if isinstance(payload, dict) else None
+        return not (isinstance(findings, str) and findings.strip())
+    return False
+
+
+def _tool_result_summary(result: Any) -> str:
+    if not result.success:
+        return (result.error or "").strip()
+    payload = result.result
+    if isinstance(payload, str):
+        return " ".join(payload.split())[:240]
+    if isinstance(payload, dict):
+        for key in ("domain_summary", "summary", "findings", "result", "content"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return " ".join(value.split())[:240]
+        preview_parts: list[str] = []
+        for key, value in payload.items():
+            if value in (None, "", [], {}):
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                preview_parts.append(f"{key}={value}")
+            if len(preview_parts) >= 3:
+                break
+        return ", ".join(preview_parts)[:240]
+    if isinstance(payload, list):
+        return f"{len(payload)} items"
+    return str(payload).strip()[:240]
 
 
 class Agent:
@@ -38,9 +100,12 @@ class Agent:
         session_store: Any | None = None,
         gate_config: GateConfig | None = None,
         decomposition_critic: DecompositionCritic | None = None,
+        evidence_store: SqliteEvidenceStore | None = None,
+        evidence_session_id: str = "",
     ) -> None:
         from valuator.utils.config import config
 
+        gate_cfg = gate_config or GateConfig()
         self._scheduler = scheduler
         self._shared = shared_state
         self._tools = tool_registry
@@ -48,21 +113,34 @@ class Agent:
         self._on_event = on_event
         self._step_planner = step_planner or StepPlanner(
             llm_client,
-            gate_config=gate_config,
-            max_steps_per_task=scheduler.max_steps_per_task,
         )
         self._session_store = session_store
         self._trace_writer = (
             session_store.trace_writer if session_store is not None else trace_writer
         )
-        self._gate = GateController(
-            llm_client=llm_client,
-            scheduler=self._scheduler,
-            step_planner=self._step_planner,
-            emit=self._emit,
-            gate_config=gate_config,
-            decomposition_critic=decomposition_critic,
+        self._evidence_store = evidence_store
+        if self._evidence_store is None and session_store is not None:
+            self._evidence_store = SqliteEvidenceStore(session_store.session_dir / "evidence.db")
+        self._evidence_session_id = (
+            evidence_session_id
+            or (
+                str(getattr(session_store, "session_id", "")).strip()
+                if session_store is not None
+                else ""
+            )
         )
+        self._gate: DecompositionGate
+        if gate_cfg.enabled:
+            self._gate = MCTSGateController(
+                llm_client=llm_client,
+                scheduler=self._scheduler,
+                step_planner=self._step_planner,
+                emit=self._emit,
+                gate_config=gate_cfg,
+                decomposition_critic=decomposition_critic,
+            )
+        else:
+            self._gate = PassthroughGate()
         self._max_invalid_decisions_per_task = max(
             int(config.agent_max_invalid_decisions_per_task),
             1,
@@ -215,6 +293,8 @@ class Agent:
             analysis=self._analysis,
             shared=self._shared,
             tools=self._tools,
+            evidence_store=self._evidence_store,
+            evidence_session_id=self._evidence_session_id,
         )
         decision_measurement = Measurement.start()
         if (
@@ -370,6 +450,26 @@ class Agent:
             )
             return None
 
+        evidence = self._lookup_evidence(
+            tool_name=effective_request.tool_name,
+            args=effective_request.args,
+        )
+        if evidence is not None and evidence.status == "satisfied":
+            summary = evidence.value_summary or "already collected"
+            await self._reject_step(
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
+                error=(
+                    "execute action repeats evidence already collected in "
+                    f"task {evidence.task_id}: {summary}"
+                ),
+            )
+            return None
+
         request_signature = _tool_request_signature(
             tool_name=effective_request.tool_name,
             args=effective_request.args,
@@ -410,6 +510,7 @@ class Agent:
         )
         duration_ms = (perf_counter() - started) * 1000.0
         tool_name = decision.tool_request.tool_name
+        artifact_refs: dict[str, str] = {}
         if result.success:
             task.tool_failure_counts.pop(tool_name, None)
         else:
@@ -427,6 +528,13 @@ class Agent:
                 >= self._max_consecutive_tool_failures
             ):
                 task.blocked_tools.add(tool_name)
+            self._append_failed_attempt(
+                task=task,
+                tool_name=tool_name,
+                args=decision.tool_request.args,
+                error=result.error or "tool execution failed",
+                kind="tool_error",
+            )
         self._scheduler.mark_tool_complete(task, result)
         if self._session_store is not None:
             artifact_refs = self._session_store.write_execution_result(
@@ -439,6 +547,14 @@ class Agent:
             )
             task.artifacts.update(artifact_refs)
             result.metadata["artifacts"] = artifact_refs
+        self._record_evidence(
+            task=task,
+            ctx=ctx,
+            tool_name=tool_name,
+            args=decision.tool_request.args,
+            result=result,
+            value_ref=artifact_refs.get("execution_result_path", ""),
+        )
         self._sync_session_tree()
         agent_trace.log_tool_execution(
             self._trace_writer,
@@ -590,6 +706,67 @@ class Agent:
             )
             return
 
+    def _append_failed_attempt(
+        self,
+        *,
+        task: Task,
+        tool_name: str,
+        args: dict[str, Any],
+        error: str,
+        kind: str,
+    ) -> None:
+        task.failed_attempts.append(
+            FailedAttempt(
+                tool_name=tool_name,
+                args=dict(args),
+                error=error,
+                kind=kind,
+            )
+        )
+
+    def _lookup_evidence(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> EvidenceRow | None:
+        if self._evidence_store is None or not self._evidence_session_id:
+            return None
+        return self._evidence_store.lookup(
+            session_id=self._evidence_session_id,
+            tool_name=tool_name,
+            args=args,
+        )
+
+    def _record_evidence(
+        self,
+        *,
+        task: Task,
+        ctx: TaskContext,
+        tool_name: str,
+        args: dict[str, Any],
+        result: Any,
+        value_ref: str,
+    ) -> None:
+        if self._evidence_store is None or not self._evidence_session_id:
+            return
+        status = _tool_result_status(tool_name=tool_name, result=result)
+        self._evidence_store.record(
+            EvidenceRow(
+                session_id=self._evidence_session_id,
+                tool_name=tool_name,
+                stable_args_hash=stable_args_hash(tool_name, args),
+                status=status,
+                value_summary=_tool_result_summary(result),
+                value_ref=value_ref,
+                task_id=task.id,
+                unit_objective=" / ".join(unit.objective for unit in ctx.query_units),
+                created_at=kst_isoformat(),
+                updated_at=kst_isoformat(),
+                stable_args=dict(args),
+            )
+        )
+
     async def _emit(self, event: AgentEvent) -> None:
         if self._on_event is None:
             return
@@ -645,6 +822,14 @@ class Agent:
             duration_ms=duration_ms,
             error=error,
         )
+        if decision is not None and decision.tool_request is not None:
+            self._append_failed_attempt(
+                task=task,
+                tool_name=decision.tool_request.tool_name,
+                args=decision.tool_request.args,
+                error=error,
+                kind="decision_rejected",
+            )
         await self._handle_invalid_step(task, error)
 
     async def _force_finalize(self, task: Task) -> None:

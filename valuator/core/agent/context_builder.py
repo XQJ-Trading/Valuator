@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from domain.query import QueryAnalysis, QueryUnit, summarize_temporal_contract
+from valuator.evidence import SqliteEvidenceStore
 from valuator.tools.base import ToolRegistry
 
 from ..context import TaskContext, TaskSummary
@@ -20,6 +21,8 @@ def build_task_context(
     analysis: QueryAnalysis,
     shared: SharedState,
     tools: ToolRegistry,
+    evidence_store: SqliteEvidenceStore | None = None,
+    evidence_session_id: str = "",
 ) -> TaskContext:
     query_units = query_units_for_task(task=task, analysis=analysis)
     return TaskContext(
@@ -49,6 +52,11 @@ def build_task_context(
         query_analysis=analysis,
         query_units=query_units,
         available_tools=analysis.allowed_tools or registered_tools(tools),
+        evidence=(
+            evidence_store.list_for_session(evidence_session_id)
+            if evidence_store is not None and evidence_session_id
+            else []
+        ),
     )
 
 

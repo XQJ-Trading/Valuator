@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable
 
 from .context import TaskContext
-from .types import TaskDecision, TaskState, ToolRequest, ToolResult
+from .types import FailedAttempt, TaskDecision, TaskState, ToolRequest, ToolResult
 
 TaskStepDecider = Callable[["Task", TaskContext], Awaitable[TaskDecision]]
 
@@ -40,6 +40,7 @@ class Task(ABC):
         self.failed_tool_request_signatures: set[str] = set()
         self.tool_failure_counts: dict[str, int] = {}
         self.blocked_tools: set[str] = set()
+        self.failed_attempts: list[FailedAttempt] = []
         self.last_invalid_error: str | None = None
         self._decide = decide
 
@@ -75,6 +76,7 @@ class Task(ABC):
         )
         target.tool_failure_counts = dict(self.tool_failure_counts)
         target.blocked_tools = set(self.blocked_tools)
+        target.failed_attempts = list(self.failed_attempts)
         target.last_invalid_error = self.last_invalid_error
         return target
 

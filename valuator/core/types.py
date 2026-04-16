@@ -52,6 +52,14 @@ class ToolRequest:
     args: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class FailedAttempt:
+    tool_name: str
+    args: dict[str, Any]
+    error: str
+    kind: str
+
+
 @dataclass
 class TaskSpec:
     description: str

@@ -510,7 +510,10 @@ def failed_attempts_text(task: Task, *, max_items: int = 8) -> str:
         for attempt in selected
     ]
     if len(task.failed_attempts) > len(selected):
-        lines.insert(0, f"... {len(task.failed_attempts) - len(selected)} older attempts omitted ...")
+        lines.insert(
+            0,
+            f"... {len(task.failed_attempts) - len(selected)} older attempts omitted ...",
+        )
     return "\n".join(lines)
 
 

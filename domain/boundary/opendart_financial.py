@@ -6,7 +6,6 @@ from typing import Any
 
 import requests
 
-from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
 from domain.knowledge.financial import OPENDART_ACCOUNT_MAP
 from valuator.utils.config import get_opendart_api_key
 
@@ -27,32 +26,20 @@ def clear_opendart_financial_cache() -> None:
     _fs_cache.clear()
 
 
-def resolve_corp_code(surface_form: str) -> str | None:
-    """KRX corp 테이블에서 종목코드 또는 회사명으로 8자리 DART corp_code 조회. 순수 lookup."""
-    record = resolve_krx_corp_record(surface_form)
-    if record is None:
-        return None
-    return record.get("corp_code") or None
-
-
 def fetch_opendart_financial(
     corp_code: str,
     year: int,
     reprt_code: str = REPRT_CODES["annual"],
     fs_div: str = "CFS",
-) -> dict[str, float | None] | None:
-    """
-    OpenDART 재무제표 단일 호출 -> canonical dict 변환.
-
-    실패 시 None 반환. 네트워크/HTTP 오류는 전파한다.
-    """
+) -> tuple[dict[str, float | None] | None, str | None]:
+    """OpenDART 재무제표 단일 호출 -> canonical dict 변환."""
     api_key = get_opendart_api_key()
     if not api_key:
-        return None
+        return None, "OPENDART_API_KEY is not set"
 
     cache_key = f"fs:{corp_code}:{year}:{reprt_code}:{fs_div}"
     if cache_key in _fs_cache:
-        return _fs_cache[cache_key]
+        return _fs_cache[cache_key], None
 
     response = requests.get(
         OPENDART_FINSTATE_URL,
@@ -63,21 +50,25 @@ def fetch_opendart_financial(
             "reprt_code": reprt_code,
             "fs_div": fs_div,
         },
-        timeout=30,
+        timeout=5,
     )
     response.raise_for_status()
 
     body = response.json()
-    if body.get("status") != "000":
-        return None
+    status = body.get("status")
+    if status != "000":
+        message = str(body.get("message") or "").strip()
+        if message:
+            return None, f"DART API: {message}"
+        return None, f"DART API status={status!r} (not success)"
 
     items = body.get("list", [])
     if not items:
-        return None
+        return None, "DART returned no line items for this corp/year/report/fs_div"
 
     result = _parse_items(items)
     _fs_cache[cache_key] = result
-    return result
+    return result, None
 
 
 def _parse_items(items: list[dict[str, Any]]) -> dict[str, float | None]:

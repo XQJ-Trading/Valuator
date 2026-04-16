@@ -4,10 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from domain.boundary.opendart_financial import (
-    fetch_opendart_financial,
-    resolve_corp_code,
-)
+from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
+from domain.boundary.opendart_financial import fetch_opendart_financial
 from domain.knowledge.financial import DERIVED_DIFFERENCES, DERIVED_RATIOS
 from .base import BaseTool, ToolResult
 
@@ -50,8 +48,9 @@ class OpenDartFinancialTool(BaseTool):
         except ValueError as exc:
             return ToolResult(success=False, result=None, error=str(exc))
 
-        corp_code = resolve_corp_code(request.corp)
-        if corp_code is None:
+        record = resolve_krx_corp_record(request.corp)
+        corp_code = record.get("corp_code") if record is not None else None
+        if not corp_code:
             return ToolResult(
                 success=False,
                 result=None,
@@ -66,27 +65,37 @@ class OpenDartFinancialTool(BaseTool):
                 },
             )
 
-        result = fetch_opendart_financial(
+        result, primary_err = fetch_opendart_financial(
             corp_code=corp_code,
             year=request.year,
             fs_div=request.fs_div,
         )
         used_fs_div = request.fs_div
+        detail_err = primary_err
         if result is None and request.fs_div == "CFS":
-            result = fetch_opendart_financial(
+            result, ofs_err = fetch_opendart_financial(
                 corp_code=corp_code,
                 year=request.year,
                 fs_div="OFS",
             )
             if result is not None:
                 used_fs_div = "OFS"
+            elif ofs_err:
+                if primary_err and primary_err != ofs_err:
+                    detail_err = f"CFS: {primary_err}; OFS: {ofs_err}"
+                else:
+                    detail_err = ofs_err or primary_err
 
         if not result:
+            reason = detail_err or "unknown error"
             return ToolResult(
                 success=False,
                 result=None,
-                error=f"No financial data: corp={request.corp}, year={request.year}",
+                error=(
+                    f"No financial data: corp={request.corp}, year={request.year} — {reason}"
+                ),
                 metadata={
+                    "dart_error": reason,
                     "fallback": {
                         "tool_name": "yfinance_balance_sheet",
                         "tool_args": {"ticker": request.corp, "year": str(request.year)},

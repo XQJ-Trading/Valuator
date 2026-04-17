@@ -31,6 +31,16 @@ def kst_isoformat(value: datetime | str | None = None) -> str:
     return dt.astimezone(KST).isoformat(timespec="milliseconds")
 
 
+def kst_as_of_format(value: datetime | None = None) -> str:
+    if value is None:
+        dt = datetime.now(KST)
+    elif value.tzinfo is None:
+        dt = value.replace(tzinfo=dt_timezone.utc)
+    else:
+        dt = value
+    return dt.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def compact_kst_timestamp(value: datetime | str | None = None) -> str:
     text = kst_isoformat(value)
     try:

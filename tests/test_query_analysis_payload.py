@@ -17,7 +17,7 @@ def test_query_unit_resolves_period_tokens_against_as_of() -> None:
             "target_start": "P-1Y",
             "target_end": "CURRENT_DATE",
         },
-        context={"as_of_kst": "2026-03-31T09:00:00+09:00"},
+        context={"as_of_kst": "2026-03-31 09:00:00"},
     )
     assert u.target_start == "2025-03-31"
     assert u.target_end == "2026-03-31"

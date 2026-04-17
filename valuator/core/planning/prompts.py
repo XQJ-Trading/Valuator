@@ -8,294 +8,75 @@ from domain.query import summarize_temporal_contract
 
 from ...tools.specs import get_tool_spec
 from ..context import TaskContext, TaskSummary
-from ..task import ComplexTask, Task
-from ..types import Action, TaskState, TaskWorkPhase
+from ..task import Task
+from ..types import Action, TaskState
 
 _TEMPORAL_ARG_KEYS = frozenset(
     {"as_of_kst", "time_scope", "target_start", "target_end"}
 )
 
 
-def _thinking_level_from_query(query: str) -> str | None:
-    lines = query.splitlines()
-    for index, line in enumerate(lines):
-        if line.strip() == "[THINKING_LEVEL]":
-            if index + 1 >= len(lines):
-                return None
-            level = lines[index + 1].strip().lower()
-            return level or None
-    return None
-
-
 def _compact_tool_args_for_prompt(args: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in args.items() if k not in _TEMPORAL_ARG_KEYS}
 
 
-def _join_system_blocks(parts: list[list[str] | None]) -> str:
-    lines: list[str] = []
-    for part in parts:
-        if not part:
-            continue
-        if lines:
-            lines.append("")
-        lines.extend(part)
-    return "\n".join(lines)
+_STATIC_SYSTEM_PREFIX = """\
+You are the step function of a recursive valuation agent.
+Write markdown in Korean for output and facts. Keep numbers, tickers, proper nouns, and quotes as in sources.
+Return JSON for the next step. Fill only the structural fields needed for the next transition.
+Do not include action. The runtime infers the transition from tool_request, children, wait_for, output, or facts.
+Treat [QUERY_UNITS] as the execution contract. Preserve as_of_kst and target period exactly.
 
+EXECUTE: a SINGLE tool call. MUST include tool_request with tool_name and args.
+  - Use ONLY when you can name EXACTLY ONE tool and its args.
+DECOMPOSE: break the task into smaller children. Requires at least one child.
+  - Use when the task is too broad for a single tool call.
+  - Check [EVIDENCE] before creating children.
+  - Do not create children that re-collect satisfied evidence already available in [EVIDENCE].
+  - Do not repeat failed requests listed in [EVIDENCE] or [FAILED_ATTEMPTS].
+  - Each child MUST include description.
+  - If a likely execution tool is obvious, include tool_hint.
+  - Never return children as an empty list. If you cannot name concrete children now, use EXECUTE, WAIT, AGGREGATE, or FAIL.
+WAIT: suspend until a sibling or dependency task is complete.
+  - Requires wait_for (task ids).
+  - Never wait on your own task id.
+  - If the needed dependency is already done, or you already have enough tool/child output, use AGGREGATE instead.
+AGGREGATE: collect child outputs and complete this task. Must include output or facts.
+  - AGGREGATE 전에 [REQUIREMENTS]를 대조하라. 미충족 항목이 있고 추가 child로 해결 가능하면 DECOMPOSE를 먼저 하라.
+  - 추가 tool 호출이 필요하면 AGGREGATE에 tool_request를 붙이지 말고 EXECUTE를 사용하라.
+  - 동일 지표가 여러 child에 연도별로 분산되어 있으면, 하나의 Markdown 표로 join하라.
+  - child별로 나열하지 마라. 주제별로 결합하라.
+  - 결합 시 원본 수치를 보존하라.
+  - child output에 status='facts_only'가 있거나 미검증/공백이 표시되면, 그 불확실성을 유지하라.
+  - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.
+  - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.
+  - [CONFLICTS]가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.
+  - 동일 신뢰도에서 값이 다르면 [INFORMATION GAPS]로 분류하라.
+FAIL: stop the task when it cannot continue with the available tools or facts.
 
-def _system_header(*, as_of_kst: str) -> list[str]:
-    return [
-        f"As-of KST timestamp: {as_of_kst}",
-        "",
-        "You are the step function of a recursive valuation agent.",
-        "Write markdown in Korean for output and facts. Keep numbers, tickers, proper nouns, and quotes as in sources.",
-        "Return JSON for the next step. Fill only the structural fields needed for the next transition.",
-        "Do not include action. The runtime infers the transition from tool_request, children, wait_for, output, or facts.",
-        "Treat [QUERY_UNITS] as the execution contract. Preserve as_of_kst and target period exactly.",
-    ]
+Use web_search_tool with search_intent='financial' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.
+Use sec_tool only for extracting data from a specific year's 10-K.
+For web_search_tool, pass query only; the runtime will inject as_of_kst/time_scope/target period.
+Prefer WAIT over inventing missing facts.
 
+[REQUIREMENTS]는 분석이 충족해야 할 조건이다.
+AGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확인하라.
+미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.
+수집 불가한 requirement는 output에서 gap으로 명시하라.
 
-def _system_root_scope_high_thinking(*, task: Task, ctx: TaskContext) -> list[str] | None:
-    if task.parent_id is not None:
-        return None
-    if _thinking_level_from_query(ctx.query or "") != "high":
-        return None
-    return [
-        "ROOT SCOPE: thinking depth is high — prefer a lean tree: fewer parallel Phase-1 children, "
-        "each covering a distinct evidence gap; wide requirements expand breadth quickly, so split only where material.",
-    ]
+재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 yfinance_balance_sheet를 연도별로 분리 호출하되, 반드시 하나의 부모 태스크로 묶어라. 단일 연도 데이터로 추세를 주장하지 마라.
 
+포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:
+  - 비용 구조: SBC, CapEx, 영업 레버리지
+  - 경쟁 포지셔닝: 동종업체 비교, 시장 점유율, 상대 멀티플
+  - 매출 세분화: 제품/지역별, 부문별 성장률
+  - 재무·현금흐름 리스크: 레버리지, 유동성, 이자·부채 만기, FCF 전환·품질
+  - 지배구조·거버넌스 리스크: 통제·의결권, 이사회 독립성, 특수관계자·이해상충
+  - 하방·전이: 규제·매크로·경쟁 충격이 손익·현금흐름으로 이어지는 경로와 주요 downside 촉매
 
-def _system_synthesize_mode_banner(*, synthesize: bool) -> list[str] | None:
-    if not synthesize:
-        return None
-    return [
-        "This task is in SYNTHESIZE phase (all children have finished). "
-        "Do not return DECOMPOSE; use AGGREGATE, WAIT, or FAIL.",
-    ]
-
-
-def _system_execute(*, allowed: set[Action]) -> list[str] | None:
-    if Action.EXECUTE not in allowed:
-        return None
-    return [
-        "EXECUTE: a SINGLE tool call. MUST include tool_request with tool_name and args.",
-        "  - Use ONLY when you can name EXACTLY ONE tool and its args.",
-    ]
-
-
-def _system_decompose(
-    *,
-    allowed: set[Action],
-    synthesize: bool,
-    task: Task,
-    task_name_max_chars: int,
-) -> list[str] | None:
-    if Action.DECOMPOSE not in allowed or synthesize:
-        return None
-    lines = [
-        "DECOMPOSE: break the task into smaller children. Requires at least one child.",
-        "  - Use when the task is too broad for a single tool call.",
-        "  - Check [EVIDENCE] before creating children.",
-        "  - Do not create children that re-collect satisfied evidence already available in [EVIDENCE].",
-        "  - Do not repeat failed requests listed in [EVIDENCE] or [FAILED_ATTEMPTS].",
-        "  - Each child MUST include description.",
-        f"  - task_name is optional; if you provide it, keep it concise, <= {task_name_max_chars} chars, and use only letters/digits/underscores.",
-        "  - If a likely execution tool is obvious, include tool_hint.",
-        "  - Never return children as an empty list. If you cannot name concrete children now, use EXECUTE, WAIT, AGGREGATE, or FAIL.",
-    ]
-    if task.query_unit_ids:
-        lines.append(
-            "  - query_unit_ids must use the numeric prefixes shown in [QUERY_UNITS] exactly (zero-based)."
-        )
-    if len(task.query_unit_ids) > 1:
-        lines.append(
-            "  - This task spans multiple query units. Every child MUST include query_unit_ids."
-        )
-    if task.parent_id is None:
-        lines.extend(
-            [
-                "ROOT DECOMPOSITION RULE — Two-Phase Structure:",
-                "Phase 1 children: collect raw data by INFORMATION TYPE (e.g., financial statements, market data, industry data, valuation multiples).",
-                "  - Each child covers one data source or category. No two children collect the same type.",
-                "  - Children should use tool_hint to indicate the primary tool.",
-                "Phase 2 children: analyze and synthesize using collected facts, by ANALYTICAL PERSPECTIVE (e.g., financial health, competitive positioning, valuation scenarios).",
-                "  - Each Phase 2 child MUST set depends_on_siblings to reference ALL Phase 1 children indices.",
-                "  - Phase 2 children read [SHARED_FACTS] populated by Phase 1; they may call tools for supplementary data only.",
-                "Do NOT mix collection and analysis in the same child.",
-            ]
-        )
-    return lines
-
-
-def _system_wait(*, allowed: set[Action]) -> list[str] | None:
-    if Action.WAIT not in allowed:
-        return None
-    return [
-        "WAIT: suspend until a sibling or dependency task is complete.",
-        "  - Requires wait_for (task ids).",
-        "  - Never wait on your own task id.",
-        "  - If the needed dependency is already done, or you already have enough tool/child output, use AGGREGATE instead.",
-    ]
-
-
-def _system_aggregate(*, allowed: set[Action], synthesize: bool) -> list[str] | None:
-    if Action.AGGREGATE not in allowed:
-        return None
-    if synthesize:
-        req = (
-            "  - AGGREGATE 전에 [REQUIREMENTS]를 대조하라. 이 단계에서는 자식을 추가할 수 없다. "
-            "미충족은 output·facts에 gap으로 남겨라."
-        )
-    else:
-        req = "  - AGGREGATE 전에 [REQUIREMENTS]를 대조하라. 미충족 항목이 있고 추가 child로 해결 가능하면 DECOMPOSE를 먼저 하라."
-    return [
-        "AGGREGATE: collect child outputs and complete this task. Must include output or facts.",
-        req,
-        "  - 추가 tool 호출이 필요하면 AGGREGATE에 tool_request를 붙이지 말고 EXECUTE를 사용하라.",
-        "  - 동일 지표가 여러 child에 연도별로 분산되어 있으면, 하나의 Markdown 표로 join하라.",
-        "  - child별로 나열하지 마라. 주제별로 결합하라.",
-        "  - 결합 시 원본 수치를 보존하라.",
-        "  - child output에 status='facts_only'가 있거나 미검증/공백이 표시되면, 그 불확실성을 유지하라.",
-        "  - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.",
-        "  - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.",
-        "  - [CONFLICTS]가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.",
-        "  - 동일 신뢰도에서 값이 다르면 [INFORMATION GAPS]로 분류하라.",
-    ]
-
-
-def _system_finalize(*, allowed: set[Action], root_only: str) -> list[str] | None:
-    if Action.FINALIZE not in allowed:
-        return None
-    return [
-        f"FINALIZE: produce the final report (root_task={root_only} only). Must include output.",
-        "  - Trading/investment decision framing comes first; full structure is in [FINALIZE_GUIDANCE] when child outputs are available.",
-    ]
-
-
-def _system_fail(*, allowed: set[Action]) -> list[str] | None:
-    if Action.FAIL not in allowed:
-        return None
-    return ["FAIL: stop the task when it cannot continue with the available tools or facts."]
-
-
-def _system_domain_tools_and_requirements(*, synthesize: bool) -> list[str]:
-    if synthesize:
-        req_follow = [
-            "이 단계에서는 자식 태스크를 추가할 수 없다. 미충족 requirement는 output에서 gap으로 명시하라.",
-            "수집 불가한 requirement도 동일하게 gap으로 남겨라.",
-        ]
-    else:
-        req_follow = [
-            "미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.",
-            "수집 불가한 requirement는 output에서 gap으로 명시하라.",
-        ]
-    return [
-        "Use web_search_tool with search_intent='financial' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.",
-        "Use sec_tool only for extracting data from a specific year's 10-K.",
-        "For web_search_tool, pass query only; the runtime will inject as_of_kst/time_scope/target period.",
-        "Prefer WAIT over inventing missing facts.",
-        "",
-        "[REQUIREMENTS]는 분석이 충족해야 할 조건이다.",
-        "AGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확인하라.",
-        *req_follow,
-        "",
-        "재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 "
-        "yfinance_balance_sheet를 연도별로 분리 호출하되, 반드시 하나의 부모 태스크로 묶어라. "
-        "단일 연도 데이터로 추세를 주장하지 마라.",
-        "",
-        "포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:",
-        "  - 비용 구조: SBC, CapEx, 영업 레버리지",
-        "  - 경쟁 포지셔닝: 동종업체 비교, 시장 점유율, 상대 멀티플",
-        "  - 매출 세분화: 제품/지역별, 부문별 성장률",
-        "  - 재무·현금흐름 리스크: 레버리지, 유동성, 이자·부채 만기, FCF 전환·품질",
-        "  - 지배구조·거버넌스 리스크: 통제·의결권, 이사회 독립성, 특수관계자·이해상충",
-        "  - 하방·전이: 규제·매크로·경쟁 충격이 손익·현금흐름으로 이어지는 경로와 주요 downside 촉매",
-    ]
-
-
-def _system_tool_success_followup(
-    *,
-    task: Task,
-    allowed: set[Action],
-    synthesize: bool,
-) -> list[str] | None:
-    if task.last_tool_success is True:
-        return [
-            "This task already has a successful tool result. You must not return EXECUTE.",
-            "Extract data from the tool result into facts as document-style entries.",
-            "Use one key per entity (e.g., company name or ticker). The value MUST be a nested dict grouping metrics by category.",
-            'Example: {"Samsung Electronics": {"revenue": {"2023": "258.9 billion KRW", "2024": "300.9 billion KRW"}, "operating_income": {"2023": "6.6 billion KRW"}}}',
-            "Do NOT create separate keys per metric or period — group them under one entity key.",
-            "NUMBER RULES:",
-            "  - Preserve the original number from the tool result. Do NOT recalculate or convert.",
-            "  - Standardize units to M (million) / B (billion) only (e.g., 5,027.1억 → 502.71B, 1.5조 → 1,500B).",
-            "  - Always append the currency (e.g., '502.71B KRW', '383.1B JPY').",
-            "Put interpretation and context in output; keep facts to numbers (and minimal labels) only.",
-        ]
-    if task.last_tool_success is False and Action.EXECUTE in allowed:
-        alt = "AGGREGATE" if synthesize else "DECOMPOSE"
-        return [
-            f"The previous tool call failed. You may try a different EXECUTE or {alt}, "
-            "but do not repeat the same failed tool request."
-        ]
-    return None
-
-
-def _system_existing_children(*, ctx: TaskContext, synthesize: bool) -> list[str] | None:
-    if not ctx.current_children:
-        return None
-    if synthesize:
-        return [
-            "This task already has children (all finished). Synthesize via AGGREGATE from [CHILD_OUTPUTS]; "
-            "do not add new children."
-        ]
-    return [
-        "This task already has children. Prefer WAIT or AGGREGATE. "
-        "Only DECOMPOSE if you are adding children to fill unmet [REQUIREMENTS] not covered by existing children."
-    ]
-
-
-def _system_execute_vs_decompose(*, allowed: set[Action], synthesize: bool) -> list[str] | None:
-    if (
-        Action.EXECUTE not in allowed
-        or Action.DECOMPOSE not in allowed
-        or synthesize
-    ):
-        return None
-    return [
-        "If the task needs multiple tool calls, use DECOMPOSE instead.",
-        "If you cannot name a specific tool and args, you MUST use DECOMPOSE, not EXECUTE.",
-        "Prefer shallow decomposition when one tool call plus AGGREGATE is enough.",
-    ]
-
-
-def _system_guards(
-    *,
-    task: Task,
-    allowed: set[Action],
-    allow_decompose: bool,
-    synthesize: bool,
-) -> list[str]:
-    lines: list[str] = []
-    if Action.FINALIZE not in allowed:
-        lines.append("FINALIZE is only allowed for the root task.")
-    if not allow_decompose:
-        lines.append("Do not return DECOMPOSE on this retry.")
-    if task.blocked_tools and Action.EXECUTE in allowed:
-        suffix = (
-            ". Use a different tool or AGGREGATE; document gaps if tools cannot proceed."
-            if synthesize
-            else ". Use a different tool or DECOMPOSE."
-        )
-        lines.append(
-            "The following tools are blocked for this task after repeated consecutive "
-            "failures: "
-            + ", ".join(sorted(task.blocked_tools))
-            + suffix
-        )
-    if task.tool_hint:
-        lines.append(f"Prefer tool_hint={task.tool_hint} when EXECUTE is appropriate.")
-    return lines
+If the task needs multiple tool calls, use DECOMPOSE instead.
+If you cannot name a specific tool and args, you MUST use DECOMPOSE, not EXECUTE.
+Prefer shallow decomposition when one tool call plus AGGREGATE is enough."""
 
 
 def build_system_prompt(
@@ -313,39 +94,64 @@ def build_system_prompt(
         units=ctx.query_units,
     )
     as_of_kst = temporal.as_of_kst or "(unknown)"
-    synthesize = (
-        isinstance(task, ComplexTask) and task.work_phase is TaskWorkPhase.SYNTHESIZE
-    )
-    return _join_system_blocks(
-        [
-            _system_header(as_of_kst=as_of_kst),
-            _system_root_scope_high_thinking(task=task, ctx=ctx),
-            _system_synthesize_mode_banner(synthesize=synthesize),
-            _system_execute(allowed=allowed),
-            _system_decompose(
-                allowed=allowed,
-                synthesize=synthesize,
-                task=task,
-                task_name_max_chars=task_name_max_chars,
-            ),
-            _system_wait(allowed=allowed),
-            _system_aggregate(allowed=allowed, synthesize=synthesize),
-            _system_finalize(allowed=allowed, root_only=root_only),
-            _system_fail(allowed=allowed),
-            _system_domain_tools_and_requirements(synthesize=synthesize),
-            _system_tool_success_followup(
-                task=task, allowed=allowed, synthesize=synthesize
-            ),
-            _system_existing_children(ctx=ctx, synthesize=synthesize),
-            _system_execute_vs_decompose(allowed=allowed, synthesize=synthesize),
-            _system_guards(
-                task=task,
-                allowed=allowed,
-                allow_decompose=allow_decompose,
-                synthesize=synthesize,
-            ),
-        ]
-    )
+
+    # --- dynamic suffix: everything that varies per call ---
+    lines: list[str] = [
+        f"As-of KST timestamp: {as_of_kst}",
+        f"Allowed actions: {', '.join(a.value for a in allowed_actions)}",
+    ]
+    if Action.DECOMPOSE in allowed:
+        lines.append(
+            f"  - task_name is optional; if you provide it, keep it concise, <= {task_name_max_chars} chars, and use only letters/digits/underscores."
+        )
+        if task.query_unit_ids:
+            lines.append(
+                "  - query_unit_ids must use the numeric prefixes shown in [QUERY_UNITS] exactly (zero-based)."
+            )
+        if len(task.query_unit_ids) > 1:
+            lines.append(
+                "  - This task spans multiple query units. Every child MUST include query_unit_ids."
+            )
+    if Action.FINALIZE in allowed:
+        lines.append(
+            f"FINALIZE: produce the final report (root_task={root_only} only). Must include output."
+        )
+        lines.append(
+            "  - Trading/investment decision framing comes first; full structure is in [FINALIZE_GUIDANCE] when child outputs are available."
+        )
+    if Action.FINALIZE not in allowed:
+        lines.append("FINALIZE is only allowed for the root task.")
+    if task.last_tool_success is True:
+        lines.extend(
+            [
+                "This task already has a successful tool result. You must not return EXECUTE.",
+                "Extract key numeric values from the tool result into the facts dict as key-value pairs.",
+                "Use keys of the form '{company}:{metric}:{fiscal_period}'.",
+                "Put interpretation and context in output; keep facts to numbers (and minimal labels) only.",
+            ]
+        )
+    elif task.last_tool_success is False and Action.EXECUTE in allowed:
+        lines.append(
+            "The previous tool call failed. You may try a different EXECUTE or DECOMPOSE, "
+            "but do not repeat the same failed tool request."
+        )
+    if ctx.current_children:
+        lines.append(
+            "This task already has children. Prefer WAIT or AGGREGATE. "
+            "Only DECOMPOSE if you are adding genuinely new, non-overlapping children."
+        )
+    if not allow_decompose:
+        lines.append("Do not return DECOMPOSE on this retry.")
+    if task.blocked_tools and Action.EXECUTE in allowed:
+        lines.append(
+            "The following tools are blocked for this task after repeated consecutive "
+            "failures: "
+            + ", ".join(sorted(task.blocked_tools))
+            + ". Use a different tool or DECOMPOSE."
+        )
+    if task.tool_hint:
+        lines.append(f"Prefer tool_hint={task.tool_hint} when EXECUTE is appropriate.")
+    return _STATIC_SYSTEM_PREFIX + "\n\n" + "\n".join(lines)
 
 
 def build_step_prompt(

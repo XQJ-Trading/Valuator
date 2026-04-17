@@ -419,9 +419,9 @@ def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
         task_id="root",
         description="root",
         step_count=0,
-        as_of_kst="2026-03-30T09:00:00+09:00",
+        as_of_kst="2026-03-30 09:00:00",
         query_analysis=QueryAnalysis(
-            as_of_kst="2026-03-30T09:00:00+09:00",
+            as_of_kst="2026-03-30 09:00:00",
             units=[
                 QueryUnit(
                     id="U-001",

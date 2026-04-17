@@ -26,7 +26,7 @@ from valuator.session.root_log_name import build_unique_root_session_id  # noqa:
 from valuator.utils.config import session_files_root  # noqa: E402
 from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
-from valuator.utils.time_utils import KST, Measurement, kst_isoformat  # noqa: E402
+from valuator.utils.time_utils import KST, Measurement, kst_as_of_format  # noqa: E402
 from valuator.core.types import EventType  # noqa: E402
 
 DEFAULT_QUERY_FILE = ROOT / "scripts" / "queries" / "amazon_analysis_ko.txt"
@@ -313,7 +313,7 @@ async def run(args: argparse.Namespace) -> int:
         args.concurrency if args.concurrency is not None else config.agent_concurrency
     )
     created_at = datetime.now(KST)
-    as_of_kst = kst_isoformat(created_at)
+    as_of_kst = kst_as_of_format(created_at)
     analysis = await build_query_analysis(
         effective_query,
         model,

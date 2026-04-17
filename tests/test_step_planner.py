@@ -52,7 +52,7 @@ def _context(*, available_tools: list[str]) -> TaskContext:
         task_id="task",
         description="collect current facts",
         step_count=0,
-        as_of_kst="2026-03-30T09:00:00+09:00",
+        as_of_kst="2026-03-30 09:00:00",
         shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
@@ -283,9 +283,7 @@ async def test_step_planner_requery_without_decompose_adds_rejection_context() -
     assert decision.action.value == "aggregate"
     assert "[DECOMPOSITION_REJECTED]" in llm.calls[0]["prompt"]
     assert "children overlap too much" in llm.calls[0]["prompt"]
-    assert "DECOMPOSE: break the task into smaller children." not in llm.calls[0][
-        "system_prompt"
-    ]
+    assert "Do not return DECOMPOSE on this retry." in llm.calls[0]["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -459,7 +457,7 @@ async def test_step_planner_finalize_prompt_preserves_unverified_gaps() -> None:
         task_id="root",
         description="root task",
         step_count=0,
-        as_of_kst="2026-03-30T09:00:00+09:00",
+        as_of_kst="2026-03-30 09:00:00",
         child_outputs={
             "root.0": {
                 "status": "facts_only",
@@ -510,10 +508,10 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
         "finalize",
         "fail",
     ]
-    assert "EXECUTE:" not in llm.calls[0]["system_prompt"]
     assert "This task already has a successful tool result." in llm.calls[0][
         "system_prompt"
     ]
+    assert "You must not return EXECUTE." in llm.calls[0]["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -589,7 +587,7 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
         task_id="root",
         description="Amazon valuation",
         step_count=1,
-        as_of_kst="2026-03-30T09:00:00+09:00",
+        as_of_kst="2026-03-30 09:00:00",
         child_outputs={"root.0": {"summary": "segment analysis complete"}},
         shared=SharedStateView({}, []),
         query="Amazon analysis",
@@ -649,7 +647,7 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
         task_id="root",
         description="root task",
         step_count=1,
-        as_of_kst="2026-03-30T09:00:00+09:00",
+        as_of_kst="2026-03-30 09:00:00",
         shared=SharedStateView(
             {
                 "iran_enrichment_level@2024-01-01:2024-12-31": Fact(
@@ -657,7 +655,7 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
                     value={"percent": 60},
                     source_task_id="root.0",
                     grounded=True,
-                    as_of_kst="2026-03-30T09:00:00+09:00",
+                    as_of_kst="2026-03-30 09:00:00",
                     time_scope="historical",
                     target_start="2024-01-01",
                     target_end="2024-12-31",
@@ -668,7 +666,7 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
         ),
         query="2026-03-30 기준으로 2024년 이란 상황 분석",
         query_analysis=QueryAnalysis(
-            as_of_kst="2026-03-30T09:00:00+09:00",
+            as_of_kst="2026-03-30 09:00:00",
             units=[
                 QueryUnit(
                     id="U-001",
@@ -712,7 +710,7 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     assert "target_period=2024-01-01..2024-12-31" in prompt
     assert "iran_enrichment_level@2024-01-01:2024-12-31" in prompt
     assert "60" in prompt
-    assert "As-of KST timestamp: 2026-03-30T09:00:00+09:00" in system_prompt
+    assert "As-of KST timestamp: 2026-03-30 09:00:00" in system_prompt
 
 
 @pytest.mark.asyncio
@@ -846,7 +844,7 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
         task_id="root",
         description="mixed market identifier task",
         step_count=0,
-        as_of_kst="2026-03-30T09:00:00+09:00",
+        as_of_kst="2026-03-30 09:00:00",
         shared=SharedStateView({}, []),
         query="삼성전자와 Amazon 재무 조회",
         query_analysis=QueryAnalysis(

@@ -278,22 +278,45 @@ def _resolve_requirement_unit_ids(
         if isinstance(raw_ref, int):
             resolved_unit_ids.append(raw_ref)
             continue
-        if raw_ref in unit_id_to_index:
-            resolved_unit_ids.append(unit_id_to_index[raw_ref])
+        key = raw_ref.strip()
+        if key in unit_id_to_index:
+            resolved_unit_ids.append(unit_id_to_index[key])
             continue
-        if raw_ref.isdigit():
-            resolved_unit_ids.append(int(raw_ref))
+        casefold_matches = [
+            unit_id_to_index[k]
+            for k in unit_id_to_index
+            if k.casefold() == key.casefold()
+        ]
+        if len(casefold_matches) == 1:
+            resolved_unit_ids.append(casefold_matches[0])
             continue
-        raise ValueError("query requirement references unknown unit_ids")
+        if len(casefold_matches) > 1:
+            raise ValueError(
+                f"query requirement unit_ids reference {raw_ref!r} matches multiple unit ids"
+            )
+        if key.isdigit():
+            resolved_unit_ids.append(int(key))
+            continue
+        known = ", ".join(sorted(unit_id_to_index))
+        raise ValueError(
+            f"query requirement references unknown unit id {raw_ref!r}; "
+            f"known unit ids: {known or '(none)'}"
+        )
 
-    uses_one_based = (
-        all(1 <= unit_id <= unit_count for unit_id in resolved_unit_ids)
-        and 0 not in resolved_unit_ids
-    )
+    uses_one_based = all(
+        1 <= unit_id <= unit_count for unit_id in resolved_unit_ids
+    ) and (0 not in resolved_unit_ids)
     if uses_one_based:
         resolved_unit_ids = [unit_id - 1 for unit_id in resolved_unit_ids]
-    if any(unit_id < 0 or unit_id >= unit_count for unit_id in resolved_unit_ids):
-        raise ValueError("query requirement references unknown unit_ids")
+    bad = [
+        unit_id
+        for unit_id in resolved_unit_ids
+        if unit_id < 0 or unit_id >= unit_count
+    ]
+    if bad:
+        raise ValueError(
+            f"query requirement unit_ids out of range for {unit_count} unit(s): {bad}"
+        )
     return _dedupe_ints(resolved_unit_ids)
 
 

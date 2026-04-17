@@ -37,7 +37,7 @@ _QUERY_ANALYSIS_RULES = (
     "- units must be semantic retrieval units, not formatting instructions.",
     "- Every unit must include id, objective, retrieval_query, entity_ids, time_scope.",
     "- Every requirement must include acceptance, unit_ids, entity_ids, provenance. Requirements are for analytical content only, not formatting preferences or table styles.",
-    "- requirement unit_ids may refer to units by zero-based position, one-based position, or unit id string.",
+    "- requirement unit_ids may refer to units by zero-based position, one-based position, or each unit's id string (must match exactly; prefer copying ids from the units list).",
     "- Preserve the user's response intent and constraints, such as recommendation, screening, comparison, requested market, count, style lens, and actionability, instead of rewriting the query into a generic valuation essay.",
     "- If the query does not name a concrete company/security, do not invent placeholder company entities such as 'investment candidates'.",
     "- If the query is valuation/investment-related, prefer comprehensive analysis rather than omitting needed aspects.",

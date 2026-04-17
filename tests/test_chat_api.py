@@ -125,6 +125,131 @@ def test_post_message_passes_web_search_provider_to_agent(
     )
 
 
+def test_post_message_passes_model_and_openrouter_env_to_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = str(uuid.uuid4())
+    commands: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    release = asyncio.Event()
+    release.set()
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        commands.append((args, kwargs))
+        return _FakeProcess(release)
+
+    monkeypatch.setattr(
+        chat_api.asyncio,
+        "create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/chat/messages",
+            params=_chat_params(session_id),
+            json={
+                "text": "hello",
+                "llm_backend": "openrouter",
+                "model": "google/gemini-2.5-flash",
+                "openrouter_api_key": "or-key",
+                "openrouter_base_url": "https://openrouter.ai/api/v1",
+            },
+        )
+        assert response.status_code == 200
+        _wait_until(lambda: bool(commands))
+
+    args, kwargs = commands[0]
+    assert args[:6] == (
+        sys.executable,
+        str(chat_api.AGENT_ENTRYPOINT),
+        "--query",
+        "hello",
+        "--model",
+        "google/gemini-2.5-flash",
+    )
+    env = kwargs["env"]
+    assert isinstance(env, dict)
+    assert env["LLM_BACKEND"] == "openrouter"
+    assert env["OPENROUTER_API_KEY"] == "or-key"
+    assert env["OPENROUTER_BASE_URL"] == "https://openrouter.ai/api/v1"
+
+
+def test_post_message_rejects_openrouter_model_without_key() -> None:
+    session_id = str(uuid.uuid4())
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/chat/messages",
+            params=_chat_params(session_id),
+            json={
+                "text": "hello",
+                "llm_backend": "openrouter",
+                "model": "google/gemini-2.5-flash",
+            },
+        )
+
+    assert response.status_code == 422
+    assert "openrouter_api_key is required when llm_backend=openrouter" in response.text
+
+
+def test_post_message_forces_google_backend_when_openrouter_not_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = str(uuid.uuid4())
+    commands: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    release = asyncio.Event()
+    release.set()
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        commands.append((args, kwargs))
+        return _FakeProcess(release)
+
+    monkeypatch.setattr(
+        chat_api.asyncio,
+        "create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    monkeypatch.setenv("LLM_BACKEND", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "server-key")
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/chat/messages",
+            params=_chat_params(session_id),
+            json={
+                "text": "hello",
+                "llm_backend": "google_genai",
+                "model": "gemini-3-flash-preview",
+            },
+        )
+        assert response.status_code == 200
+        _wait_until(lambda: bool(commands))
+
+    _, kwargs = commands[0]
+    env = kwargs["env"]
+    assert isinstance(env, dict)
+    assert env["LLM_BACKEND"] == "google_genai"
+    assert "OPENROUTER_API_KEY" not in env
+
+
+def test_post_message_rejects_openrouter_model_for_google_backend() -> None:
+    session_id = str(uuid.uuid4())
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/chat/messages",
+            params=_chat_params(session_id),
+            json={
+                "text": "hello",
+                "llm_backend": "google_genai",
+                "model": "openrouter/auto",
+            },
+        )
+
+    assert response.status_code == 422
+    assert "google_genai backend does not accept provider/model format" in response.text
+
+
 def test_post_message_rejects_while_starting_and_stop_cancels_pending_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

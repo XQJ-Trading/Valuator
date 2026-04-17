@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import sys
 import uuid
@@ -11,10 +12,14 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
+from valuator.models.naming import is_openrouter_model_name
 from valuator.tools.web_search_providers import available_web_search_providers
-from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES
+from valuator.utils.config import (
+    DEFAULT_OPENROUTER_BASE_URL,
+    WEB_SEARCH_PROVIDER_NAMES,
+)
 from valuator.utils.time_utils import kst_isoformat
 
 from .auth import register_session
@@ -135,6 +140,10 @@ async def _run_agent_for_message(
     session_id: str,
     text: str,
     web_search_provider: str | None = None,
+    llm_backend: str | None = None,
+    model: str | None = None,
+    openrouter_api_key: str | None = None,
+    openrouter_base_url: str | None = None,
 ) -> None:
     process: asyncio.subprocess.Process | None = None
 
@@ -164,10 +173,25 @@ async def _run_agent_for_message(
         ]
         if web_search_provider:
             command.extend(["--web-search-provider", web_search_provider])
+        if model:
+            command.extend(["--model", model])
+        env = os.environ.copy()
+        if llm_backend == "openrouter":
+            # Request-scoped env override keeps UI config independent from server-wide .env.
+            env["LLM_BACKEND"] = "openrouter"
+            env["OPENROUTER_API_KEY"] = openrouter_api_key or ""
+            env["OPENROUTER_BASE_URL"] = (
+                openrouter_base_url or DEFAULT_OPENROUTER_BASE_URL
+            )
+        else:
+            env["LLM_BACKEND"] = "google_genai"
+            env.pop("OPENROUTER_API_KEY", None)
+            env.pop("OPENROUTER_BASE_URL", None)
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         async with _agent_lock:
             _agent_processes[session_id] = process
@@ -247,6 +271,10 @@ async def _run_agent_for_message(
 class PostChatMessageRequest(BaseModel):
     text: str
     web_search_provider: str | None = None
+    llm_backend: str | None = None
+    model: str | None = None
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str | None = None
 
     @field_validator("text")
     @classmethod
@@ -270,6 +298,46 @@ class PostChatMessageRequest(BaseModel):
             allowed = ", ".join(WEB_SEARCH_PROVIDER_NAMES)
             raise ValueError(f"web_search_provider must be one of: {allowed}")
         return selected
+
+    @field_validator("llm_backend")
+    @classmethod
+    def validate_llm_backend(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        selected = value.strip().lower()
+        if not selected:
+            return None
+        if selected not in {"google_genai", "openrouter"}:
+            raise ValueError("llm_backend must be one of: google_genai, openrouter")
+        return selected
+
+    @field_validator("model", "openrouter_api_key", "openrouter_base_url")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_openrouter_config(self) -> PostChatMessageRequest:
+        backend = self.llm_backend or "google_genai"
+        if backend == "openrouter":
+            if not self.openrouter_api_key:
+                raise ValueError("openrouter_api_key is required when llm_backend=openrouter")
+            if self.model and not is_openrouter_model_name(self.model):
+                raise ValueError(
+                    "openrouter model must use provider/model format such as openrouter/auto"
+                )
+        if backend == "google_genai" and self.model and is_openrouter_model_name(
+            self.model
+        ):
+            raise ValueError(
+                "google_genai backend does not accept provider/model format"
+            )
+        return self
 
 
 @router.get("/messages")
@@ -296,6 +364,10 @@ async def post_message(body: PostChatMessageRequest, session_id: uuid.UUID):
                 session_key,
                 body.text,
                 body.web_search_provider,
+                body.llm_backend,
+                body.model,
+                body.openrouter_api_key,
+                body.openrouter_base_url,
             )
         )
     return msg

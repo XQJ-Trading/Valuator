@@ -53,6 +53,22 @@
   color: var(--text-muted);
 }
 
+.select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--text-accent);
+}
+
 .actions {
   display: flex;
   align-items: center;

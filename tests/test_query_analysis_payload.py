@@ -3,6 +3,7 @@
 from domain.boundary.query_analysis_payload import (
     QueryRequirementPayload,
     QueryUnitPayload,
+    _resolve_requirement_unit_ids,
 )
 
 
@@ -50,3 +51,46 @@ def test_query_requirement_payload_accepts_requirement_without_id() -> None:
         }
     )
     assert requirement.unit_ids == [0]
+
+
+def test_resolve_requirement_unit_ids_case_insensitive_unit_id() -> None:
+    assert _resolve_requirement_unit_ids(
+        ["U1"],
+        unit_id_to_index={"u1": 0},
+        unit_count=1,
+    ) == [0]
+
+
+def test_resolve_requirement_unit_ids_strips_string_refs() -> None:
+    assert _resolve_requirement_unit_ids(
+        ["  0  "],
+        unit_id_to_index={},
+        unit_count=1,
+    ) == [0]
+
+
+def test_resolve_requirement_unit_ids_unknown_string_lists_known_ids() -> None:
+    try:
+        _resolve_requirement_unit_ids(
+            ["ghost"],
+            unit_id_to_index={"a": 0, "b": 1},
+            unit_count=2,
+        )
+    except ValueError as exc:
+        assert "ghost" in str(exc)
+        assert "a" in str(exc) and "b" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_resolve_requirement_unit_ids_range_error_names_indices() -> None:
+    try:
+        _resolve_requirement_unit_ids(
+            [99],
+            unit_id_to_index={},
+            unit_count=2,
+        )
+    except ValueError as exc:
+        assert "99" in str(exc) or "[99]" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")

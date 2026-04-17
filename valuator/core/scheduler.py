@@ -8,7 +8,14 @@ from domain.query import summarize_temporal_contract
 from .context import TaskContext
 from .shared_state import SharedState
 from .task import AtomicTask, ComplexTask, Task
-from .types import Action, TaskDecision, TaskSpec, TaskState, ToolResult
+from .types import (
+    Action,
+    TaskDecision,
+    TaskSpec,
+    TaskState,
+    TaskWorkPhase,
+    ToolResult,
+)
 
 
 class Scheduler:
@@ -414,6 +421,8 @@ class Scheduler:
         )
         has_success = any(s == TaskState.DONE for s in child_states)
         if all_terminal and has_success:
+            if isinstance(parent, ComplexTask):
+                parent.work_phase = TaskWorkPhase.SYNTHESIZE
             self._mark_ready(parent)
             return [parent.id]
         return []
@@ -429,6 +438,8 @@ class Scheduler:
         if not all_terminal:
             return
         if any(s == TaskState.DONE for s in child_states):
+            if isinstance(parent, ComplexTask):
+                parent.work_phase = TaskWorkPhase.SYNTHESIZE
             self._mark_ready(parent)
         else:
             self.mark_failed(parent, f"all children failed (last: {task.id})")

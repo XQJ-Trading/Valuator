@@ -9,8 +9,16 @@ from valuator.tools.base import ToolRegistry
 from ..context import TaskContext, TaskSummary
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
-from ..task import Task
-from ..types import TaskState, ToolRequest
+from ..task import ComplexTask, Task
+from ..types import TaskState, TaskWorkPhase, ToolRequest
+
+
+def _fact_keys_from_child_completion_payload(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    if payload.get("status") == "facts_only" and isinstance(payload.get("facts"), dict):
+        return set(payload["facts"].keys())
+    return set()
 
 
 def build_task_context(
@@ -25,6 +33,21 @@ def build_task_context(
     evidence_session_id: str = "",
 ) -> TaskContext:
     query_units = query_units_for_task(task=task, analysis=analysis)
+    include_fact_keys: frozenset[str] | None = None
+    if (
+        isinstance(task, ComplexTask)
+        and task.work_phase is TaskWorkPhase.SYNTHESIZE
+        and task.child_outputs
+    ):
+        from_child: set[str] = set()
+        for payload in task.child_outputs.values():
+            from_child |= _fact_keys_from_child_completion_payload(payload)
+        if from_child:
+            relevant = shared.relevant_fact_keys_for(
+                task_id=task.id,
+                query_unit_ids=task.query_unit_ids,
+            )
+            include_fact_keys = frozenset(relevant - from_child)
     return TaskContext(
         task_id=task.id,
         description=task.description,
@@ -53,13 +76,14 @@ def build_task_context(
         shared=shared.view_for(
             task_id=task.id,
             query_unit_ids=task.query_unit_ids,
+            include_fact_keys=include_fact_keys,
         ),
         query=query,
         query_analysis=analysis,
         query_units=query_units,
         available_tools=analysis.allowed_tools or registered_tools(tools),
         evidence=(
-            evidence_store.list_for_session_task(evidence_session_id, task.id)
+            evidence_store.list_for_session(evidence_session_id)
             if evidence_store is not None and evidence_session_id
             else []
         ),
@@ -133,13 +157,18 @@ def query_units_for_task(*, task: Task, analysis: QueryAnalysis) -> list[QueryUn
     return []
 
 
+# Tools whose args receive temporal fields here must match evidence lookup/record keys
+# (same dict passed to stable_args_hash after this enrichment).
+_TEMPORAL_ENRICH_TOOLS = frozenset({"web_search_tool"})
+
+
 def enrich_tool_request(*, tool_request: Any, ctx: TaskContext) -> ToolRequest:
     args = dict(tool_request.args)
     temporal = summarize_temporal_contract(
         as_of_kst=ctx.as_of_kst,
         units=ctx.query_units,
     )
-    if tool_request.tool_name == "web_search_tool":
+    if tool_request.tool_name in _TEMPORAL_ENRICH_TOOLS:
         for key in ("as_of_kst", "time_scope", "target_start", "target_end"):
             value = getattr(temporal, key)
             if value:

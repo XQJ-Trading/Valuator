@@ -80,6 +80,7 @@ def build_task_tree_snapshot(
             "parent_id": task.parent_id,
             "description": task.description,
             "task_name": task.task_name,
+            "work_phase": task.work_phase.value,
             "state": task.state.value,
             "error": task.error,
             "created_at": created_at,

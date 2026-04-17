@@ -4,7 +4,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable
 
 from .context import TaskContext
-from .types import FailedAttempt, TaskDecision, TaskState, ToolRequest, ToolResult
+from .types import (
+    FailedAttempt,
+    TaskDecision,
+    TaskState,
+    TaskWorkPhase,
+    ToolRequest,
+    ToolResult,
+)
 
 TaskStepDecider = Callable[["Task", TaskContext], Awaitable[TaskDecision]]
 
@@ -42,6 +49,7 @@ class Task(ABC):
         self.blocked_tools: set[str] = set()
         self.failed_attempts: list[FailedAttempt] = []
         self.last_invalid_error: str | None = None
+        self.work_phase = TaskWorkPhase.COLLECT
         self._decide = decide
 
     def bind_step(self, decide: TaskStepDecider) -> None:
@@ -78,6 +86,7 @@ class Task(ABC):
         target.blocked_tools = set(self.blocked_tools)
         target.failed_attempts = list(self.failed_attempts)
         target.last_invalid_error = self.last_invalid_error
+        target.work_phase = self.work_phase
         return target
 
     def implicit_aggregate_payload(self) -> tuple[Any, dict[str, Any]]:

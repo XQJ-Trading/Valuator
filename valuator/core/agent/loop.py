@@ -21,7 +21,7 @@ from ..decomposition import (
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
-from ..task import Task
+from ..task import ComplexTask, Task
 from ..types import (
     Action,
     AgentEvent,
@@ -29,6 +29,7 @@ from ..types import (
     FailedAttempt,
     TaskDecision,
     TaskState,
+    TaskWorkPhase,
 )
 from . import context_builder, trace as agent_trace
 
@@ -373,10 +374,19 @@ class Agent:
                 "use aggregate, decompose, wait, or fail"
             )
         elif decision.action is Action.DECOMPOSE:
-            invalid_error = self._scheduler.validate_decomposition(
-                task,
-                decision.children,
-            )
+            if (
+                isinstance(task, ComplexTask)
+                and task.work_phase is TaskWorkPhase.SYNTHESIZE
+            ):
+                invalid_error = (
+                    "decompose is not allowed in synthesize phase; use aggregate, "
+                    "wait, or fail"
+                )
+            else:
+                invalid_error = self._scheduler.validate_decomposition(
+                    task,
+                    decision.children,
+                )
         elif decision.action is Action.WAIT:
             invalid_error = self._scheduler.validate_wait(task.id, decision.wait_for)
 

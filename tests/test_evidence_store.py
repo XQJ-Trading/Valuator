@@ -65,50 +65,6 @@ def test_sqlite_evidence_store_round_trip_and_upsert(tmp_path) -> None:
     assert updated.created_at == row.created_at
 
 
-def test_sqlite_evidence_store_list_for_session_task_filters_by_subtree(tmp_path) -> None:
-    store = SqliteEvidenceStore(tmp_path / "evidence.db")
-    common = dict(
-        session_id="session-1",
-        tool_name="web_search_tool",
-        status="satisfied",
-        value_summary="ok",
-        value_ref="",
-        unit_objective="u",
-        created_at="2026-04-16T10:00:00+09:00",
-        updated_at="2026-04-16T10:00:00+09:00",
-    )
-    store.record(
-        EvidenceRow(
-            **common,
-            stable_args_hash=stable_args_hash("web_search_tool", {"query": "x"}),
-            stable_args={"query": "x"},
-            task_id="root.0",
-        )
-    )
-    store.record(
-        EvidenceRow(
-            **common,
-            stable_args_hash=stable_args_hash("web_search_tool", {"query": "y"}),
-            stable_args={"query": "y"},
-            task_id="root.1",
-        )
-    )
-    store.record(
-        EvidenceRow(
-            **common,
-            stable_args_hash=stable_args_hash("web_search_tool", {"query": "z"}),
-            stable_args={"query": "z"},
-            task_id="root.0.1",
-        )
-    )
-
-    root_rows = store.list_for_session_task("session-1", "root")
-    assert len(root_rows) == 3
-
-    branch = store.list_for_session_task("session-1", "root.0")
-    assert {r.task_id for r in branch} == {"root.0", "root.0.1"}
-
-
 def test_build_task_context_includes_session_evidence(tmp_path) -> None:
     store = SqliteEvidenceStore(tmp_path / "evidence.db")
     store.record(

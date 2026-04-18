@@ -1,9 +1,6 @@
 import {
-  forwardRef,
   useCallback,
   useEffect,
-  useImperativeHandle,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -19,6 +16,7 @@ import JsonMarkdownStyleView from "./JsonMarkdownStyleView";
 import JsonTreeView from "./JsonTreeView";
 import RawTextView from "./RawTextView";
 import RenderEverythingView from "./RenderEverythingView";
+import ConfirmCloseDialog from "./ConfirmCloseDialog";
 import { type JsonExt } from "./jsonParse";
 import styles from "./ContentView.module.css";
 
@@ -26,24 +24,25 @@ type MdViewMode = "preview" | "render-everything" | "raw";
 type JsonViewMode = "preview" | "markdown-style" | "render-everything" | "raw";
 type FilePanelMode = MdViewMode | JsonViewMode;
 
-type PanelHandle = { persist: () => Promise<void>; dirty: boolean };
-
 function TabBar({
   openTabs,
   activeTabPath,
   onSelectTab,
   onCloseTab,
+  dirtyPaths,
 }: {
   openTabs: string[];
   activeTabPath: string | null;
   onSelectTab: (path: string) => void;
   onCloseTab: (path: string) => void;
+  dirtyPaths: Set<string>;
 }) {
   return (
     <div className={styles.tabBar} role="tablist">
       {openTabs.map((path) => {
         const name = path.split("/").at(-1) ?? path;
         const isActive = path === activeTabPath;
+        const isDirty = dirtyPaths.has(path);
         return (
           <div
             key={path}
@@ -57,7 +56,7 @@ function TabBar({
             onClick={() => onSelectTab(path)}
           >
             <span className={styles.tabLabel} title={path}>
-              {name}
+              {isDirty ? `● ${name}` : name}
             </span>
             <button
               type="button"
@@ -78,10 +77,12 @@ function TabBar({
 }
 
 type EditableFilePanelProps = {
-  dataSource: DataSource;
-  filePath: string;
-  content: string;
-  onFileUpdated: (f: FileResponse) => void;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  saveError: string | null;
+  dirty: boolean;
   activeMode: FilePanelMode;
   onModeChange: (mode: FilePanelMode) => void;
   modes: Array<{ value: FilePanelMode; label: string }>;
@@ -94,125 +95,53 @@ type EditableFilePanelProps = {
   }) => ReactNode;
 };
 
-const EditableFilePanel = forwardRef<PanelHandle, EditableFilePanelProps>(
-  function EditableFilePanel(
-    {
-      dataSource,
-      filePath,
-      content,
-      onFileUpdated,
-      activeMode,
-      onModeChange,
-      modes,
-      ariaLabel,
-      mobileLayout,
-      children,
-    },
-    ref,
-  ) {
-    const [draft, setDraft] = useState(content);
-    const [savedContent, setSavedContent] = useState(content);
-    const [saving, setSaving] = useState(false);
-    const [saveError, setSaveError] = useState<string | null>(null);
-    const [draftSaved, setDraftSaved] = useState(false);
-
-    const localKey = `valuator.draft.${dataSource}.${filePath}`;
-    const draftRestoredRef = useRef(false);
-
-    useEffect(() => {
-      if (draftRestoredRef.current) {
-        // A localStorage draft is active — only track what the server has, don't overwrite local edits
-        setSavedContent(content);
-        return;
+function EditableFilePanel({
+  draft,
+  onDraftChange,
+  onSave,
+  saving,
+  saveError,
+  dirty,
+  activeMode,
+  onModeChange,
+  modes,
+  ariaLabel,
+  mobileLayout,
+  children,
+}: EditableFilePanelProps) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === "s") {
+        e.preventDefault();
+        onSave();
       }
-      setDraft(content);
-      setSavedContent(content);
-    }, [content]);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onSave]);
 
-    // Restore draft from localStorage on mount
-    useEffect(() => {
-      const stored = localStorage.getItem(localKey);
-      if (stored !== null && stored !== content) {
-        setDraft(stored);
-        setDraftSaved(true);
-        draftRestoredRef.current = true;
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+  const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
+  const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
+  const saveDisabled = !dirty || saving;
 
-    const dirty = draft !== savedContent;
-
-    const persist = useCallback(async () => {
-      if (draft === savedContent || saving) return;
-      setSaving(true);
-      setSaveError(null);
-      try {
-        const updated = await saveFile(filePath, dataSource, draft);
-        setSavedContent(updated.content);
-        setDraftSaved(false);
-        localStorage.removeItem(localKey);
-        draftRestoredRef.current = false;
-        onFileUpdated(updated);
-      } catch (e) {
-        setSaveError(e instanceof Error ? e.message : "Save failed");
-      } finally {
-        setSaving(false);
-      }
-    }, [draft, savedContent, saving, filePath, dataSource, localKey, onFileUpdated]);
-
-    // 1s debounce save to localStorage; reset draftSaved immediately on each draft change
-    useEffect(() => {
-      setDraftSaved(false);
-      const id = setTimeout(() => {
-        localStorage.setItem(localKey, draft);
-        setDraftSaved(true);
-      }, 1000);
-      return () => clearTimeout(id);
-    }, [draft, localKey]);
-
-    // Save to localStorage immediately on unmount (captures last edits when switching tabs)
-    const draftRef = useRef(draft);
-    draftRef.current = draft;
-    const savedContentRef = useRef(savedContent);
-    savedContentRef.current = savedContent;
-    useEffect(() => {
-      return () => {
-        if (draftRef.current !== savedContentRef.current) {
-          localStorage.setItem(localKey, draftRef.current);
-        }
-      };
-    }, [localKey]);
-
-    // 30s API auto-save interval
-    useEffect(() => {
-      const id = setInterval(() => void persist(), 30_000);
-      return () => clearInterval(id);
-    }, [persist]);
-
-    useImperativeHandle(ref, () => ({ persist, dirty }), [persist, dirty]);
-
-    const rootCls = mobileLayout ? `${styles.mdRoot} ${styles.mdRootMobile}` : styles.mdRoot;
-    const bodyCls = mobileLayout ? `${styles.mdBody} ${styles.mdBodyMobile}` : styles.mdBody;
-
-    return (
-      <div className={rootCls}>
-        <div className={styles.toolbar}>
-          <div className={styles.toolbarStatus} aria-live="polite">
-            {saveError ? (
-              <span className={styles.toolbarError} title={saveError}>
-                {saveError}
-              </span>
-            ) : saving ? (
-              <span>Saving…</span>
-            ) : dirty ? (
-              <>
-                <span className={styles.toolbarDirtyDot} aria-hidden />
-                <span aria-label={draftSaved ? "Saved as draft" : "Unsaved changes"}>
-                  {draftSaved ? "Saved as draft" : "Modified"}
-                </span>
-              </>
-            ) : null}
-          </div>
+  return (
+    <div className={rootCls}>
+      <div className={styles.toolbar}>
+        <div className={styles.toolbarStatus} aria-live="polite">
+          {saveError ? (
+            <span className={styles.toolbarError} title={saveError}>
+              {saveError}
+            </span>
+          ) : saving ? (
+            <span>Saving…</span>
+          ) : dirty ? (
+            <>
+              <span className={styles.toolbarDirtyDot} aria-hidden />
+              <span aria-label="Unsaved changes">Modified</span>
+            </>
+          ) : null}
+        </div>
+        <div className={styles.toolbarActions}>
           <div className={styles.segment} role="tablist" aria-label={ariaLabel}>
             {modes.map((mode) => (
               <button
@@ -231,35 +160,41 @@ const EditableFilePanel = forwardRef<PanelHandle, EditableFilePanelProps>(
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            className={styles.saveBtn}
+            onClick={onSave}
+            disabled={saveDisabled}
+            aria-label="Save file"
+            title={saveDisabled ? "변경사항 없음" : "저장 (Ctrl+S)"}
+          >
+            저장
+          </button>
         </div>
-        <div className={bodyCls}>{children({ draft, saving, setDraft })}</div>
       </div>
-    );
-  },
-);
+      <div className={bodyCls}>{children({ draft, saving, setDraft: onDraftChange })}</div>
+    </div>
+  );
+}
 
-const MarkdownFilePanel = forwardRef<
-  PanelHandle,
-  {
-    dataSource: DataSource;
-    filePath: string;
-    content: string;
-    onFileUpdated: (f: FileResponse) => void;
-    mobileLayout?: boolean;
-  }
->(function MarkdownFilePanel(
-  { dataSource, filePath, content, onFileUpdated, mobileLayout },
-  ref,
-) {
+type FilePanelSharedProps = {
+  filePath: string;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  saveError: string | null;
+  dirty: boolean;
+  mobileLayout?: boolean;
+};
+
+function MarkdownFilePanel(props: FilePanelSharedProps) {
   const [mdMode, setMdMode] = useState<MdViewMode>("preview");
+  const { filePath, ...panelProps } = props;
 
   return (
     <EditableFilePanel
-      ref={ref}
-      dataSource={dataSource}
-      filePath={filePath}
-      content={content}
-      onFileUpdated={onFileUpdated}
+      {...panelProps}
       activeMode={mdMode}
       onModeChange={(mode) => setMdMode(mode as MdViewMode)}
       modes={[
@@ -268,7 +203,6 @@ const MarkdownFilePanel = forwardRef<
         { value: "raw", label: "Markdown" },
       ]}
       ariaLabel="Markdown view"
-      mobileLayout={mobileLayout}
     >
       {({ draft, saving, setDraft }) =>
         mdMode === "preview" ? (
@@ -286,31 +220,15 @@ const MarkdownFilePanel = forwardRef<
       }
     </EditableFilePanel>
   );
-});
+}
 
-const JsonFilePanel = forwardRef<
-  PanelHandle,
-  {
-    dataSource: DataSource;
-    filePath: string;
-    content: string;
-    ext: JsonExt;
-    onFileUpdated: (f: FileResponse) => void;
-    mobileLayout?: boolean;
-  }
->(function JsonFilePanel(
-  { dataSource, filePath, content, ext, onFileUpdated, mobileLayout },
-  ref,
-) {
+function JsonFilePanel(props: FilePanelSharedProps & { ext: JsonExt }) {
   const [jsonMode, setJsonMode] = useState<JsonViewMode>("preview");
+  const { ext, filePath, ...panelProps } = props;
 
   return (
     <EditableFilePanel
-      ref={ref}
-      dataSource={dataSource}
-      filePath={filePath}
-      content={content}
-      onFileUpdated={onFileUpdated}
+      {...panelProps}
       activeMode={jsonMode}
       onModeChange={(mode) => setJsonMode(mode as JsonViewMode)}
       modes={[
@@ -320,7 +238,6 @@ const JsonFilePanel = forwardRef<
         { value: "raw", label: "Raw" },
       ]}
       ariaLabel="JSON view"
-      mobileLayout={mobileLayout}
     >
       {({ draft, saving, setDraft }) =>
         jsonMode === "preview" ? (
@@ -340,7 +257,7 @@ const JsonFilePanel = forwardRef<
       }
     </EditableFilePanel>
   );
-});
+}
 
 export default function ContentView({
   dataSource,
@@ -356,19 +273,24 @@ export default function ContentView({
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
   const [file, setFile] = useState<FileResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pendingClose, setPendingClose] = useState<string | null>(null);
   const pushToast = useToast();
-  const activePanelRef = useRef<PanelHandle | null>(null);
 
-  // dataSource가 바뀌면 이전 source의 탭 상태를 render 중에 즉시 초기화한다.
-  // effect 안에서 하면 이전 activeTabPath로 fetch가 먼저 실행된 뒤에야 리셋되므로 render 중 처리.
+  // dataSource가 바뀌면 이전 source의 탭/draft 상태를 render 중에 즉시 초기화한다.
   if (tabsDataSource !== dataSource) {
     setTabsDataSource(dataSource);
     setOpenTabs([]);
     setActiveTabPath(null);
     setFile(null);
+    setDrafts({});
+    setSaving(false);
+    setSaveError(null);
+    setPendingClose(null);
   }
 
-  // Sync filePath prop changes to tabs
   useEffect(() => {
     if (!filePath) return;
     setOpenTabs((prev) =>
@@ -377,52 +299,116 @@ export default function ContentView({
     setActiveTabPath(filePath);
   }, [filePath]);
 
-  // Fetch file content based on active tab
-  /* eslint-disable react-hooks/set-state-in-effect -- sync loading/error from async fetch */
   useEffect(() => {
     if (!activeTabPath) return;
     setLoading(true);
+    setSaveError(null);
     fetchFile(activeTabPath, dataSource)
       .then(setFile)
       .catch((e: Error) =>
         pushToast({ type: "warning", title: "File not found", message: e.message })
       )
       .finally(() => setLoading(false));
-  }, [activeTabPath, dataSource]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [activeTabPath, dataSource, pushToast]);
 
-  const closeTab = useCallback(async (path: string) => {
-    // Active panel: save via mounted component's persist
-    if (path === activeTabPath && activePanelRef.current?.dirty) {
-      await activePanelRef.current.persist();
-    } else {
-      // Inactive tab: check localStorage for unsaved draft
-      const localKey = `valuator.draft.${dataSource}.${path}`;
-      const stored = localStorage.getItem(localKey);
-      if (stored !== null) {
-        try {
-          await saveFile(path, dataSource, stored);
-          localStorage.removeItem(localKey);
-        } catch {
-          // Don't block tab close on save failure
+  const persist = useCallback(
+    async (path: string): Promise<boolean> => {
+      const content = drafts[path];
+      if (content === undefined) return true;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const updated = await saveFile(path, dataSource, content);
+        setDrafts((prev) => {
+          if (prev[path] === undefined) return prev;
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        });
+        if (path === activeTabPath) setFile(updated);
+        return true;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Save failed";
+        setSaveError(msg);
+        pushToast({ type: "warning", title: "저장 실패", message: msg });
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [drafts, dataSource, activeTabPath, pushToast],
+  );
+
+  const removeTab = useCallback(
+    (path: string) => {
+      setDrafts((prev) => {
+        if (prev[path] === undefined) return prev;
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
+      setOpenTabs((prev) => {
+        const next = prev.filter((p) => p !== path);
+        if (activeTabPath === path) {
+          const idx = prev.indexOf(path);
+          setActiveTabPath(next[idx] ?? next[idx - 1] ?? null);
         }
+        return next;
+      });
+    },
+    [activeTabPath],
+  );
+
+  const closeTab = useCallback(
+    (path: string) => {
+      if (drafts[path] !== undefined) {
+        setPendingClose(path);
+        return;
       }
+      removeTab(path);
+    },
+    [drafts, removeTab],
+  );
+
+  const handleDialogSave = useCallback(async () => {
+    if (!pendingClose) return;
+    const path = pendingClose;
+    const ok = await persist(path);
+    if (ok) {
+      setPendingClose(null);
+      removeTab(path);
     }
-    setOpenTabs((prev) => {
-      const next = prev.filter((p) => p !== path);
-      if (activeTabPath === path) {
-        const idx = prev.indexOf(path);
-        setActiveTabPath(next[idx] ?? next[idx - 1] ?? null);
-      }
-      return next;
-    });
-  }, [activeTabPath, dataSource]);
+  }, [pendingClose, persist, removeTab]);
 
-  if (openTabs.length === 0) {
-    return <div className="content-empty">Select a file to view</div>;
-  }
+  const handleDialogDiscard = useCallback(() => {
+    if (!pendingClose) return;
+    const path = pendingClose;
+    setPendingClose(null);
+    removeTab(path);
+  }, [pendingClose, removeTab]);
 
-  if (!activeTabPath) {
+  const handleDialogCancel = useCallback(() => {
+    setPendingClose(null);
+  }, []);
+
+  const handleDraftChange = useCallback(
+    (value: string) => {
+      if (!activeTabPath) return;
+      const key = activeTabPath;
+      setDrafts((prev) => ({ ...prev, [key]: value }));
+      setSaveError(null);
+    },
+    [activeTabPath],
+  );
+
+  const handleSaveActive = useCallback(() => {
+    if (!activeTabPath) return;
+    void persist(activeTabPath);
+  }, [activeTabPath, persist]);
+
+  const dirtyPaths = new Set(Object.keys(drafts));
+
+  if (openTabs.length === 0 || !activeTabPath) {
     return <div className="content-empty">Select a file to view</div>;
   }
 
@@ -430,37 +416,28 @@ export default function ContentView({
   if (!file) return null;
 
   const ext = file.ext.toLowerCase();
+  const currentDraft =
+    drafts[activeTabPath] !== undefined ? drafts[activeTabPath] : file.content;
+  const dirty = drafts[activeTabPath] !== undefined;
+
+  const sharedProps: FilePanelSharedProps = {
+    filePath: activeTabPath,
+    draft: currentDraft,
+    onDraftChange: handleDraftChange,
+    onSave: handleSaveActive,
+    saving,
+    saveError,
+    dirty,
+    mobileLayout,
+  };
 
   const renderContent = () => {
     if (ext === ".md") {
-      return (
-        <MarkdownFilePanel
-          key={activeTabPath}
-          ref={activePanelRef}
-          dataSource={dataSource}
-          filePath={activeTabPath}
-          content={file.content}
-          onFileUpdated={setFile}
-          mobileLayout={mobileLayout}
-        />
-      );
+      return <MarkdownFilePanel key={activeTabPath} {...sharedProps} />;
     }
-
     if (ext === ".json" || ext === ".jsonl") {
-      return (
-        <JsonFilePanel
-          key={activeTabPath}
-          ref={activePanelRef}
-          dataSource={dataSource}
-          filePath={activeTabPath}
-          content={file.content}
-          ext={ext}
-          onFileUpdated={setFile}
-          mobileLayout={mobileLayout}
-        />
-      );
+      return <JsonFilePanel key={activeTabPath} {...sharedProps} ext={ext} />;
     }
-
     return (
       <div className="content-area">
         <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
@@ -474,6 +451,10 @@ export default function ContentView({
     ? `${styles.tabViewRoot} ${styles.tabViewRootMobile}`
     : styles.tabViewRoot;
 
+  const pendingFileName = pendingClose
+    ? (pendingClose.split("/").at(-1) ?? pendingClose)
+    : "";
+
   return (
     <div className={tabViewCls}>
       <TabBar
@@ -481,8 +462,17 @@ export default function ContentView({
         activeTabPath={activeTabPath}
         onSelectTab={setActiveTabPath}
         onCloseTab={closeTab}
+        dirtyPaths={dirtyPaths}
       />
       {renderContent()}
+      {pendingClose && (
+        <ConfirmCloseDialog
+          fileName={pendingFileName}
+          onSave={handleDialogSave}
+          onDiscard={handleDialogDiscard}
+          onCancel={handleDialogCancel}
+        />
+      )}
     </div>
   );
 }

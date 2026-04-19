@@ -175,3 +175,33 @@
 .successLink:hover {
   text-decoration: underline;
 }
+
+.modeGroup {
+  display: flex;
+  gap: 0;
+}
+
+.modeBtn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.modeBtn:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.modeBtn:last-child {
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+
+.modeBtnActive {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--text-accent) 8%, transparent);
+  font-weight: 500;
+}

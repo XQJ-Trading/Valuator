@@ -12,6 +12,8 @@ import styles from "./UploadSessionCard.module.css";
 // so cap raw file size at 800KB to stay safely under the 1MB request body limit.
 const MAX_UPLOAD_BYTES = 800 * 1024;
 
+const CORE_ENTRIES = new Set(["session.json", "browse", "output"]);
+
 async function remoteFetch(url: string, init: RequestInit): Promise<Response> {
   const res = await fetch(url, init);
   // 409 Conflict = already exists, treat as success for idempotent creates
@@ -47,6 +49,8 @@ export default function UploadSessionCard() {
   const [sessions, setSessions] = useState<string[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [selectedSession, setSelectedSession] = useState("");
+
+  const [uploadMode, setUploadMode] = useState<"core" | "full">("core");
 
   const [uploadState, setUploadState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -97,16 +101,33 @@ export default function UploadSessionCard() {
     setProgress({ done: 0, total: 0 });
 
     try {
-      // BFS 트리 탐색
       const allDirs: string[] = [];
       const allFiles: string[] = [];
-      const queue: string[] = [selectedSession];
+      const queue: string[] = [];
 
+      if (uploadMode === "core") {
+        // 세션 루트에서 CORE_ENTRIES에 포함된 항목만 선택
+        const rootTree = await fetchTree(selectedSession, "session");
+        for (const entry of rootTree.children) {
+          if (!CORE_ENTRIES.has(entry.name)) continue;
+          const fullPath = `${selectedSession}/${entry.name}`;
+          if (entry.type === "directory") {
+            allDirs.push(fullPath);
+            queue.push(fullPath);
+          } else {
+            allFiles.push(fullPath);
+          }
+        }
+      } else {
+        queue.push(selectedSession);
+      }
+
+      // BFS — full 모드는 trace/ 스킵, core 모드는 이미 필터된 큐에서 시작
       while (queue.length > 0) {
         const cur = queue.shift()!;
         const tree = await fetchTree(cur, "session");
         for (const entry of tree.children) {
-          if (entry.name === "trace") continue;
+          if (uploadMode === "full" && entry.name === "trace") continue;
           const fullPath = `${cur}/${entry.name}`;
           if (entry.type === "directory") {
             allDirs.push(fullPath);
@@ -208,8 +229,9 @@ export default function UploadSessionCard() {
       </div>
 
       <p className={styles.cardDesc}>
-        로컬에서 실행한 세션 분석 결과를 배포 서버로 업로드합니다.{" "}
-        <code>trace/</code> 디렉터리와 1.5MB 초과 파일은 제외됩니다.
+        {uploadMode === "core"
+          ? "browse, output 디렉터리와 session.json만 업로드합니다."
+          : "trace/ 제외, 800KB 이하 전체 파일을 업로드합니다."}
       </p>
 
       {configOpen && (
@@ -255,6 +277,28 @@ export default function UploadSessionCard() {
           </div>
         </div>
       )}
+
+      <div className={styles.section}>
+        <label className={styles.sectionLabel}>업로드 범위</label>
+        <div className={styles.modeGroup}>
+          <button
+            type="button"
+            className={`${styles.modeBtn}${uploadMode === "core" ? ` ${styles.modeBtnActive}` : ""}`}
+            onClick={() => setUploadMode("core")}
+            disabled={uploadState === "running"}
+          >
+            핵심만
+          </button>
+          <button
+            type="button"
+            className={`${styles.modeBtn}${uploadMode === "full" ? ` ${styles.modeBtnActive}` : ""}`}
+            onClick={() => setUploadMode("full")}
+            disabled={uploadState === "running"}
+          >
+            전체
+          </button>
+        </div>
+      </div>
 
       <div className={styles.section}>
         <label className={styles.sectionLabel}>세션 선택</label>

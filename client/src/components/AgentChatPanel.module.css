@@ -132,38 +132,10 @@
   gap: 6px;
 }
 
-.controlsRow {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.providerLabel {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.providerSelect {
-  min-width: 160px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.providerSelect:focus {
-  outline: none;
-  border-color: var(--text-accent);
-}
 
 .inputRow {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 6px;
 }
 

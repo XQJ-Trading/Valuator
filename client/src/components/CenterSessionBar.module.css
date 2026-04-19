@@ -1,69 +1,53 @@
 .centerBar {
   flex-shrink: 0;
-  min-height: 40px;
-  max-height: 220px;
-  padding: 6px 16px;
+  height: 40px;
+  padding: 0 16px;
   background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  justify-content: center;
-  overflow-y: auto;
-}
-
-.centerBarInner {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  max-width: min(960px, 100%);
-  width: 100%;
 }
 
 .barRow {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .statusArea {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  max-height: 200px;
-  overflow-y: auto;
+  gap: 8px;
+  overflow: hidden;
 }
 
 .flowLine {
-  align-self: stretch;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-primary);
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1;
   color: var(--text-primary);
   font-weight: 500;
   font-family: "SF Mono", "Fira Code", Menlo, monospace;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .progressItem {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  max-width: 100%;
+  overflow: hidden;
 }
 
 .progressSpinner {
@@ -83,28 +67,37 @@
 }
 
 .progressName {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  text-align: center;
+  font-size: 12px;
   color: var(--text-primary);
   font-weight: 500;
 }
 
 .runningLabel {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .idle {
   font-size: 12px;
   color: var(--text-secondary);
   opacity: 0.85;
+  white-space: nowrap;
 }
 
 .stopBtn {
   flex-shrink: 0;
-  padding: 6px 14px;
+  height: 28px;
+  padding: 0 14px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -112,6 +105,7 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .stopBtn:hover:not(:disabled) {

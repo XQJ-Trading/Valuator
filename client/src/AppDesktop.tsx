@@ -7,6 +7,7 @@ import ActivitySidebar from "./components/ActivitySidebar";
 import FileTree from "./components/FileTree";
 import ContentView from "./components/ContentView";
 import ConfigView from "./components/ConfigView";
+import DeveloperView from "./components/DeveloperView";
 import AgentChatPanel from "./components/AgentChatPanel";
 import CenterSessionBar from "./components/CenterSessionBar";
 import TaskTreeOutline from "./components/TaskTreeOutline";
@@ -80,6 +81,8 @@ export default function AppDesktop() {
               <div className="main-content">
                 {activityView === "config" ? (
                   <ConfigView />
+                ) : activityView === "developer" ? (
+                  <DeveloperView />
                 ) : (
                   <>
                     <Group orientation="horizontal" className="panels">

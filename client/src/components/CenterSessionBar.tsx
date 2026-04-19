@@ -38,44 +38,39 @@ export default function CenterSessionBar() {
 
   return (
     <div className={styles.centerBar} role="status" aria-live="polite">
-      <div className={styles.centerBarInner}>
-        <div className={styles.barRow}>
-          <div className={styles.statusArea}>
-            {flow ? (
-              <div className={styles.flowLine}>
-                {formatStepLine(
-                  flow,
-                  humanTaskLabel(flow.taskId, flow.taskName, taskDisplayNames),
-                )}
-              </div>
-            ) : showProgress ? (
-              activeTaskIds.map((id) => (
-                <div key={id} className={styles.progressItem}>
-                  <span className={styles.progressSpinner} aria-hidden="true" />
-                  <span className={styles.progressName}>
-                    {taskDisplayNames.get(id) ?? taskDescriptions.get(id) ?? id}
-                  </span>
-                </div>
-              ))
-            ) : agentRunning ? (
-              <div className={styles.progressItem}>
+      <div className={styles.barRow}>
+        <div className={styles.statusArea}>
+          {flow ? (
+            <span className={styles.flowLine} title={formatStepLine(flow, humanTaskLabel(flow.taskId, flow.taskName, taskDisplayNames))}>
+              {formatStepLine(flow, humanTaskLabel(flow.taskId, flow.taskName, taskDisplayNames))}
+            </span>
+          ) : showProgress ? (
+            activeTaskIds.slice(0, 1).map((id) => (
+              <div key={id} className={styles.progressItem}>
                 <span className={styles.progressSpinner} aria-hidden="true" />
-                <span className={styles.runningLabel}>에이전트 실행 중…</span>
+                <span className={styles.progressName} title={taskDisplayNames.get(id) ?? taskDescriptions.get(id) ?? id}>
+                  {taskDisplayNames.get(id) ?? taskDescriptions.get(id) ?? id}
+                </span>
               </div>
-            ) : (
-              <span className={styles.idle}>에이전트 대기 중</span>
-            )}
-          </div>
-          <button
-            type="button"
-            className={styles.stopBtn}
-            disabled={!agentRunning}
-            onClick={() => void stopAgent()}
-            title={agentRunning ? "실행 중인 에이전트 프로세스를 중지합니다" : "실행 중인 세션이 없습니다"}
-          >
-            세션 중지
-          </button>
+            ))
+          ) : agentRunning ? (
+            <div className={styles.progressItem}>
+              <span className={styles.progressSpinner} aria-hidden="true" />
+              <span className={styles.runningLabel}>에이전트 실행 중…</span>
+            </div>
+          ) : (
+            <span className={styles.idle}>에이전트 대기 중</span>
+          )}
         </div>
+        <button
+          type="button"
+          className={styles.stopBtn}
+          disabled={!agentRunning}
+          onClick={() => void stopAgent()}
+          title={agentRunning ? "실행 중인 에이전트 프로세스를 중지합니다" : "실행 중인 세션이 없습니다"}
+        >
+          세션 중지
+        </button>
       </div>
     </div>
   );

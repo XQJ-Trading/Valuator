@@ -1,57 +1,17 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import type { Editor } from "@tiptap/core";
-import { EditorContent, useEditor } from "@tiptap/react";
-import { mergeAttributes } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import Mention from "@tiptap/extension-mention";
-import Placeholder from "@tiptap/extension-placeholder";
-import {
-  createMentionSuggestionRender,
-  fetchMentionItems,
-} from "./mentionSuggestionConfig";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { MentionsInput, Mention } from "react-mentions";
+import type { SuggestionDataItem } from "react-mentions";
+import { fetchMentionItems } from "./mentionSuggestionConfig";
+import { renderMentionItem, type FileMentionItem } from "./MentionSuggestion";
 import styles from "./ChatEditor.module.css";
 
 export type ChatEditorHandle = {
   clear: () => void;
 };
 
-const MENTION_LIMIT = 5;
-
-const FileMention = Mention.extend({
-  selectable: true,
-}).configure({
-  deleteTriggerWithBackspace: false,
-  renderText({ node }) {
-    const id = node.attrs.id ?? "";
-    const idx = id.indexOf(":");
-    if (idx >= 0) {
-      const source = id.slice(0, idx);
-      const relPath = id.slice(idx + 1);
-      return `@[${source}:${relPath}]`;
-    }
-    return `@${node.attrs.label ?? id}`;
-  },
-  renderHTML({ node, suggestion }) {
-    const label = node.attrs.label ?? node.attrs.id;
-    const ch = suggestion?.char ?? "@";
-    return [
-      "span",
-      mergeAttributes(
-        { class: "chat-mention", "data-type": "mention" },
-        {
-          "data-id": node.attrs.id ?? undefined,
-          "data-label": node.attrs.label ?? undefined,
-        },
-      ),
-      `${ch}${label}`,
-    ];
-  },
-  suggestion: {
-    char: "@",
-    items: async ({ query }) => fetchMentionItems(query, MENTION_LIMIT),
-    render: createMentionSuggestionRender(),
-  },
-});
+// react-mentions stores markup as @[display](id); convert to @[id] before sending
+const toSendFormat = (v: string) =>
+  v.replace(/@\[([^\]]*?)\]\(([^)]*?)\)/g, "@[$2]");
 
 const ChatEditor = forwardRef<
   ChatEditorHandle,
@@ -61,86 +21,80 @@ const ChatEditor = forwardRef<
     onDraftChange?: (plainText: string) => void;
   }
 >(function ChatEditor({ disabled, onSubmit, onDraftChange }, ref) {
+  const [value, setValue] = useState("");
+  const valueRef = useRef("");
   const onSubmitRef = useRef(onSubmit);
   const onDraftChangeRef = useRef(onDraftChange);
-  const editorRef = useRef<Editor | null>(null);
 
-  useEffect(() => {
-    onSubmitRef.current = onSubmit;
-  }, [onSubmit]);
-
-  useEffect(() => {
-    onDraftChangeRef.current = onDraftChange;
-  }, [onDraftChange]);
-
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: false,
-        blockquote: false,
-        bulletList: false,
-        orderedList: false,
-        listItem: false,
-        listKeymap: false,
-        codeBlock: false,
-        horizontalRule: false,
-        bold: false,
-        italic: false,
-        strike: false,
-        code: false,
-        link: false,
-        underline: false,
-        trailingNode: false,
-      }),
-      FileMention,
-      Placeholder.configure({
-        placeholder: "Message…",
-        emptyEditorClass: "is-editor-empty",
-      }),
-    ],
-    content: "<p></p>",
-    onCreate: ({ editor: ed }) => {
-      editorRef.current = ed;
-    },
-    onDestroy: () => {
-      editorRef.current = null;
-    },
-    onUpdate: ({ editor: ed }) => {
-      onDraftChangeRef.current?.(ed.getText());
-    },
-    editorProps: {
-      attributes: {
-        spellcheck: "false",
-      },
-      handleKeyDown: (_view, event) => {
-        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-          event.preventDefault();
-          const ed = editorRef.current;
-          if (!ed) return false;
-          const text = ed.getText().trim();
-          if (text) onSubmitRef.current(text);
-          return true;
-        }
-        return false;
-      },
-    },
-    immediatelyRender: true,
-  });
+  useEffect(() => { onSubmitRef.current = onSubmit; }, [onSubmit]);
+  useEffect(() => { onDraftChangeRef.current = onDraftChange; }, [onDraftChange]);
 
   useImperativeHandle(ref, () => ({
     clear: () => {
-      editorRef.current?.commands.clearContent();
+      setValue("");
+      valueRef.current = "";
       onDraftChangeRef.current?.("");
     },
   }));
 
-  useEffect(() => {
-    editor?.setEditable(!disabled);
-  }, [disabled, editor]);
+  const handleChange = (
+    _e: { target: { value: string } },
+    newValue: string,
+    newPlainTextValue: string,
+  ) => {
+    setValue(newValue);
+    valueRef.current = newValue;
+    // Pass send-format so AgentChatPanel draft state contains the final text
+    onDraftChangeRef.current?.(
+      newPlainTextValue.trim() ? toSendFormat(newValue) : "",
+    );
+  };
+
+  const handleKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement> | React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const text = toSendFormat(valueRef.current).trim();
+      if (text) onSubmitRef.current(text);
+    }
+  };
+
+  const fetchSuggestions = async (
+    query: string,
+    callback: (data: SuggestionDataItem[]) => void,
+  ) => {
+    const items = await fetchMentionItems(query);
+    callback(items.map((item) => ({ ...item, display: item.label })));
+  };
 
   return (
     <div className={styles.wrap}>
-      <EditorContent editor={editor} className={styles.editor} />
+      <MentionsInput
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        disabled={disabled}
+        placeholder="Message…"
+        spellCheck={false}
+        allowSuggestionsAboveCursor
+        suggestionsPortalHost={document.body}
+        className={`react-mentions ${styles.mentionsInput}`}
+        style={{ highlighter: { border: 'none' } }}
+        a11ySuggestionsListLabel="File mentions"
+      >
+        <Mention
+          trigger="@"
+          data={fetchSuggestions}
+          markup="@[__display__](__id__)"
+          displayTransform={(_id, display) => `@${display}`}
+          renderSuggestion={(suggestion, _search, _highlightedDisplay, _index, focused) =>
+            renderMentionItem(suggestion as unknown as FileMentionItem, focused)
+          }
+          className={styles.mention}
+          appendSpaceOnAdd
+        />
+      </MentionsInput>
     </div>
   );
 });

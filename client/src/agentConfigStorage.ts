@@ -11,6 +11,8 @@ export interface AgentConfig {
   webSearchProvider: SavedWebSearchProvider;
   llmBackend: SavedLlmBackend;
   model: string;
+  /** 모델 추가(입력칸) UI를 켠 상태. 저장되어 Save 이후에도 유지된다. */
+  customModelUiOpen: boolean;
   openrouterApiKey: string;
   openrouterBaseUrl: string;
 }
@@ -21,6 +23,7 @@ const DEFAULTS: AgentConfig = {
   webSearchProvider: "",
   llmBackend: "google_genai",
   model: DEFAULT_MODEL,
+  customModelUiOpen: false,
   openrouterApiKey: "",
   openrouterBaseUrl: DEFAULT_OPENROUTER_BASE_URL,
 };
@@ -41,6 +44,7 @@ function parseStored(raw: string | null): AgentConfig {
       typeof o.model === "string" && o.model.trim()
         ? o.model.trim()
         : DEFAULTS.model;
+    const customModelUiOpen = o.customModelUiOpen === true;
     const openrouterApiKey =
       typeof o.openrouterApiKey === "string" ? o.openrouterApiKey.trim() : "";
     const openrouterBaseUrl =
@@ -53,6 +57,7 @@ function parseStored(raw: string | null): AgentConfig {
       webSearchProvider,
       llmBackend,
       model,
+      customModelUiOpen,
       openrouterApiKey,
       openrouterBaseUrl,
     };
@@ -71,6 +76,14 @@ export function loadAgentConfig(): AgentConfig {
 
 export function saveAgentConfig(config: AgentConfig): void {
   try {
+    const model = config.model.trim() || DEFAULTS.model;
+    const llmBackend =
+      config.llmBackend === "openrouter" ? "openrouter" : DEFAULTS.llmBackend;
+    const isPresetModel =
+      (llmBackend === "google_genai" && model === DEFAULT_MODEL) ||
+      (llmBackend === "openrouter" && model === "openrouter/auto");
+    const customModelUiOpen =
+      !isPresetModel && config.customModelUiOpen === true ? true : false;
     const payload: AgentConfig = {
       authKey: config.authKey,
       authSecret: config.authSecret,
@@ -79,9 +92,9 @@ export function saveAgentConfig(config: AgentConfig): void {
         config.webSearchProvider === "tavily"
           ? config.webSearchProvider
           : DEFAULTS.webSearchProvider,
-      llmBackend:
-        config.llmBackend === "openrouter" ? "openrouter" : DEFAULTS.llmBackend,
-      model: config.model.trim() || DEFAULTS.model,
+      llmBackend,
+      model,
+      customModelUiOpen,
       openrouterApiKey: config.openrouterApiKey.trim(),
       openrouterBaseUrl:
         config.openrouterBaseUrl.trim() || DEFAULTS.openrouterBaseUrl,

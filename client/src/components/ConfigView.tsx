@@ -11,10 +11,28 @@ import {
 } from "../agentConfigStorage";
 import styles from "./ConfigView.module.css";
 
-const MODEL_PRESETS = {
-  google_genai: ["gemini-3-flash-preview", "gemini-3-pro-preview"],
-  openrouter: ["openrouter/auto", "google/gemini-2.5-flash"],
-} as const;
+type ModelPick =
+  | "gemini-3-flash-preview"
+  | "openrouter"
+  | "saved_custom"
+  | "add_model";
+
+function hasNonPresetModel(c: AgentConfig): boolean {
+  return (
+    (c.llmBackend === "google_genai" && c.model !== "gemini-3-flash-preview") ||
+    (c.llmBackend === "openrouter" && c.model !== "openrouter/auto")
+  );
+}
+
+function deriveModelPick(c: AgentConfig): ModelPick {
+  if (c.customModelUiOpen === true) {
+    return "add_model";
+  }
+  if (hasNonPresetModel(c)) {
+    return "saved_custom";
+  }
+  return c.llmBackend === "openrouter" ? "openrouter" : "gemini-3-flash-preview";
+}
 
 export default function ConfigView() {
   const keyId = useId();
@@ -29,12 +47,16 @@ export default function ConfigView() {
   const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>([]);
   const [providersLoading, setProvidersLoading] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
+  const [modelPick, setModelPick] = useState<ModelPick>(() =>
+    deriveModelPick(loadAgentConfig()),
+  );
 
   useEffect(() => {
     let cancelled = false;
     const c = loadAgentConfig();
     setDraft(c);
     setSaved(c);
+    setModelPick(deriveModelPick(c));
     void fetchWebSearchProviders()
       .then((response) => {
         if (!cancelled) {
@@ -63,25 +85,27 @@ export default function ConfigView() {
     draft.llmBackend !== saved.llmBackend ||
     draft.model !== saved.model ||
     draft.openrouterApiKey !== saved.openrouterApiKey ||
-    draft.openrouterBaseUrl !== saved.openrouterBaseUrl;
+    draft.openrouterBaseUrl !== saved.openrouterBaseUrl ||
+    draft.customModelUiOpen !== saved.customModelUiOpen;
 
   const selectedProvider = draft.webSearchProvider || webSearchProviders[0] || "";
   const providerUnavailable =
     selectedProvider.length > 0 &&
     !webSearchProviders.some((provider) => provider === selectedProvider);
-  const selectedModelOption =
-    draft.llmBackend === "openrouter" ? "openrouter" : "gemini-3-flash-preview";
-
   const persist = () => {
-    saveAgentConfig(draft);
+    const nonPreset = hasNonPresetModel(draft);
+    const toSave =
+      nonPreset && draft.customModelUiOpen
+        ? { ...draft, customModelUiOpen: false }
+        : draft;
+    saveAgentConfig(toSave);
     const next = loadAgentConfig();
     setDraft(next);
     setSaved(next);
+    setModelPick(deriveModelPick(next));
     setStatus("Saved.");
     window.setTimeout(() => setStatus(null), 2000);
   };
-
-  const modelPresets = MODEL_PRESETS[draft.llmBackend];
 
   return (
     <Group orientation="horizontal" className="panels">
@@ -167,75 +191,84 @@ export default function ConfigView() {
                 </div>
               </div>
               <div className={styles.field}>
-                <label className={styles.label} htmlFor={backendId}>
-                  Select model
-                </label>
-                <select
-                  id={backendId}
-                  className={styles.select}
-                  value={selectedModelOption}
-                  onChange={(e) =>
-                    setDraft((current) => {
+                <div className={styles.label}>Select model</div>
+                <div className={styles.modelBlock}>
+                  <select
+                    id={backendId}
+                    className={styles.select}
+                    value={modelPick}
+                    aria-label="LLM backend and model mode"
+                    onChange={(e) => {
                       const nextOption = e.target.value;
-                      const nextBackend: AgentConfig["llmBackend"] =
-                        nextOption === "openrouter" ? "openrouter" : "google_genai";
-                      let nextModel = current.model;
-                      if (nextBackend === "openrouter" && !nextModel.includes("/")) {
-                        nextModel = "openrouter/auto";
+                      if (nextOption === "add_model") {
+                        setModelPick("add_model");
+                        setDraft((d) => ({ ...d, customModelUiOpen: true }));
+                        return;
                       }
-                      if (
-                        nextBackend === "google_genai" &&
-                        nextModel !== "gemini-3-flash-preview"
-                      ) {
-                        nextModel = "gemini-3-flash-preview";
+                      if (nextOption === "saved_custom") {
+                        setModelPick("saved_custom");
+                        setDraft((d) => ({ ...d, customModelUiOpen: false }));
+                        return;
                       }
-                      return {
-                        ...current,
-                        llmBackend: nextBackend,
-                        model: nextModel,
-                      };
-                    })
-                  }
-                >
-                  <option value="gemini-3-flash-preview">
-                    gemini-3-flash-preview
-                  </option>
-                  <option value="openrouter">OpenRouter</option>
-                </select>
-                <div className={styles.hint}>
-                  기본 선택지는 <code>gemini-3-flash-preview</code>와{" "}
-                  <code>OpenRouter</code>입니다.
+                      setModelPick(nextOption as "gemini-3-flash-preview" | "openrouter");
+                      setDraft((current) => {
+                        if (nextOption === "gemini-3-flash-preview") {
+                          return {
+                            ...current,
+                            llmBackend: "google_genai",
+                            model: "gemini-3-flash-preview",
+                            customModelUiOpen: false,
+                          };
+                        }
+                        let nextModel = current.model;
+                        if (!nextModel.includes("/")) {
+                          nextModel = "openrouter/auto";
+                        }
+                        return {
+                          ...current,
+                          llmBackend: "openrouter",
+                          model: nextModel,
+                          customModelUiOpen: false,
+                        };
+                      });
+                    }}
+                  >
+                    <option value="gemini-3-flash-preview">
+                      gemini-3-flash-preview
+                    </option>
+                    <option value="openrouter">OpenRouter</option>
+                    {hasNonPresetModel(draft) ? (
+                      <option value="saved_custom">{draft.model}</option>
+                    ) : null}
+                    <option value="add_model">모델 추가</option>
+                  </select>
+                  {modelPick === "add_model" ? (
+                    <input
+                      id={modelId}
+                      className={styles.input}
+                      type="text"
+                      value={draft.model}
+                      aria-label="Custom model ID"
+                      onChange={(e) =>
+                        setDraft((current) => ({
+                          ...current,
+                          model: e.target.value,
+                          customModelUiOpen: true,
+                        }))
+                      }
+                      placeholder={
+                        draft.llmBackend === "openrouter"
+                          ? "provider/model"
+                          : "gemini-3-flash-preview"
+                      }
+                      autoComplete="off"
+                    />
+                  ) : null}
                 </div>
-              </div>
-              <div className={styles.field}>
-                <label className={styles.label} htmlFor={modelId}>
-                  Selected model
-                </label>
-                <input
-                  id={modelId}
-                  className={styles.input}
-                  list={`${modelId}-options`}
-                  type="text"
-                  value={draft.model}
-                  onChange={(e) => setDraft((current) => ({ ...current, model: e.target.value }))}
-                  placeholder="gemini-3-flash-preview"
-                  autoComplete="off"
-                />
-                <datalist id={`${modelId}-options`}>
-                  {modelPresets.map((model) => (
-                    <option key={model} value={model} />
-                  ))}
-                </datalist>
                 <div className={styles.hint}>
-                  {draft.llmBackend === "google_genai" ? (
-                    <>
-                      기본값은 <code>gemini-3-flash-preview</code>입니다.
-                    </>
-                  ) : (
-                    <>
-                      OpenRouter 모델은 <code>provider/model</code> 형식으로 입력하세요.
-                    </>
-                  )}
+                  저장한 비프리셋 모델은 셀렉트에 그대로 뜹니다. <code>모델 추가</code>는 입력칸을
+                  켭니다. OpenRouter는 <code>provider/model</code>, Google GenAI는 모델 이름만. Save
+                  시 모델·UI 상태가 함께 저장됩니다.
                 </div>
               </div>
               <div

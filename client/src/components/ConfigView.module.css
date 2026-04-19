@@ -19,6 +19,12 @@
   gap: 4px;
 }
 
+.modelBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .label {
   font-size: 11px;
   text-transform: uppercase;

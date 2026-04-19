@@ -56,10 +56,31 @@ function IconConfig() {
   );
 }
 
+function IconDeveloper() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M8 9l-3 3 3 3M16 9l3 3-3 3"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 7l-2 10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 const items: { id: ActivityView; label: string; Icon: () => JSX.Element }[] = [
   { id: "session", label: "session-data", Icon: IconSession },
   { id: "guide", label: "guide-data", Icon: IconGuide },
   { id: "config", label: "config", Icon: IconConfig },
+  { id: "developer", label: "developer", Icon: IconDeveloper },
 ];
 
 export default function ActivitySidebar({

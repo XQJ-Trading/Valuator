@@ -2,7 +2,7 @@ import { loadAgentConfig } from "./agentConfigStorage";
 
 export type DataSource = "session" | "guide";
 
-export type ActivityView = DataSource | "config";
+export type ActivityView = DataSource | "config" | "developer";
 
 export interface TreeEntry {
   name: string;

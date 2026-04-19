@@ -139,7 +139,7 @@ export default function AgentChatPanel() {
             Send
           </button>
         </div>
-        <span className={styles.hint}>⌘↵ or Ctrl+↵ to send</span>
+        <span className={styles.hint}>↵ to send · Shift+↵ for new line</span>
       </div>
     </div>
   );

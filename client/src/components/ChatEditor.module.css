@@ -5,53 +5,96 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
 }
 
-.editor {
+/* react-mentions outer container */
+.mentionsInput {
   flex: 1;
   min-height: 36px;
   max-height: 120px;
-  overflow-y: auto;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
   font: inherit;
   font-size: 12px;
   line-height: 1.4;
 }
 
-.editor:focus-within {
+/* The control layer (positions textarea + highlighter) */
+.mentionsInput :global(.react-mentions__control) {
+  min-height: 36px;
+  max-height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.mentionsInput:focus-within :global(.react-mentions__control) {
+  border-color: color-mix(in srgb, var(--text-accent) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-accent) 12%, transparent);
   outline: none;
-  border-color: var(--text-accent);
 }
 
-.editor :global(.ProseMirror) {
+/* The actual textarea */
+.mentionsInput :global(.react-mentions__input) {
+  padding: 7px 10px;
+  color: var(--text-primary);
+  border: none;
   outline: none;
-  min-height: 20px;
+  background: transparent;
+  resize: none;
+  overflow-y: auto !important;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-.editor :global(.ProseMirror p) {
-  margin: 0;
-}
-
-.editor :global(.ProseMirror p + p) {
-  margin-top: 0.25em;
-}
-
-.editor :global(.chat-mention) {
-  color: var(--text-accent);
-  font-weight: 500;
-  border-radius: 3px;
-  padding: 0 1px;
-  background: color-mix(in srgb, var(--text-accent) 10%, transparent);
-}
-
-.editor :global(.ProseMirror p.is-editor-empty.is-empty::before) {
-  color: var(--text-secondary);
-  content: attr(data-placeholder);
-  float: left;
-  height: 0;
+/* The highlighter div (mirrors textarea content, shows mention spans) */
+.mentionsInput :global(.react-mentions__highlighter) {
+  padding: 7px 10px;
   pointer-events: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  border: none;
+}
+
+/* Mention highlight in the highlighter layer */
+.mention {
+  /* color: var(--text-accent); */
+  background: color-mix(in srgb, var(--text-accent) 20%, transparent);
+}
+
+/* Placeholder (react-mentions uses textarea's native placeholder) */
+.mentionsInput :global(.react-mentions__input::placeholder) {
+  color: var(--text-secondary);
+}
+
+/* Suggestions dropdown — rendered in document.body portal, so global selectors needed */
+:global(.react-mentions__suggestions) {
+  z-index: 200;
+}
+
+:global(.react-mentions__suggestions__list) {
+  min-width: 220px;
+  max-width: min(360px, 90vw);
+  max-height: 220px;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+:global(.react-mentions__suggestions__item) {
+  cursor: pointer;
+}
+
+:global(.react-mentions__suggestions__item--focused) {
+  background: var(--bg-hover);
 }

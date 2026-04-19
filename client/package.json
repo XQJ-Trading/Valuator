@@ -10,18 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tiptap/extension-mention": "^3.20.4",
-    "@tiptap/extension-placeholder": "^3.20.4",
-    "@tiptap/pm": "^3.20.4",
-    "@tiptap/react": "^3.20.4",
-    "@tiptap/starter-kit": "^3.20.4",
+    "@types/react-mentions": "^4.4.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-json-tree": "^0.20.0",
     "react-markdown": "^10.1.0",
+    "react-mentions": "^4.4.10",
     "react-resizable-panels": "^4.7.4",
-    "remark-gfm": "^4.0.1",
-    "tippy.js": "^6.3.7"
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

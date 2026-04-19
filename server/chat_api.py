@@ -177,12 +177,15 @@ async def _run_agent_for_message(
             command.extend(["--model", model])
         env = os.environ.copy()
         if llm_backend == "openrouter":
-            # Request-scoped env override keeps UI config independent from server-wide .env.
+            key = (openrouter_api_key or "").strip() or os.environ.get(
+                "OPENROUTER_API_KEY", ""
+            ).strip()
             env["LLM_BACKEND"] = "openrouter"
-            env["OPENROUTER_API_KEY"] = openrouter_api_key or ""
-            env["OPENROUTER_BASE_URL"] = (
-                openrouter_base_url or DEFAULT_OPENROUTER_BASE_URL
-            )
+            env["OPENROUTER_API_KEY"] = key
+            base = (openrouter_base_url or "").strip() or os.environ.get(
+                "OPENROUTER_BASE_URL", ""
+            ).strip()
+            env["OPENROUTER_BASE_URL"] = base or DEFAULT_OPENROUTER_BASE_URL
         else:
             env["LLM_BACKEND"] = "google_genai"
             env.pop("OPENROUTER_API_KEY", None)
@@ -325,8 +328,14 @@ class PostChatMessageRequest(BaseModel):
     def validate_openrouter_config(self) -> PostChatMessageRequest:
         backend = self.llm_backend or "google_genai"
         if backend == "openrouter":
-            if not self.openrouter_api_key:
-                raise ValueError("openrouter_api_key is required when llm_backend=openrouter")
+            key = (self.openrouter_api_key or "").strip() or os.environ.get(
+                "OPENROUTER_API_KEY", ""
+            ).strip()
+            if not key:
+                raise ValueError(
+                    "openrouter requires openrouter_api_key in the request or "
+                    "OPENROUTER_API_KEY in the server environment when llm_backend=openrouter"
+                )
             if self.model and not is_openrouter_model_name(self.model):
                 raise ValueError(
                     "openrouter model must use provider/model format such as openrouter/auto"

@@ -40,8 +40,6 @@ export default function ConfigView() {
   const webSearchId = useId();
   const backendId = useId();
   const modelId = useId();
-  const openrouterKeyId = useId();
-  const openrouterBaseUrlId = useId();
   const [draft, setDraft] = useState<AgentConfig>(() => loadAgentConfig());
   const [saved, setSaved] = useState<AgentConfig>(() => loadAgentConfig());
   const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>([]);
@@ -84,8 +82,6 @@ export default function ConfigView() {
     draft.webSearchProvider !== saved.webSearchProvider ||
     draft.llmBackend !== saved.llmBackend ||
     draft.model !== saved.model ||
-    draft.openrouterApiKey !== saved.openrouterApiKey ||
-    draft.openrouterBaseUrl !== saved.openrouterBaseUrl ||
     draft.customModelUiOpen !== saved.customModelUiOpen;
 
   const selectedProvider = draft.webSearchProvider || webSearchProviders[0] || "";
@@ -267,58 +263,11 @@ export default function ConfigView() {
                 </div>
                 <div className={styles.hint}>
                   저장한 비프리셋 모델은 셀렉트에 그대로 뜹니다. <code>모델 추가</code>는 입력칸을
-                  켭니다. OpenRouter는 <code>provider/model</code>, Google GenAI는 모델 이름만. Save
+                  켭니다. OpenRouter는 <code>provider/model</code>, Google GenAI는 모델 이름만.
+                  OpenRouter API 키·base URL은 서버 환경 변수(
+                  <code>OPENROUTER_API_KEY</code>, <code>OPENROUTER_BASE_URL</code>)로 둡니다. Save
                   시 모델·UI 상태가 함께 저장됩니다.
                 </div>
-              </div>
-              <div
-                className={styles.field}
-                aria-disabled={draft.llmBackend !== "openrouter"}
-              >
-                <label className={styles.label} htmlFor={openrouterKeyId}>
-                  OpenRouter API key
-                </label>
-                <input
-                  id={openrouterKeyId}
-                  className={styles.input}
-                  type="password"
-                  value={draft.openrouterApiKey}
-                  disabled={draft.llmBackend !== "openrouter"}
-                  onChange={(e) =>
-                    setDraft((current) => ({
-                      ...current,
-                      openrouterApiKey: e.target.value,
-                    }))
-                  }
-                  placeholder=""
-                  autoComplete="off"
-                />
-                <div className={styles.hint}>
-                  OpenRouter를 선택했을 때만 사용합니다.
-                </div>
-              </div>
-              <div
-                className={styles.field}
-                aria-disabled={draft.llmBackend !== "openrouter"}
-              >
-                <label className={styles.label} htmlFor={openrouterBaseUrlId}>
-                  OpenRouter base URL
-                </label>
-                <input
-                  id={openrouterBaseUrlId}
-                  className={styles.input}
-                  type="text"
-                  value={draft.openrouterBaseUrl}
-                  disabled={draft.llmBackend !== "openrouter"}
-                  onChange={(e) =>
-                    setDraft((current) => ({
-                      ...current,
-                      openrouterBaseUrl: e.target.value,
-                    }))
-                  }
-                  placeholder="https://openrouter.ai/api/v1"
-                  autoComplete="off"
-                />
               </div>
               <div className={styles.actions}>
                 <button

@@ -1,6 +1,5 @@
 const STORAGE_KEY = "sessionviewer.agentConfig";
 const DEFAULT_MODEL = "gemini-3-flash-preview";
-const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export type SavedWebSearchProvider = "" | "perplexity" | "tavily";
 export type SavedLlmBackend = "google_genai" | "openrouter";
@@ -13,8 +12,6 @@ export interface AgentConfig {
   model: string;
   /** 모델 추가(입력칸) UI를 켠 상태. 저장되어 Save 이후에도 유지된다. */
   customModelUiOpen: boolean;
-  openrouterApiKey: string;
-  openrouterBaseUrl: string;
 }
 
 const DEFAULTS: AgentConfig = {
@@ -24,8 +21,6 @@ const DEFAULTS: AgentConfig = {
   llmBackend: "google_genai",
   model: DEFAULT_MODEL,
   customModelUiOpen: false,
-  openrouterApiKey: "",
-  openrouterBaseUrl: DEFAULT_OPENROUTER_BASE_URL,
 };
 
 function parseStored(raw: string | null): AgentConfig {
@@ -45,12 +40,6 @@ function parseStored(raw: string | null): AgentConfig {
         ? o.model.trim()
         : DEFAULTS.model;
     const customModelUiOpen = o.customModelUiOpen === true;
-    const openrouterApiKey =
-      typeof o.openrouterApiKey === "string" ? o.openrouterApiKey.trim() : "";
-    const openrouterBaseUrl =
-      typeof o.openrouterBaseUrl === "string" && o.openrouterBaseUrl.trim()
-        ? o.openrouterBaseUrl.trim()
-        : DEFAULTS.openrouterBaseUrl;
     return {
       authKey: typeof o.authKey === "string" ? o.authKey : "",
       authSecret: typeof o.authSecret === "string" ? o.authSecret : "",
@@ -58,8 +47,6 @@ function parseStored(raw: string | null): AgentConfig {
       llmBackend,
       model,
       customModelUiOpen,
-      openrouterApiKey,
-      openrouterBaseUrl,
     };
   } catch {
     return { ...DEFAULTS };
@@ -95,9 +82,6 @@ export function saveAgentConfig(config: AgentConfig): void {
       llmBackend,
       model,
       customModelUiOpen,
-      openrouterApiKey: config.openrouterApiKey.trim(),
-      openrouterBaseUrl:
-        config.openrouterBaseUrl.trim() || DEFAULTS.openrouterBaseUrl,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {

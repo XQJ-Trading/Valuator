@@ -126,8 +126,6 @@ export async function postChatMessage(
     web_search_provider?: SavedWebSearchProvider;
     llm_backend?: SavedLlmBackend;
     model?: string;
-    openrouter_api_key?: string;
-    openrouter_base_url?: string;
   } = { text };
   if (webSearchProvider) {
     body.web_search_provider = webSearchProvider;
@@ -136,14 +134,6 @@ export async function postChatMessage(
   const model = cfg.model.trim();
   if (model) {
     body.model = model;
-  }
-  const openrouterApiKey = cfg.openrouterApiKey.trim();
-  if (cfg.llmBackend === "openrouter" && openrouterApiKey) {
-    body.openrouter_api_key = openrouterApiKey;
-    const openrouterBaseUrl = cfg.openrouterBaseUrl.trim();
-    if (openrouterBaseUrl) {
-      body.openrouter_base_url = openrouterBaseUrl;
-    }
   }
   const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
     method: "POST",

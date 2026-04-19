@@ -189,7 +189,47 @@ def test_post_message_rejects_openrouter_model_without_key() -> None:
         )
 
     assert response.status_code == 422
-    assert "openrouter_api_key is required when llm_backend=openrouter" in response.text
+    assert "OPENROUTER_API_KEY in the server environment" in response.text
+
+
+def test_post_message_openrouter_uses_env_key_when_request_omits_openrouter_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = str(uuid.uuid4())
+    commands: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    release = asyncio.Event()
+    release.set()
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        commands.append((args, kwargs))
+        return _FakeProcess(release)
+
+    monkeypatch.setattr(
+        chat_api.asyncio,
+        "create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "env-or-key")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://example.com/v1")
+
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/chat/messages",
+            params=_chat_params(session_id),
+            json={
+                "text": "hello",
+                "llm_backend": "openrouter",
+                "model": "google/gemini-2.5-flash",
+            },
+        )
+        assert response.status_code == 200
+        _wait_until(lambda: bool(commands))
+
+    _, kwargs = commands[0]
+    env = kwargs["env"]
+    assert isinstance(env, dict)
+    assert env["OPENROUTER_API_KEY"] == "env-or-key"
+    assert env["OPENROUTER_BASE_URL"] == "https://example.com/v1"
 
 
 def test_post_message_forces_google_backend_when_openrouter_not_requested(

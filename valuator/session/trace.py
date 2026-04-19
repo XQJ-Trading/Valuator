@@ -186,6 +186,8 @@ class SessionTraceWriter:
         usage: TokenUsage,
         latency_seconds: float,
         started_at: str,
+        cache_source: str | None = None,
+        cache_storage_hours: float = 0.0,
     ) -> None:
         self._usage_writer.append_call(
             method=method,
@@ -193,6 +195,8 @@ class SessionTraceWriter:
             usage=usage,
             latency_seconds=latency_seconds,
             started_at=started_at,
+            cache_source=cache_source,
+            cache_storage_hours=cache_storage_hours,
         )
 
     def append_total(self) -> None:
@@ -331,6 +335,7 @@ class SessionTraceWriter:
         usage: Mapping[str, Any] | None,
         latency_ms: float,
         started_at: str,
+        cache_source: str | None = None,
         error: str | None = None,
     ) -> None:
         with self._lock:
@@ -344,6 +349,7 @@ class SessionTraceWriter:
                 "trace_method": trace_method,
                 "task_id": task_id,
                 "model": model,
+                "cache_source": cache_source,
                 "prompt": prompt,
                 "system_prompt": system_prompt,
                 "response_mime_type": response_mime_type,

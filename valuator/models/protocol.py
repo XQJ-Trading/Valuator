@@ -15,6 +15,8 @@ class UsageWriter(Protocol):
         usage: TokenUsage,
         latency_seconds: float,
         started_at: str,
+        cache_source: str | None = None,
+        cache_storage_hours: float = 0.0,
     ) -> None:
         ...
 
@@ -31,6 +33,7 @@ class UsageWriter(Protocol):
         usage: dict[str, Any] | None,
         latency_ms: float,
         started_at: str,
+        cache_source: str | None = None,
         error: str | None = None,
     ) -> None:
         ...
@@ -43,6 +46,18 @@ class LlmClient(Protocol):
     def bind_usage_writer(self, usage_writer: UsageWriter | None) -> None:
         ...
 
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        ...
+
     async def generate(
         self,
         prompt: str,
@@ -51,6 +66,7 @@ class LlmClient(Protocol):
         response_json_schema: dict[str, Any] | None = None,
         trace_method: str = "llm.generate",
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> str:
         ...
 
@@ -63,5 +79,6 @@ class LlmClient(Protocol):
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, Any]:
         ...

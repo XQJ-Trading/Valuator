@@ -10,7 +10,7 @@ from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.shared_state import Fact, SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, FailedAttempt, TaskState, ToolResult
+from valuator.core.types import Action, FailedAttempt, TaskState, TaskWorkPhase, ToolResult
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.evidence import EvidenceRow
 
@@ -19,6 +19,29 @@ class ScriptedLLM:
     def __init__(self, responses: list[Any]) -> None:
         self._responses = list(responses)
         self.calls: list[dict[str, Any]] = []
+        self.cache_requests: list[dict[str, Any]] = []
+
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        self.cache_requests.append(
+            {
+                "cache_key": cache_key,
+                "contents": contents,
+                "system_prompt": system_prompt,
+                "ttl_seconds": ttl_seconds,
+                "display_name": display_name,
+                "trace_method": trace_method,
+            }
+        )
+        return f"cache::{cache_key}"
 
     async def generate_json(
         self,
@@ -29,6 +52,7 @@ class ScriptedLLM:
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, Any]:
         del trace_method, max_response_chars
         self.calls.append(
@@ -37,6 +61,7 @@ class ScriptedLLM:
                 "system_prompt": system_prompt,
                 "response_json_schema": response_json_schema,
                 "max_output_tokens": max_output_tokens,
+                "cached_content": cached_content,
             }
         )
         if not self._responses:
@@ -543,9 +568,8 @@ async def test_step_planner_keeps_execute_after_failed_tool_result() -> None:
         "finalize",
         "fail",
     ]
-    assert "EXECUTE:" in llm.calls[0]["system_prompt"]
+    assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
     assert "The previous tool call failed." in llm.calls[0]["system_prompt"]
-    assert "Return JSON" in llm.calls[0]["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -599,6 +623,7 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
 
     system = llm.calls[0]["system_prompt"]
     prompt = llm.calls[0]["prompt"]
+    assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
     assert "FINALIZE" in system
     assert "Original query:" not in system
     assert "BULL / BASE / BEAR" in prompt
@@ -937,4 +962,48 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
     assert "opendart_financial_tool(corp=\"LS전선\", fs_div=\"CFS\", year=2024): satisfied" in prompt
     assert "[FAILED_ATTEMPTS]" in prompt
     assert "web_search_tool(query=\"LS전선 경쟁사\"): tool_error - Search failed" in prompt
-    assert "Do not create children that re-collect satisfied evidence" in system_prompt
+    assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
+    assert "Do not create children that re-collect satisfied evidence" in llm.cache_requests[0][
+        "system_prompt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_step_planner_omits_shared_facts_during_synthesize_with_child_outputs() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    task.work_phase = TaskWorkPhase.SYNTHESIZE
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=0,
+        child_outputs={"root.0": {"summary": "done"}},
+        shared=SharedStateView(
+            {
+                "revenue_2024": Fact(
+                    key="revenue_2024",
+                    value={"amount": 100},
+                    source_task_id="root.0",
+                    grounded=True,
+                )
+            },
+            [],
+        ),
+        query="LS전선 분석",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[CHILD_OUTPUTS]" in prompt
+    assert "[SHARED_FACTS]" not in prompt

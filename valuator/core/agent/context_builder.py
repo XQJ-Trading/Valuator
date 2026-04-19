@@ -21,6 +21,36 @@ def _fact_keys_from_child_completion_payload(payload: Any) -> set[str]:
     return set()
 
 
+def _task_scoped_evidence(
+    *,
+    task: Task,
+    scheduler: Scheduler,
+    evidence_rows: list[Any],
+) -> list[Any]:
+    if not evidence_rows or task.parent_id is None:
+        return evidence_rows
+
+    related_task_ids = {task.id}
+    parent_id = task.parent_id
+    while parent_id:
+        related_task_ids.add(parent_id)
+        parent = scheduler.get_task(parent_id)
+        if parent is None:
+            break
+        parent_id = parent.parent_id
+
+    descendant_prefix = f"{task.id}."
+    scoped: list[Any] = []
+    for row in evidence_rows:
+        row_task_id = getattr(row, "task_id", "") or ""
+        if not row_task_id:
+            scoped.append(row)
+            continue
+        if row_task_id in related_task_ids or row_task_id.startswith(descendant_prefix):
+            scoped.append(row)
+    return scoped
+
+
 def build_task_context(
     *,
     task: Task,
@@ -33,6 +63,11 @@ def build_task_context(
     evidence_session_id: str = "",
 ) -> TaskContext:
     query_units = query_units_for_task(task=task, analysis=analysis)
+    evidence_rows = (
+        evidence_store.list_for_session(evidence_session_id)
+        if evidence_store is not None and evidence_session_id
+        else []
+    )
     include_fact_keys: frozenset[str] | None = None
     if (
         isinstance(task, ComplexTask)
@@ -82,10 +117,10 @@ def build_task_context(
         query_analysis=analysis,
         query_units=query_units,
         available_tools=analysis.allowed_tools or registered_tools(tools),
-        evidence=(
-            evidence_store.list_for_session(evidence_session_id)
-            if evidence_store is not None and evidence_session_id
-            else []
+        evidence=_task_scoped_evidence(
+            task=task,
+            scheduler=scheduler,
+            evidence_rows=evidence_rows,
         ),
     )
 

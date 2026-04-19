@@ -9,6 +9,9 @@ from ..task import Task
 from ..types import TaskDecision
 from .types import CriticVerdict
 
+_ROOT_CRITIC_CACHE_KEY = "critic:root-system:v1"
+_NON_ROOT_CRITIC_CACHE_KEY = "critic:non-root-system:v1"
+
 
 class _CriticPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,13 +37,23 @@ class DecompositionCritic:
         ctx: TaskContext,
     ) -> CriticVerdict:
         prompt = self._build_prompt(task, decision, ctx)
+        system_prompt = self._system_prompt(is_root=not ctx.ancestry)
+        cached_content = await self._llm.get_or_create_explicit_cache(
+            cache_key=(
+                _ROOT_CRITIC_CACHE_KEY if not ctx.ancestry else _NON_ROOT_CRITIC_CACHE_KEY
+            ),
+            system_prompt=system_prompt,
+            display_name="critic-root" if not ctx.ancestry else "critic-non-root",
+            trace_method="agent.gate.cache.critic",
+        )
         raw = await self._llm.generate_json(
             prompt=prompt,
-            system_prompt=self._system_prompt(is_root=not ctx.ancestry),
+            system_prompt="" if cached_content else system_prompt,
             response_json_schema=_CriticPayload.model_json_schema(),
             trace_method=f"agent.gate.critic.{task.id}",
             max_response_chars=20_000,
             max_output_tokens=self._max_output_tokens,
+            cached_content=cached_content,
         )
         payload = _CriticPayload.model_validate(raw)
         return self._to_verdict(payload)

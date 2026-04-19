@@ -9,11 +9,17 @@ from domain.query import summarize_temporal_contract
 from ...tools.specs import get_tool_spec
 from ..context import TaskContext, TaskSummary
 from ..task import Task
-from ..types import Action, TaskState
+from ..types import Action, TaskState, TaskWorkPhase
 
 _TEMPORAL_ARG_KEYS = frozenset(
     {"as_of_kst", "time_scope", "target_start", "target_end"}
 )
+_LAST_TOOL_RESULT_MAX_CHARS = 4_000
+_CHILD_OUTPUT_MAX_CHARS = 2_500
+_CHILD_OUTPUT_SECTION_MAX_CHARS = 8_000
+_CURRENT_CHILD_OUTPUT_MAX_CHARS = 800
+_SHARED_FACTS_MAX_CHARS = 3_000
+_EVIDENCE_SUMMARY_MAX_CHARS = 280
 
 
 def _compact_tool_args_for_prompt(args: Mapping[str, Any]) -> dict[str, Any]:
@@ -79,7 +85,11 @@ If you cannot name a specific tool and args, you MUST use DECOMPOSE, not EXECUTE
 Prefer shallow decomposition when one tool call plus AGGREGATE is enough."""
 
 
-def build_system_prompt(
+def static_system_prefix() -> str:
+    return _STATIC_SYSTEM_PREFIX
+
+
+def build_system_prompt_suffix(
     *,
     task: Task,
     ctx: TaskContext,
@@ -151,7 +161,27 @@ def build_system_prompt(
         )
     if task.tool_hint:
         lines.append(f"Prefer tool_hint={task.tool_hint} when EXECUTE is appropriate.")
-    return _STATIC_SYSTEM_PREFIX + "\n\n" + "\n".join(lines)
+    return "\n".join(lines)
+
+
+def build_system_prompt(
+    *,
+    task: Task,
+    ctx: TaskContext,
+    allow_decompose: bool,
+    task_name_max_chars: int,
+    allowed_actions: list[Action],
+) -> str:
+    suffix = build_system_prompt_suffix(
+        task=task,
+        ctx=ctx,
+        allow_decompose=allow_decompose,
+        task_name_max_chars=task_name_max_chars,
+        allowed_actions=allowed_actions,
+    )
+    if not suffix:
+        return _STATIC_SYSTEM_PREFIX
+    return _STATIC_SYSTEM_PREFIX + "\n\n" + suffix
 
 
 def build_step_prompt(
@@ -193,7 +223,8 @@ def build_step_prompt(
         sections.append(
             (
                 "[LAST_TOOL_RESULT]",
-                f"success={latest.success}\n{render_prompt_value(latest.result)}",
+                f"success={latest.success}\n"
+                f"{render_prompt_value_limited(latest.result, max_chars=_LAST_TOOL_RESULT_MAX_CHARS)}",
             )
         )
     if task.last_tool_request is not None:
@@ -207,10 +238,19 @@ def build_step_prompt(
         )
     if ctx.child_outputs:
         child_blocks = [
-            f"{child_id}\n{render_prompt_value(output)}"
+            f"{child_id}\n"
+            f"{render_prompt_value_limited(output, max_chars=_CHILD_OUTPUT_MAX_CHARS)}"
             for child_id, output in ctx.child_outputs.items()
         ]
-        sections.append(("[CHILD_OUTPUTS]", "\n\n".join(child_blocks)))
+        sections.append(
+            (
+                "[CHILD_OUTPUTS]",
+                limit_text(
+                    "\n\n".join(child_blocks),
+                    max_chars=_CHILD_OUTPUT_SECTION_MAX_CHARS,
+                ),
+            )
+        )
     if ctx.current_children:
         failed = [s for s in ctx.current_children if s.state == TaskState.FAILED]
         sections.append(
@@ -229,13 +269,22 @@ def build_step_prompt(
                     + "\nSome children failed. Aggregate available results and note gaps.",
                 )
             )
-    if ctx.shared.facts:
+    if ctx.shared.facts and not (
+        task.work_phase is TaskWorkPhase.SYNTHESIZE and ctx.child_outputs
+    ):
         fact_lines = [
             shared_fact_line(key=key, fact=fact)
             for key, fact in ctx.shared.facts.items()
         ]
-        sections.append(("[SHARED_FACTS]", "\n".join(fact_lines)))
-    if ctx.evidence:
+        sections.append(
+            (
+                "[SHARED_FACTS]",
+                limit_text("\n".join(fact_lines), max_chars=_SHARED_FACTS_MAX_CHARS),
+            )
+        )
+    if ctx.evidence and (
+        Action.EXECUTE in allowed_actions or Action.DECOMPOSE in allowed_actions
+    ):
         sections.append(("[EVIDENCE]", evidence_text(ctx, task_id=task.id)))
     if ctx.shared.conflicts:
         conflict_lines = [
@@ -463,7 +512,11 @@ def evidence_line(row: Any, *, current_task_id: str = "") -> str:
     args_text = ", ".join(f"{key}={json_arg(args[key])}" for key in sorted(args))
     line = f"{row.tool_name}({args_text}): {row.status}"
     if row.value_summary:
-        line += f' - "{row.value_summary}"'
+        summary = limit_single_line_text(
+            row.value_summary,
+            max_chars=_EVIDENCE_SUMMARY_MAX_CHARS,
+        )
+        line += f' - "{summary}"'
     if row.task_id and row.task_id != current_task_id:
         line += f" [task={row.task_id}]"
     return line
@@ -491,8 +544,7 @@ def json_arg(value: Any) -> str:
 
 
 def preview_json(value: Any, *, max_chars: int) -> str:
-    del max_chars
-    return render_prompt_value(value)
+    return render_prompt_value_limited(value, max_chars=max_chars)
 
 
 def prompt_query(query: str, *, prompt_query_chars: int) -> str:
@@ -519,8 +571,36 @@ def prompt_query(query: str, *, prompt_query_chars: int) -> str:
 def task_summary_line(summary: TaskSummary) -> str:
     line = f"{summary.id}: {summary.state.value} - {summary.description}"
     if summary.output is not None:
-        line += f" | output={render_prompt_value(summary.output)}"
+        line += (
+            " | output="
+            + render_prompt_value_limited(
+                summary.output,
+                max_chars=_CURRENT_CHILD_OUTPUT_MAX_CHARS,
+            )
+        )
     return line
+
+
+def limit_text(text: str, *, max_chars: int, suffix: str = "\n... [truncated]") -> str:
+    stripped = text.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    keep = max(max_chars - len(suffix), 0)
+    if keep == 0:
+        return suffix.lstrip()
+    return stripped[:keep].rstrip() + suffix
+
+
+def limit_single_line_text(text: str, *, max_chars: int) -> str:
+    return limit_text(
+        " ".join(text.split()),
+        max_chars=max_chars,
+        suffix="...",
+    )
+
+
+def render_prompt_value_limited(value: Any, *, max_chars: int) -> str:
+    return limit_text(render_prompt_value(value), max_chars=max_chars, suffix="\n... [truncated]")
 
 
 def render_sections(sections: list[tuple[str, str]]) -> str:

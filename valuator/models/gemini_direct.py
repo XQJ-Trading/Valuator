@@ -5,6 +5,7 @@ import json
 import queue
 import threading
 import uuid
+from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
@@ -42,6 +43,26 @@ def ensure_supported_google_genai_runtime() -> str:
             "support and must run with the project environment."
         ) from exc
     return installed_version
+
+
+@dataclass(frozen=True)
+class ExplicitGeminiCache:
+    name: str
+    model: str
+    token_count: int
+    ttl_seconds: int
+    create_time: str | None = None
+    expire_time: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "model": self.model,
+            "token_count": self.token_count,
+            "ttl_seconds": self.ttl_seconds,
+            "create_time": self.create_time,
+            "expire_time": self.expire_time,
+        }
 
 
 class GeminiSession:
@@ -124,6 +145,8 @@ class GeminiClient:
             if retry_base_delay is not None
             else config.agent_llm_retry_base_delay
         )
+        self._explicit_cache_lock = asyncio.Lock()
+        self._explicit_cache_names: dict[str, str] = {}
         ensure_supported_google_genai_runtime()
 
     def bind_usage_writer(self, usage_writer: "UsageWriter | None") -> None:
@@ -139,6 +162,7 @@ class GeminiClient:
         session_id: str | None = None,
         response_mime_type: str | None = None,
         response_json_schema: dict[str, Any] | None = None,
+        cached_content: str | None = None,
     ) -> GeminiSession:
         system_prompt = ""
         if messages:
@@ -147,6 +171,7 @@ class GeminiClient:
             system_prompt=system_prompt,
             response_mime_type=response_mime_type,
             response_json_schema=response_json_schema,
+            cached_content=cached_content,
         )
         sid = session_id or f"gemini-{uuid.uuid4().hex[:12]}"
         return GeminiSession(
@@ -164,12 +189,14 @@ class GeminiClient:
         response_json_schema: dict[str, Any] | None = None,
         trace_method: str = "gemini.generate",
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> str:
         config_obj = self._build_config(
             system_prompt=system_prompt,
             response_mime_type=response_mime_type,
             response_json_schema=response_json_schema,
             max_output_tokens=max_output_tokens,
+            cached_content=cached_content,
         )
         writer = self.usage_writer
 
@@ -186,6 +213,10 @@ class GeminiClient:
                 latency_seconds = measurement.latency_seconds()
                 usage = self._token_usage(getattr(response, "usage_metadata", None))
                 response_text = self._extract_text(response)
+                cache_source = self._cache_source(
+                    usage=usage,
+                    cached_content=cached_content,
+                )
 
                 if writer is not None:
                     await asyncio.to_thread(
@@ -201,6 +232,7 @@ class GeminiClient:
                         response_mime_type=response_mime_type,
                         response_json_schema=response_json_schema,
                         response_text=response_text,
+                        cache_source=cache_source,
                     )
                 return response_text
             except Exception as exc:
@@ -222,6 +254,7 @@ class GeminiClient:
                         response_json_schema=response_json_schema,
                         error=str(exc),
                         usage=usage,
+                        cache_source="explicit" if cached_content else None,
                     )
                 if attempt >= self._retry_count:
                     raise
@@ -236,6 +269,7 @@ class GeminiClient:
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, Any]:
         raw = await self.generate(
             prompt=prompt,
@@ -244,6 +278,7 @@ class GeminiClient:
             response_json_schema=response_json_schema,
             trace_method=trace_method,
             max_output_tokens=max_output_tokens,
+            cached_content=cached_content,
         )
         if max_response_chars is not None and len(raw) > max_response_chars:
             raise ValueError(
@@ -271,6 +306,87 @@ class GeminiClient:
             raise ValueError(f"{trace_method} expected JSON object")
         return data
 
+    async def create_explicit_cache(
+        self,
+        *,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "gemini.cache.create",
+    ) -> ExplicitGeminiCache:
+        ttl = (
+            ttl_seconds
+            if ttl_seconds is not None
+            else config.gemini_explicit_cache_ttl_seconds
+        )
+        if ttl <= 0:
+            raise ValueError("ttl_seconds must be > 0")
+        measurement = Measurement.start()
+        config_data: dict[str, Any] = {"ttl": f"{ttl}s"}
+        if contents is not None:
+            config_data["contents"] = (
+                list(contents)
+                if isinstance(contents, (list, tuple))
+                else [contents]
+            )
+        if system_prompt:
+            config_data["system_instruction"] = system_prompt
+        if display_name:
+            config_data["display_name"] = display_name
+
+        cached_content = await asyncio.to_thread(
+            self.client.caches.create,
+            model=self.model,
+            config=types.CreateCachedContentConfig(**config_data),
+        )
+        latency_seconds = measurement.latency_seconds()
+        cache = self._explicit_cache(cached_content, ttl_seconds=ttl)
+
+        writer = self.usage_writer
+        if writer is not None:
+            await asyncio.to_thread(
+                writer.append_call,
+                method=trace_method,
+                model=self.model,
+                usage=TokenUsage(cache_write_tokens=cache.token_count),
+                latency_seconds=latency_seconds,
+                started_at=measurement.started_at,
+                cache_source="explicit",
+                cache_storage_hours=ttl / 3600.0,
+            )
+        return cache
+
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "gemini.cache.create",
+    ) -> str | None:
+        if not cache_key:
+            return None
+        existing = self._explicit_cache_names.get(cache_key)
+        if existing:
+            return existing
+
+        async with self._explicit_cache_lock:
+            existing = self._explicit_cache_names.get(cache_key)
+            if existing:
+                return existing
+            cache = await self.create_explicit_cache(
+                contents=contents,
+                system_prompt=system_prompt,
+                ttl_seconds=ttl_seconds,
+                display_name=display_name,
+                trace_method=trace_method,
+            )
+            self._explicit_cache_names[cache_key] = cache.name
+            return cache.name
+
     def _record_success_call(
         self,
         *,
@@ -285,6 +401,7 @@ class GeminiClient:
         response_mime_type: str | None,
         response_json_schema: dict[str, Any] | None,
         response_text: str,
+        cache_source: str | None,
     ) -> None:
         self._record_call(
             writer=writer,
@@ -298,6 +415,7 @@ class GeminiClient:
             response_mime_type=response_mime_type,
             response_json_schema=response_json_schema,
             response_text=response_text,
+            cache_source=cache_source,
             error=None,
         )
 
@@ -315,6 +433,7 @@ class GeminiClient:
         response_json_schema: dict[str, Any] | None,
         error: str,
         usage: TokenUsage | None = None,
+        cache_source: str | None = None,
     ) -> None:
         self._record_call(
             writer=writer,
@@ -328,6 +447,7 @@ class GeminiClient:
             response_mime_type=response_mime_type,
             response_json_schema=response_json_schema,
             response_text=None,
+            cache_source=cache_source,
             error=error,
         )
 
@@ -345,6 +465,7 @@ class GeminiClient:
         response_mime_type: str | None,
         response_json_schema: dict[str, Any] | None,
         response_text: str | None,
+        cache_source: str | None,
         error: str | None,
     ) -> None:
         writer.append_call(
@@ -353,6 +474,7 @@ class GeminiClient:
             usage=usage,
             latency_seconds=latency_seconds,
             started_at=started_at,
+            cache_source=cache_source,
         )
         writer.log_llm_call(
             trace_method=method,
@@ -365,6 +487,7 @@ class GeminiClient:
             usage=usage.to_dict(),
             latency_ms=latency_seconds * 1000.0,
             started_at=started_at,
+            cache_source=cache_source,
             error=error,
         )
 
@@ -374,29 +497,7 @@ class GeminiClient:
             usage_metadata = usage_metadata.model_dump()
         if not isinstance(usage_metadata, dict):
             return TokenUsage()
-        return TokenUsage(
-            prompt_tokens=int(
-                usage_metadata.get(
-                    "prompt_tokens",
-                    usage_metadata.get("prompt_token_count", 0),
-                )
-                or 0
-            ),
-            completion_tokens=int(
-                usage_metadata.get(
-                    "completion_tokens",
-                    usage_metadata.get("candidates_token_count", 0),
-                )
-                or 0
-            ),
-            total_tokens=int(
-                usage_metadata.get(
-                    "total_tokens",
-                    usage_metadata.get("total_token_count", 0),
-                )
-                or 0
-            ),
-        )
+        return TokenUsage.from_raw(usage_metadata)
 
     async def generate_stream(
         self,
@@ -537,6 +638,7 @@ class GeminiClient:
         response_mime_type: str | None,
         response_json_schema: dict[str, Any] | None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> types.GenerateContentConfig | None:
         config_data: dict[str, Any] = {}
         if system_prompt:
@@ -547,6 +649,58 @@ class GeminiClient:
             config_data["response_json_schema"] = response_json_schema
         if max_output_tokens is not None:
             config_data["max_output_tokens"] = max_output_tokens
+        if cached_content:
+            config_data["cached_content"] = cached_content
         if not config_data:
             return None
         return types.GenerateContentConfig(**config_data)
+
+    @staticmethod
+    def _cache_source(*, usage: TokenUsage, cached_content: str | None) -> str | None:
+        if cached_content:
+            return "explicit"
+        if usage.cached_prompt_tokens > 0:
+            return "implicit"
+        return None
+
+    @staticmethod
+    def _explicit_cache(
+        cached_content: Any, *, ttl_seconds: int
+    ) -> ExplicitGeminiCache:
+        payload = GeminiClient._sdk_dict(cached_content)
+        usage_metadata = payload.get("usage_metadata", payload.get("usageMetadata", {}))
+        if hasattr(usage_metadata, "model_dump"):
+            usage_metadata = usage_metadata.model_dump()
+        token_count = 0
+        if isinstance(usage_metadata, dict):
+            token_count = int(
+                usage_metadata.get(
+                    "total_token_count",
+                    usage_metadata.get("totalTokenCount", 0),
+                )
+                or 0
+            )
+        return ExplicitGeminiCache(
+            name=str(payload.get("name") or ""),
+            model=str(payload.get("model") or ""),
+            token_count=token_count,
+            ttl_seconds=ttl_seconds,
+            create_time=GeminiClient._sdk_time(
+                payload.get("create_time", payload.get("createTime"))
+            ),
+            expire_time=GeminiClient._sdk_time(
+                payload.get("expire_time", payload.get("expireTime"))
+            ),
+        )
+
+    @staticmethod
+    def _sdk_dict(value: Any) -> dict[str, Any]:
+        if hasattr(value, "model_dump"):
+            value = value.model_dump()
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _sdk_time(value: Any) -> str | None:
+        if value is None:
+            return None
+        return str(value)

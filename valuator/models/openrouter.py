@@ -133,6 +133,26 @@ class OpenRouterClient:
     def bind_usage_writer(self, usage_writer: "UsageWriter | None") -> None:
         self.usage_writer = usage_writer
 
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        del (
+            cache_key,
+            contents,
+            system_prompt,
+            ttl_seconds,
+            display_name,
+            trace_method,
+        )
+        return None
+
     async def generate(
         self,
         prompt: str,
@@ -141,7 +161,9 @@ class OpenRouterClient:
         response_json_schema: dict[str, Any] | None = None,
         trace_method: str = "openrouter.generate",
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> str:
+        del cached_content
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -224,6 +246,7 @@ class OpenRouterClient:
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, Any]:
         raw = await self.generate(
             prompt=prompt,
@@ -232,6 +255,7 @@ class OpenRouterClient:
             response_json_schema=response_json_schema,
             trace_method=trace_method,
             max_output_tokens=max_output_tokens,
+            cached_content=cached_content,
         )
         if max_response_chars is not None and len(raw) > max_response_chars:
             raise ValueError(

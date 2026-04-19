@@ -16,6 +16,26 @@ class _DummyGeminiClient:
     def bind_usage_writer(self, usage_writer: object | None) -> None:
         self.usage_writer = usage_writer
 
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: object | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        del (
+            cache_key,
+            contents,
+            system_prompt,
+            ttl_seconds,
+            display_name,
+            trace_method,
+        )
+        return None
+
     async def generate(
         self,
         prompt: str,
@@ -24,6 +44,7 @@ class _DummyGeminiClient:
         response_json_schema: dict[str, object] | None = None,
         trace_method: str = "llm.generate",
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> str:
         del (
             prompt,
@@ -32,6 +53,7 @@ class _DummyGeminiClient:
             response_json_schema,
             trace_method,
             max_output_tokens,
+            cached_content,
         )
         return "ok"
 
@@ -44,6 +66,7 @@ class _DummyGeminiClient:
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, object]:
         del (
             prompt,
@@ -52,6 +75,7 @@ class _DummyGeminiClient:
             trace_method,
             max_response_chars,
             max_output_tokens,
+            cached_content,
         )
         return {}
 

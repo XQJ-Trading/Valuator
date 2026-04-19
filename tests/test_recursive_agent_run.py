@@ -47,6 +47,26 @@ class ScriptedLLM:
         self._responses = {task_id: list(items) for task_id, items in responses.items()}
         self.calls: list[dict[str, Any]] = []
 
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        del (
+            cache_key,
+            contents,
+            system_prompt,
+            ttl_seconds,
+            display_name,
+            trace_method,
+        )
+        return None
+
     async def generate_json(
         self,
         *,
@@ -56,8 +76,9 @@ class ScriptedLLM:
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, Any]:
-        del response_json_schema, max_response_chars, max_output_tokens
+        del response_json_schema, max_response_chars, max_output_tokens, cached_content
         self.calls.append(
             {
                 "prompt": prompt,

@@ -104,3 +104,62 @@ def test_build_task_context_includes_session_evidence(tmp_path) -> None:
     assert len(ctx.evidence) == 1
     assert ctx.evidence[0].tool_name == "opendart_financial_tool"
     assert ctx.evidence[0].value_summary == "연결 재무제표 확보"
+
+
+def test_build_task_context_limits_evidence_to_task_scope(tmp_path) -> None:
+    store = SqliteEvidenceStore(tmp_path / "evidence.db")
+    rows = [
+        ("root", "parent evidence"),
+        ("root.0", "current evidence"),
+        ("root.0.0", "descendant evidence"),
+        ("root.1", "sibling evidence"),
+    ]
+    for index, (task_id, summary) in enumerate(rows):
+        store.record(
+            EvidenceRow(
+                session_id="session-1",
+                tool_name="web_search_tool",
+                stable_args_hash=stable_args_hash(
+                    "web_search_tool",
+                    {"query": f"evidence-{index}"},
+                ),
+                status="satisfied",
+                value_summary=summary,
+                value_ref=f"tasks/{task_id}/execution/result.md",
+                task_id=task_id,
+                unit_objective="scope test",
+                created_at="2026-04-16T10:00:00+09:00",
+                updated_at="2026-04-16T10:00:00+09:00",
+                stable_args={"query": f"evidence-{index}"},
+            )
+        )
+
+    scheduler = Scheduler(max_steps_per_task=10, concurrency=1)
+    root = ComplexTask(id="root", description="root task")
+    child = ComplexTask(id="root.0", description="child task")
+    descendant = ComplexTask(id="root.0.0", description="descendant task")
+    sibling = ComplexTask(id="root.1", description="sibling task")
+    root.add_child(child)
+    child.add_child(descendant)
+    root.add_child(sibling)
+    scheduler.register(root)
+    scheduler.register(child)
+    scheduler.register(descendant)
+    scheduler.register(sibling)
+
+    ctx = build_task_context(
+        task=child,
+        query="scope test",
+        scheduler=scheduler,
+        analysis=QueryAnalysis(allowed_tools=["web_search_tool"]),
+        shared=SharedState(),
+        tools=ToolRegistry(),
+        evidence_store=store,
+        evidence_session_id="session-1",
+    )
+
+    assert [row.value_summary for row in ctx.evidence] == [
+        "parent evidence",
+        "current evidence",
+        "descendant evidence",
+    ]

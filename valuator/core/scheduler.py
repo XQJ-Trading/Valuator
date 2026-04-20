@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Mapping
-
-from domain.query import summarize_temporal_contract
+from collections.abc import Iterable
 
 from .context import TaskContext
+from .ontology import parse_raw_fact
 from .shared_state import SharedState
 from .task import AtomicTask, ComplexTask, Task
 from .types import (
@@ -157,30 +156,15 @@ class Scheduler:
                 task.state = TaskState.DONE
                 task.published_facts = dict(decision.facts)
                 task.output = decision.output
-                temporal = (
-                    summarize_temporal_contract(
-                        as_of_kst=ctx.as_of_kst,
-                        units=ctx.query_units,
-                    )
-                    if ctx is not None
-                    else None
-                )
                 for key, value in decision.facts.items():
-                    fact_value, grounded, source_urls = self._fact_payload(value)
-                    shared.publish(
+                    fact = parse_raw_fact(
                         key,
-                        fact_value,
-                        task.id,
+                        value,
+                        source_task_id=task.id,
                         query_unit_ids=tuple(task.query_unit_ids),
-                        grounded=grounded,
                         as_of_kst=ctx.as_of_kst if ctx is not None else "",
-                        time_scope=temporal.time_scope if temporal is not None else "",
-                        target_start=(
-                            temporal.target_start if temporal is not None else ""
-                        ),
-                        target_end=temporal.target_end if temporal is not None else "",
-                        source_urls=source_urls,
                     )
+                    shared.publish(fact)
                 newly_ready.extend(self._release_dependents(task.id))
                 newly_ready.extend(self._propagate_completion(task))
 
@@ -473,17 +457,6 @@ class Scheduler:
         if len(parent.query_unit_ids) > 1:
             raise ValueError("decompose action requires child query_unit_ids")
         return []
-
-    @staticmethod
-    def _fact_payload(value: object) -> tuple[object, bool, tuple[str, ...]]:
-        if isinstance(value, Mapping) and "value" in value:
-            grounded = bool(value.get("grounded", False))
-            raw_urls = value.get("source_urls") or ()
-            source_urls = tuple(
-                str(item).strip() for item in raw_urls if str(item).strip()
-            )
-            return value.get("value"), grounded, source_urls
-        return value, False, ()
 
     def _set_task_dependencies(self, task_id: str, dependency_ids: list[str]) -> None:
         self._clear_task_dependencies(task_id)

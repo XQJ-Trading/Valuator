@@ -70,7 +70,7 @@ AGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확�
 미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.
 수집 불가한 requirement는 output에서 gap으로 명시하라.
 
-재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 yfinance_balance_sheet를 연도별로 분리 호출하되, 반드시 하나의 부모 태스크로 묶어라. 단일 연도 데이터로 추세를 주장하지 마라.
+재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 한국 회사인 경우 opendart_finance_tool 그 외는 yfinance_balance_sheet를 연도별로 분리 호출하되, 반드시 하나의 부모 태스크로 묶어라. 단일 연도 데이터로 추세를 주장하지 마라.
 
 포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:
   - 비용 구조: SBC, CapEx, 영업 레버리지
@@ -131,6 +131,15 @@ def build_system_prompt_suffix(
         )
     if Action.FINALIZE not in allowed:
         lines.append("FINALIZE is only allowed for the root task.")
+    if ctx.shared.conflicts and (
+        Action.AGGREGATE in allowed or Action.FINALIZE in allowed
+    ):
+        lines.extend(
+            [
+                f"[CONFLICTS] contains {len(ctx.shared.conflicts)} conflicting fact(s).",
+                "When conflicts exist, AGGREGATE/FINALIZE output must explicitly resolve each conflict or classify it as an information gap with decision impact.",
+            ]
+        )
     if task.last_tool_success is True:
         lines.extend(
             [
@@ -289,11 +298,12 @@ def build_step_prompt(
     if ctx.shared.conflicts:
         conflict_lines = [
             f"{conflict.key}:\n"
-            f"existing:\n{render_prompt_value(conflict.existing.value)}\n"
-            f"incoming:\n{render_prompt_value(conflict.incoming.value)}"
+            f"existing: {shared_fact_line(key=conflict.key, fact=conflict.existing)}\n"
+            f"incoming: {shared_fact_line(key=conflict.key, fact=conflict.incoming)}"
             for conflict in ctx.shared.conflicts
         ]
         sections.append(("[CONFLICTS]", "\n\n".join(conflict_lines)))
+        sections.append(("[CONFLICT_RESOLUTION]", conflict_resolution_text(ctx)))
     subject_text = subject_context_text(ctx)
     if subject_text:
         sections.append(("[SUBJECTS]", subject_text))
@@ -340,37 +350,50 @@ def build_step_prompt(
 
 def finalize_guidance_text(ctx: TaskContext) -> str:
     as_of = ctx.as_of_kst.strip() or "(unknown)"
-    return "\n".join(
+    lines = [
+        "Child outputs are your structured data layer. FINALIZE must deliver a trading- and investment-actionable conclusion first, then layered evidence.",
+        "",
+        "[PRIORITY — TRADING / INVESTMENT DECISION FIRST]",
+        f"- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_kst={as_of}, only when child outputs support it; otherwise state uncertainty explicitly.",
+        f"- Near the top (as_of_kst={as_of}), include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
+        "- Do not lead with DCF alone or end on intrinsic value only. DCF/fair value is supporting evidence, not the sole headline.",
+        "",
+        "[DATA PRESERVATION]",
+        "- Every number, ratio, and factual finding from child outputs MUST appear in the report.",
+        "- Do NOT summarize away detail. The final report must be MORE comprehensive than any single child.",
+        "",
+        "[EVIDENCE — MULTIPLES, INTRINSIC, AND SCENARIOS]",
+        "- Multiples: implied EV/EBITDA, P/E, P/FCF (or sector-appropriate), vs peers and vs own history where child data allows.",
+        "- Intrinsic / DCF: fair value or range when computed; tie it to multiples and scenarios (consistency or tension).",
+        "- Margin trajectory: segment-level margin trends, inflection points, structural vs cyclical drivers.",
+        "- Growth decomposition: organic vs inorganic, volume vs price, sustainable vs one-off.",
+        "- Capital efficiency: ROIC vs WACC, incremental returns on capex, FCF conversion rate.",
+        "- Cash flow quality: operating cash flow vs net income divergence, capex intensity, working capital dynamics.",
+        "",
+        "[DOMAIN INSIGHT — your perspective]",
+        "- Competitive positioning: moat durability, market share trajectory, pricing power evidence.",
+        "- Asymmetric risk/opportunity vs market consensus: what the market may be underpricing or overpricing.",
+        "- Cross-segment dynamics: how segments interact (subsidize, cannibalize, reinforce each other).",
+        "- Regulatory and macro sensitivity: quantify exposure where possible.",
+        "",
+        "[INFORMATION GAPS — investment impact]",
+        "- For each gap, state what investment conclusion it blocks or weakens.",
+        "- Distinguish between gaps that are resolvable (with more data) and structural unknowns.",
+        "- facts_only, unverified, data gap, grounded=false, could not verify 성격의 정보는 확정 사실로 쓰지 마라.",
+    ]
+    if ctx.shared.conflicts:
+        lines.extend(
+            [
+                "",
+                "[CONFLICT RESOLUTION]",
+                "- Resolve every item from [CONFLICTS] explicitly in the relevant section or in a dedicated subsection.",
+                "- Use the [CONFLICTS] source-reliability order directly: 공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티.",
+                "- If sources are at the same reliability tier and still disagree, keep both values visible and move the blocked conclusion into [INFORMATION GAPS].",
+                "- Do not silently drop a conflicting value or average conflicting values without support.",
+            ]
+        )
+    lines.extend(
         [
-            "Child outputs are your structured data layer. FINALIZE must deliver a trading- and investment-actionable conclusion first, then layered evidence.",
-            "",
-            "[PRIORITY — TRADING / INVESTMENT DECISION FIRST]",
-            f"- Open with a decision-oriented summary: what the evidence implies for 매수·보유·축소·관망 (or equivalent) at as_of_kst={as_of}, only when child outputs support it; otherwise state uncertainty explicitly.",
-            f"- Near the top (as_of_kst={as_of}), include when data allows: (1) market price or valuation snapshot vs thesis, (2) scenario-level upside/downside direction, (3) the shortest list of reasons that drive the action view.",
-            "- Do not lead with DCF alone or end on intrinsic value only. DCF/fair value is supporting evidence, not the sole headline.",
-            "",
-            "[DATA PRESERVATION]",
-            "- Every number, ratio, and factual finding from child outputs MUST appear in the report.",
-            "- Do NOT summarize away detail. The final report must be MORE comprehensive than any single child.",
-            "",
-            "[EVIDENCE — MULTIPLES, INTRINSIC, AND SCENARIOS]",
-            "- Multiples: implied EV/EBITDA, P/E, P/FCF (or sector-appropriate), vs peers and vs own history where child data allows.",
-            "- Intrinsic / DCF: fair value or range when computed; tie it to multiples and scenarios (consistency or tension).",
-            "- Margin trajectory: segment-level margin trends, inflection points, structural vs cyclical drivers.",
-            "- Growth decomposition: organic vs inorganic, volume vs price, sustainable vs one-off.",
-            "- Capital efficiency: ROIC vs WACC, incremental returns on capex, FCF conversion rate.",
-            "- Cash flow quality: operating cash flow vs net income divergence, capex intensity, working capital dynamics.",
-            "",
-            "[DOMAIN INSIGHT — your perspective]",
-            "- Competitive positioning: moat durability, market share trajectory, pricing power evidence.",
-            "- Asymmetric risk/opportunity vs market consensus: what the market may be underpricing or overpricing.",
-            "- Cross-segment dynamics: how segments interact (subsidize, cannibalize, reinforce each other).",
-            "- Regulatory and macro sensitivity: quantify exposure where possible.",
-            "",
-            "[INFORMATION GAPS — investment impact]",
-            "- For each gap, state what investment conclusion it blocks or weakens.",
-            "- Distinguish between gaps that are resolvable (with more data) and structural unknowns.",
-            "- facts_only, unverified, data gap, grounded=false, could not verify 성격의 정보는 확정 사실로 쓰지 마라.",
             "",
             "[TEMPORAL SEPARATION]",
             "- Separate historical facts, current assessment, and future scenarios into distinct sentences or sections.",
@@ -392,6 +415,18 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
             "",
             "Be comprehensive — Soften the overall tone and simplify the language while maintaining the original meaning.",
             "Write the final report markdown in Korean.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def conflict_resolution_text(ctx: TaskContext) -> str:
+    return "\n".join(
+        [
+            f"{len(ctx.shared.conflicts)} conflicting fact(s) require explicit handling.",
+            "- Apply the [CONFLICTS] source-reliability order directly: 공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티.",
+            "- If the values still conflict within the same reliability tier, keep both visible and classify the blocked conclusion under [INFORMATION GAPS].",
+            "- Do not silently drop a conflicting value or blend conflicting values into an invented midpoint/range.",
         ]
     )
 
@@ -489,7 +524,20 @@ def query_units_text(task: Task, ctx: TaskContext) -> str:
 
 
 def shared_fact_line(*, key: str, fact: Any) -> str:
-    return f"{key}: {render_prompt_value(fact.value)}"
+    from ..ontology import NumericValue, TextValue
+
+    addr = fact.address
+    match fact.value:
+        case NumericValue(amount=a, unit=u):
+            val_str = f"{a:,.2f} {u}".strip() if u else f"{a:,.2f}"
+        case TextValue(text=t):
+            val_str = t
+        case _:
+            val_str = str(fact.value)
+    label = f"{addr.subject}:{addr.property_key}"
+    if addr.period:
+        label += f"({addr.period})"
+    return f"{label}: {val_str}"
 
 
 def evidence_text(ctx: TaskContext, *, task_id: str, max_items: int = 8) -> str:
@@ -571,12 +619,9 @@ def prompt_query(query: str, *, prompt_query_chars: int) -> str:
 def task_summary_line(summary: TaskSummary) -> str:
     line = f"{summary.id}: {summary.state.value} - {summary.description}"
     if summary.output is not None:
-        line += (
-            " | output="
-            + render_prompt_value_limited(
-                summary.output,
-                max_chars=_CURRENT_CHILD_OUTPUT_MAX_CHARS,
-            )
+        line += " | output=" + render_prompt_value_limited(
+            summary.output,
+            max_chars=_CURRENT_CHILD_OUTPUT_MAX_CHARS,
         )
     return line
 
@@ -600,7 +645,9 @@ def limit_single_line_text(text: str, *, max_chars: int) -> str:
 
 
 def render_prompt_value_limited(value: Any, *, max_chars: int) -> str:
-    return limit_text(render_prompt_value(value), max_chars=max_chars, suffix="\n... [truncated]")
+    return limit_text(
+        render_prompt_value(value), max_chars=max_chars, suffix="\n... [truncated]"
+    )
 
 
 def render_sections(sections: list[tuple[str, str]]) -> str:

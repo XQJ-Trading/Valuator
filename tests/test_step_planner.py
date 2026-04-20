@@ -7,7 +7,8 @@ import pytest
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
-from valuator.core.shared_state import Fact, SharedStateView
+from valuator.core.ontology import FactAddress, NumericValue
+from valuator.core.shared_state import Conflict, Fact, SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
 from valuator.core.types import Action, FailedAttempt, TaskState, TaskWorkPhase, ToolResult
@@ -308,7 +309,7 @@ async def test_step_planner_requery_without_decompose_adds_rejection_context() -
     assert decision.action.value == "aggregate"
     assert "[DECOMPOSITION_REJECTED]" in llm.calls[0]["prompt"]
     assert "children overlap too much" in llm.calls[0]["prompt"]
-    assert "Do not return DECOMPOSE on this retry." in llm.calls[0]["system_prompt"]
+    assert "Do not return DECOMPOSE on this retry." in llm.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -533,10 +534,10 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
         "finalize",
         "fail",
     ]
-    assert "This task already has a successful tool result." in llm.calls[0][
-        "system_prompt"
-    ]
-    assert "You must not return EXECUTE." in llm.calls[0]["system_prompt"]
+    call = llm.calls[0]
+    assert call["system_prompt"] == ""
+    assert "This task already has a successful tool result." in call["prompt"]
+    assert "You must not return EXECUTE." in call["prompt"]
 
 
 @pytest.mark.asyncio
@@ -569,7 +570,8 @@ async def test_step_planner_keeps_execute_after_failed_tool_result() -> None:
         "fail",
     ]
     assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
-    assert "The previous tool call failed." in llm.calls[0]["system_prompt"]
+    assert llm.calls[0]["system_prompt"] == ""
+    assert "The previous tool call failed." in llm.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -621,11 +623,11 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
 
     await planner.decide(task, ctx)
 
-    system = llm.calls[0]["system_prompt"]
     prompt = llm.calls[0]["prompt"]
     assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
-    assert "FINALIZE" in system
-    assert "Original query:" not in system
+    assert llm.calls[0]["system_prompt"] == ""
+    assert "FINALIZE" in prompt
+    assert "Original query:" not in prompt
     assert "BULL / BASE / BEAR" in prompt
     assert "gap" in prompt.lower()
     assert "INFORMATION GAPS" in prompt
@@ -675,15 +677,17 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
         as_of_kst="2026-03-30 09:00:00",
         shared=SharedStateView(
             {
-                "iran_enrichment_level@2024-01-01:2024-12-31": Fact(
-                    key="iran_enrichment_level@2024-01-01:2024-12-31",
-                    value={"percent": 60},
+                "Observation:iran:enrichment_level:2024": Fact(
+                    address=FactAddress(
+                        node_type="Observation",
+                        subject="iran",
+                        property_key="enrichment_level",
+                        period="2024",
+                    ),
+                    value=NumericValue(amount=60.0, unit="%"),
                     source_task_id="root.0",
                     grounded=True,
                     as_of_kst="2026-03-30 09:00:00",
-                    time_scope="historical",
-                    target_start="2024-01-01",
-                    target_end="2024-12-31",
                     source_urls=("https://example.com/source",),
                 )
             },
@@ -727,15 +731,15 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     await planner.decide(task, ctx)
 
     prompt = llm.calls[0]["prompt"]
-    system_prompt = llm.calls[0]["system_prompt"]
+    assert llm.calls[0]["system_prompt"] == ""
     assert "[QUERY_UNITS]" in prompt
     assert "2024년 이란 상황 조사" in prompt
     assert "[TEMPORAL_CONTRACT]" in prompt
     assert "time_scope=historical" in prompt
     assert "target_period=2024-01-01..2024-12-31" in prompt
-    assert "iran_enrichment_level@2024-01-01:2024-12-31" in prompt
+    assert "iran:enrichment_level(2024)" in prompt
     assert "60" in prompt
-    assert "As-of KST timestamp: 2026-03-30 09:00:00" in system_prompt
+    assert "As-of KST timestamp: 2026-03-30 09:00:00" in prompt
 
 
 @pytest.mark.asyncio
@@ -957,7 +961,7 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
 
     assert decision.action is Action.AGGREGATE
     prompt = llm.calls[0]["prompt"]
-    system_prompt = llm.calls[0]["system_prompt"]
+    assert llm.calls[0]["system_prompt"] == ""
     assert "[EVIDENCE]" in prompt
     assert "opendart_financial_tool(corp=\"LS전선\", fs_div=\"CFS\", year=2024): satisfied" in prompt
     assert "[FAILED_ATTEMPTS]" in prompt
@@ -966,6 +970,71 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
     assert "Do not create children that re-collect satisfied evidence" in llm.cache_requests[0][
         "system_prompt"
     ]
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_requires_conflict_resolution_when_conflicts_present() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "finalize",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="resolve conflicting metrics")
+    conflict = Conflict(
+        key="FinancialStatements:LS전선:revenue:2024",
+        existing=Fact(
+            address=FactAddress(
+                node_type="FinancialStatements",
+                subject="LS전선",
+                property_key="revenue",
+                period="2024",
+            ),
+            value=NumericValue(amount=100.0),
+            source_task_id="root.0",
+            grounded=True,
+        ),
+        incoming=Fact(
+            address=FactAddress(
+                node_type="FinancialStatements",
+                subject="LS전선",
+                property_key="revenue",
+                period="2024",
+            ),
+            value=NumericValue(amount=120.0),
+            source_task_id="root.1",
+            grounded=False,
+        ),
+    )
+    ctx = TaskContext(
+        task_id="root",
+        description="resolve conflicting metrics",
+        step_count=0,
+        as_of_kst="2026-03-30 09:00:00",
+        child_outputs={
+            "root.0": {"summary": "dart value"},
+            "root.1": {"summary": "news value"},
+        },
+        shared=SharedStateView({}, [conflict]),
+        query="LS전선 2024 매출 충돌 해결",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[CONFLICTS]" in prompt
+    assert "LS전선:revenue(2024): 100.00" in prompt
+    assert "LS전선:revenue(2024): 120.00" in prompt
+    assert "[CONFLICT_RESOLUTION]" in prompt
+    assert "explicitly resolve each conflict or classify it as an information gap" in prompt
+    assert "[CONFLICT RESOLUTION]" in prompt
+    assert "공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티" in prompt
+    assert "Do not silently drop a conflicting value" in prompt
 
 
 @pytest.mark.asyncio
@@ -988,9 +1057,14 @@ async def test_step_planner_omits_shared_facts_during_synthesize_with_child_outp
         child_outputs={"root.0": {"summary": "done"}},
         shared=SharedStateView(
             {
-                "revenue_2024": Fact(
-                    key="revenue_2024",
-                    value={"amount": 100},
+                "FinancialStatements:LS전선:revenue:2024": Fact(
+                    address=FactAddress(
+                        node_type="FinancialStatements",
+                        subject="LS전선",
+                        property_key="revenue",
+                        period="2024",
+                    ),
+                    value=NumericValue(amount=100.0),
                     source_task_id="root.0",
                     grounded=True,
                 )

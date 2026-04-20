@@ -260,6 +260,26 @@ class _DummyCacheClient:
         self.caches = _DummyCaches()
 
 
+class _TooSmallCaches:
+    def __init__(self) -> None:
+        self.create_calls = 0
+
+    def create(self, *, model: str, config: object) -> _DummyCachedContent:
+        del model, config
+        self.create_calls += 1
+        raise ValueError(
+            "400 INVALID_ARGUMENT. {'error': {'message': "
+            "'Cached content is too small. total_token_count=204, "
+            "min_total_token_count=1024', 'status': 'INVALID_ARGUMENT'}}"
+        )
+
+
+class _TooSmallCacheClient:
+    def __init__(self) -> None:
+        self.models = _DummyModels()
+        self.caches = _TooSmallCaches()
+
+
 class _NoisyClient:
     def __init__(self) -> None:
         self.models = _NoisyModels()
@@ -391,6 +411,35 @@ async def test_gemini_client_reuses_explicit_cache_by_key(
 
     assert first == "cachedContents/test-cache"
     assert second == "cachedContents/test-cache"
+    assert backend.caches.create_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_skips_explicit_cache_key_when_too_small(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "valuator.models.gemini_direct.ensure_supported_google_genai_runtime",
+        lambda: "test-runtime",
+    )
+    backend = _TooSmallCacheClient()
+    client = GeminiClient(
+        model="gemini-3-flash-preview",
+        api_key="test-key",
+        client=backend,
+    )
+
+    first = await client.get_or_create_explicit_cache(
+        cache_key="critic:root-system:v1",
+        system_prompt="short",
+    )
+    second = await client.get_or_create_explicit_cache(
+        cache_key="critic:root-system:v1",
+        system_prompt="short",
+    )
+
+    assert first is None
+    assert second is None
     assert backend.caches.create_calls == 1
 
 

@@ -225,13 +225,17 @@ def _build_query_intent(
     )
 
 
-def _build_entities(raw_entities: list[QueryEntityPayload]) -> dict[str, str]:
+def _build_entities(
+    raw_entities: list[QueryEntityPayload],
+) -> tuple[dict[str, str], dict[str, str]]:
     entities: dict[str, str] = {}
+    entity_kinds: dict[str, str] = {}
     for item in raw_entities:
         if item.id in entities:
             raise ValueError(f"duplicate query entity id: {item.id}")
         entities[item.id] = item.label
-    return entities
+        entity_kinds[item.id] = item.kind
+    return entities, entity_kinds
 
 
 def _build_units(
@@ -402,7 +406,7 @@ def _build_query_analysis(
         raw_entities=raw.entities,
         on_miss=on_miss,
     )
-    entities = _build_entities(raw.entities)
+    entities, entity_kinds = _build_entities(raw.entities)
     entity_id_set = set(entities)
     units, unit_id_to_index = _build_units(
         raw.units,
@@ -418,6 +422,7 @@ def _build_query_analysis(
         as_of_kst=as_of_kst,
         query_intent=query_intent,
         entities=entities,
+        entity_kinds=entity_kinds,
         units=units,
         requirements=requirements,
         intent_tags=_dedupe_strings(raw.intent_tags),

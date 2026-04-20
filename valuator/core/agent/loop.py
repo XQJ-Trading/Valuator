@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 from time import perf_counter
 from typing import Any, Awaitable, Callable
 
@@ -18,6 +19,7 @@ from ..decomposition import (
     MCTSGateController,
     PassthroughGate,
 )
+from ..ontology import parse_raw_fact
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
@@ -589,9 +591,14 @@ class Agent:
             self._session_store is not None
             and decision.action in (Action.AGGREGATE, Action.FINALIZE)
         ):
+            shared_view = self._shared.view_for(
+                task_id=task.id,
+                query_unit_ids=task.query_unit_ids,
+            )
             artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,
                 output=task.completion_payload(),
+                shared_view=shared_view,
             )
             task.artifacts.update(artifact_refs)
         self._sync_session_tree()
@@ -611,8 +618,8 @@ class Agent:
                     detail={
                         "kind": "conflict",
                         "key": conflict.key,
-                        "existing": conflict.existing.value,
-                        "incoming": conflict.incoming.value,
+                        "existing": asdict(conflict.existing.value),
+                        "incoming": asdict(conflict.incoming.value),
                     },
                 )
             )
@@ -841,12 +848,13 @@ class Agent:
         output, facts = task.implicit_aggregate_payload()
         if facts:
             for key, value in facts.items():
-                self._shared.publish(
+                fact = parse_raw_fact(
                     key,
                     value,
                     source_task_id=task.id,
                     query_unit_ids=tuple(task.query_unit_ids),
                 )
+                self._shared.publish(fact)
         decision = TaskDecision(
             action=Action.FINALIZE,
             output=output,
@@ -855,9 +863,14 @@ class Agent:
         )
         self._scheduler.apply_decision(task, decision, self._shared)
         if self._session_store is not None:
+            shared_view = self._shared.view_for(
+                task_id=task.id,
+                query_unit_ids=task.query_unit_ids,
+            )
             artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,
                 output=task.completion_payload(),
+                shared_view=shared_view,
             )
             task.artifacts.update(artifact_refs)
         self._sync_session_tree()

@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -91,6 +92,29 @@ def test_render_event_collapses_newlines_in_step_description() -> None:
 
     assert "\n" not in rendered
     assert "Analysis: line1 line2" in rendered
+
+
+def test_build_effective_query_omits_thinking_level_when_blank() -> None:
+    module = _load_script_module()
+
+    effective_query = module.build_effective_query("alpha query", "")
+
+    assert effective_query == "alpha query"
+
+
+def test_parse_args_thinking_level_defaults_blank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_recursive_agent_query.py", "--query", "alpha query"],
+    )
+
+    args = module.parse_args()
+
+    assert args.thinking_level == ""
 
 
 @pytest.mark.asyncio

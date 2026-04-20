@@ -102,6 +102,28 @@ async def test_tavily_provider_maps_deep_intent_to_advanced_general(
 
 
 @pytest.mark.asyncio
+async def test_tavily_provider_maps_financial_intent_to_general_topic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_module = importlib.import_module("valuator.utils.config")
+    from valuator.tools import web_search_providers as module
+
+    client = _FakeTavilyClient()
+    monkeypatch.setattr(
+        config_module, "config", SimpleNamespace(tavily_api_key="test-key")
+    )
+    monkeypatch.setattr(
+        module.TavilyProvider, "_init_client", lambda self, api_key: client
+    )
+
+    provider = TavilyProvider()
+    await provider.search("PBR 지표", intent="financial")
+
+    assert client.calls[0]["topic"] == "general"
+    assert client.calls[0]["search_depth"] == "advanced"
+
+
+@pytest.mark.asyncio
 async def test_tavily_provider_truncates_duplicate_sources_heading_from_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -229,3 +251,56 @@ async def test_web_search_tool_rejects_invalid_search_intent() -> None:
 
     assert result.success is False
     assert result.error == "search_intent must be one of: deep, financial, general"
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_marks_empty_findings_as_failure() -> None:
+    class FakeProvider:
+        name = "fake"
+        model_name = "fake-model"
+        available = True
+
+        async def search(self, query: str, *, intent: str):
+            del query, intent
+            return SimpleNamespace(
+                answer="   ",
+                sources=[],
+                usage_meta={"provider": "fake"},
+            )
+
+    tool = WebSearchTool(provider=FakeProvider())
+    result = await tool.execute(query="Samsung revenue", search_intent="general")
+
+    assert result.success is False
+    assert result.error == "Search returned no findings"
+    assert result.result == {"query": "Samsung revenue", "findings": ""}
+    assert result.metadata["search_intent"] == "general"
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_batch_fails_when_any_search_returns_empty_findings() -> None:
+    class FakeProvider:
+        name = "fake"
+        model_name = "fake-model"
+        available = True
+
+        async def search(self, query: str, *, intent: str):
+            del intent
+            if query.startswith("empty"):
+                return SimpleNamespace(answer="", sources=[], usage_meta={})
+            return SimpleNamespace(
+                answer=f"answer for {query}",
+                sources=[f"https://example.com/{query}"],
+                usage_meta={},
+            )
+
+    tool = WebSearchTool(provider=FakeProvider())
+    result = await tool.execute(
+        queries=["filled", "empty"],
+        search_intent="general",
+    )
+
+    assert result.success is False
+    assert result.error == "One or more searches failed"
+    assert isinstance(result.result, list)
+    assert result.result[1]["error"] == "Search returned no findings"

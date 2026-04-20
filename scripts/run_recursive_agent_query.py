@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from valuator.runtime import create_tool_registry, finalize_trace  # noqa: E402
 from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
+from valuator.session.trace import json_ready  # noqa: E402
 from valuator.session.browse_tree import (  # noqa: E402
     task_description_from_effective_query,
 )
@@ -53,8 +54,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--thinking-level",
-        default="high",
-        help="Optional thinking level tag appended to the effective query.",
+        default="low",
+        help="Optional thinking level tag appended to the effective query. Omitted by default.",
     )
     parser.add_argument(
         "--max-steps",
@@ -216,12 +217,12 @@ def _write_cli_trace_compat(trace_writer: SessionTraceWriter) -> None:
             )
     with (output_dir / "method_calls.jsonl").open("w", encoding="utf-8") as file_obj:
         for row in method_rows:
-            file_obj.write(json.dumps(row, ensure_ascii=False) + "\n")
+            file_obj.write(json.dumps(json_ready(row), ensure_ascii=False) + "\n")
 
 
 def render_event(event, *, jsonl: bool) -> str:
     if jsonl:
-        return json.dumps(asdict(event), ensure_ascii=False)
+        return json.dumps(json_ready(asdict(event)), ensure_ascii=False)
 
     event_type = event.type
     task_id = event.task_id
@@ -254,15 +255,15 @@ def render_event(event, *, jsonl: bool) -> str:
         name_part = f"{tn} " if tn else ""
         return (
             f"[tool] {task_id} {name_part}{tool}{duration_text} "
-            f"{json.dumps(detail.get('args') or {}, ensure_ascii=False)}"
+            f"{json.dumps(json_ready(detail.get('args') or {}), ensure_ascii=False)}"
         )
 
     if event_type == EventType.STEP_COMPLETED:
         if detail.get("kind") == "conflict":
             return (
                 f"[conflict] {task_id} {detail.get('key')}: "
-                f"{json.dumps(detail.get('existing'), ensure_ascii=False)} vs "
-                f"{json.dumps(detail.get('incoming'), ensure_ascii=False)}"
+                f"{json.dumps(json_ready(detail.get('existing')), ensure_ascii=False)} vs "
+                f"{json.dumps(json_ready(detail.get('incoming')), ensure_ascii=False)}"
             )
         action = detail.get("action")
         if action:

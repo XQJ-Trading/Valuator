@@ -134,7 +134,7 @@ class TavilyProvider(_BaseProvider):
     _INTENT_TO_REQUEST: dict[SearchIntent, dict[str, Any]] = {
         "general": {"topic": "general", "search_depth": "basic"},
         "deep": {"topic": "general", "search_depth": "advanced"},
-        "financial": {"topic": "finance", "search_depth": "advanced"},
+        "financial": {"topic": "general", "search_depth": "advanced"},
     }
     _max_results = 5
     _include_answer: str | bool = "advanced"

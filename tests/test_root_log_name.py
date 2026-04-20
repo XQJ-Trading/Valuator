@@ -38,6 +38,7 @@ def test_segment_prefers_unit_entity_label_over_subject_order(tmp_path: Path) ->
             subjects=(Subject(company=wrong, listing=listing),),
         ),
         entities={"e0": "LS ELECTRIC", "t0": "010820"},
+        entity_kinds={"e0": "company", "t0": "ticker"},
         units=[
             QueryUnit(
                 id="u0",
@@ -77,6 +78,46 @@ def test_segment_prefers_company_name_over_ticker(tmp_path: Path) -> None:
         tmp_path,
     )
     assert sid.startswith("20260416-0153-LS")
+
+
+def test_segment_skips_non_company_unit_entity_prefers_subject_name(
+    tmp_path: Path,
+) -> None:
+    listing = Listing(
+        listing_id="KRX:042660",
+        company_id="KRX:042660",
+        security_code="042660",
+        exchange="KOSPI",
+        vendor_symbols={},
+    )
+    company = Company(
+        company_id="KRX:042660",
+        company_name="한화오션",
+        aliases=(),
+    )
+    analysis = QueryAnalysis(
+        query_intent=QueryIntent(
+            query="한화오션 분석해줘",
+            subjects=(Subject(company=company, listing=listing),),
+        ),
+        entities={"industry_shipbuilding": "조선업"},
+        entity_kinds={"industry_shipbuilding": "theme"},
+        units=[
+            QueryUnit(
+                id="u0",
+                objective="industry_position",
+                retrieval_query="한화오션 조선업 점유율",
+                entity_ids=["industry_shipbuilding"],
+            )
+        ],
+    )
+    sid = build_unique_root_session_id(
+        datetime(2026, 4, 21, 0, 38, tzinfo=KST),
+        analysis,
+        "한화오션 분석해줘",
+        tmp_path,
+    )
+    assert sid.startswith("20260421-0038-한화오션")
 
 
 def test_segment_skips_ticker_uses_query_slug_when_no_company_name(

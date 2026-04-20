@@ -11,6 +11,8 @@ from .parser import StepIntentPayload, parse_decision
 
 TASK_NAME_MAX_CHARS = 30
 _PLANNER_SYSTEM_CACHE_KEY = "planner:system-prefix:v1"
+# Gemini explicit cache forbids system_instruction on GenerateContent; fold per-call system into user text.
+_STEP_PLANNER_CACHED_CONTEXT_TAG = "[STEP_PLANNER_CONTEXT]"
 
 
 class StepPlanner:
@@ -106,14 +108,24 @@ class StepPlanner:
         schema: dict[str, Any],
         allow_decompose: bool = True,
     ) -> TaskDecision:
-        prompt = base_prompt
+        def llm_prompt(*, user_body: str) -> tuple[str, str]:
+            if cached_content:
+                sections = [
+                    _STEP_PLANNER_CACHED_CONTEXT_TAG,
+                    system_prompt.strip(),
+                    user_body,
+                ]
+                return "", "\n\n".join(section for section in sections if section)
+            return system_prompt, user_body
+
+        llm_system, prompt = llm_prompt(user_body=base_prompt)
         last_error: ValueError | None = None
 
         for attempt in range(self._repair_retries + 1):
             try:
                 invalid_payload = await self._llm.generate_json(
                     prompt=prompt,
-                    system_prompt=system_prompt,
+                    system_prompt=llm_system,
                     response_json_schema=schema,
                     trace_method=f"agent.step.{task.id}",
                     max_response_chars=self._decision_max_response_chars,
@@ -129,7 +141,7 @@ class StepPlanner:
                 last_error = exc
                 if attempt >= self._repair_retries:
                     break
-                prompt = "\n\n".join(
+                repair_body = "\n\n".join(
                     [
                         base_prompt,
                         "[VALIDATION_ERROR]",
@@ -138,6 +150,7 @@ class StepPlanner:
                         "Return corrected JSON only.",
                     ]
                 )
+                llm_system, prompt = llm_prompt(user_body=repair_body)
 
         if last_error is None:
             raise ValueError("step planner produced no decision")

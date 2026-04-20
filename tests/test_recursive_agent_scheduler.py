@@ -3,6 +3,7 @@ from __future__ import annotations
 from domain.query import QueryAnalysis, QueryUnit
 from valuator.core.context import TaskContext
 from valuator.core import Action, AtomicTask, ComplexTask, Scheduler, SharedState
+from valuator.core.ontology import NumericValue
 from valuator.core.types import TaskDecision, TaskSpec, TaskState
 
 
@@ -68,7 +69,11 @@ def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
         shared,
     )
 
-    assert shared.get("wacc") == 0.095
+    # fact is now stored under canonical key; verify via view
+    facts = shared.view().facts
+    assert any(
+        f.value == NumericValue(amount=0.095) for f in facts.values()
+    )
     assert consumer.state is TaskState.READY
     assert newly_ready == ["consumer"]
 
@@ -457,14 +462,11 @@ def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
     )
 
     view = shared.view()
-    assert "iran_enrichment_level" in view.facts
-    fact = view.facts["iran_enrichment_level"]
-    assert fact.value == 60
+    assert len(view.facts) == 1
+    fact = next(iter(view.facts.values()))
+    assert fact.value == NumericValue(amount=60.0)
     assert fact.query_unit_ids == (0,)
     assert fact.grounded is True
-    assert fact.time_scope == "historical"
-    assert fact.target_start == "2024-01-01"
-    assert fact.target_end == "2024-12-31"
 
 
 def test_scheduler_inherits_single_parent_query_unit_id() -> None:

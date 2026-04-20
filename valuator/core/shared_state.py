@@ -1,21 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+
+from .ontology import FactAddress, FactValue
 
 
 @dataclass(frozen=True)
 class Fact:
-    key: str
-    value: Any
+    address: FactAddress
+    value: FactValue
     source_task_id: str
     query_unit_ids: tuple[int, ...] = ()
     grounded: bool = False
     as_of_kst: str = ""
-    time_scope: str = ""
-    target_start: str = ""
-    target_end: str = ""
     source_urls: tuple[str, ...] = ()
+    source_tier: int = -1
+
+    @property
+    def key(self) -> str:
+        return self.address.canonical_key
 
 
 @dataclass(frozen=True)
@@ -26,11 +29,22 @@ class Conflict:
 
 
 @dataclass(frozen=True)
+class ResolvedConflict:
+    key: str
+    existing: Fact
+    incoming: Fact
+    selected: Fact
+    discarded: Fact
+    reason: str
+
+
+@dataclass(frozen=True)
 class SharedStateView:
     facts: dict[str, Fact]
     conflicts: list[Conflict]
+    resolved_conflicts: list[ResolvedConflict] = field(default_factory=list)
 
-    def get(self, key: str) -> Any | None:
+    def get(self, key: str) -> FactValue | None:
         fact = self.facts.get(key)
         return fact.value if fact else None
 
@@ -62,84 +76,82 @@ def _is_relevant(
     return False
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for k, v in override.items():
-        if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
-            merged[k] = _deep_merge(merged[k], v)
-        else:
-            merged[k] = v
-    return merged
-
-
 @dataclass(frozen=True)
 class FactExposure:
     task_id: str
     fact_keys: tuple[str, ...]
 
 
+def _resolve_conflict(existing: Fact, incoming: Fact) -> ResolvedConflict | None:
+    if existing.source_tier < 0 and incoming.source_tier < 0:
+        return None
+    if existing.source_tier == incoming.source_tier:
+        return None
+    if existing.source_tier > incoming.source_tier:
+        return ResolvedConflict(
+            key=existing.key,
+            existing=existing,
+            incoming=incoming,
+            selected=existing,
+            discarded=incoming,
+            reason=(
+                "higher source priority preferred "
+                f"({existing.source_tier} > {incoming.source_tier})"
+            ),
+        )
+    return ResolvedConflict(
+        key=existing.key,
+        existing=existing,
+        incoming=incoming,
+        selected=incoming,
+        discarded=existing,
+        reason=(
+            "higher source priority preferred "
+            f"({incoming.source_tier} > {existing.source_tier})"
+        ),
+    )
+
+
+def _is_resolution_relevant(
+    resolution: ResolvedConflict,
+    *,
+    task_id: str,
+    unit_set: set[int],
+) -> bool:
+    return any(
+        _is_relevant(fact, task_id=task_id, unit_set=unit_set)
+        for fact in (resolution.existing, resolution.incoming, resolution.selected)
+    )
+
+
 class SharedState:
     def __init__(self) -> None:
         self._facts: dict[str, Fact] = {}
-        self._conflicts: list[Conflict] = []
+        self._conflicts: dict[str, Conflict] = {}
+        self._resolved_conflicts: list[ResolvedConflict] = []
         self._exposures: list[FactExposure] = []
 
-    def publish(
-        self,
-        key: str,
-        value: Any,
-        source_task_id: str,
-        *,
-        query_unit_ids: tuple[int, ...] = (),
-        grounded: bool = False,
-        as_of_kst: str = "",
-        time_scope: str = "",
-        target_start: str = "",
-        target_end: str = "",
-        source_urls: tuple[str, ...] = (),
-    ) -> Conflict | None:
-        incoming = Fact(
-            key=key,
-            value=value,
-            source_task_id=source_task_id,
-            query_unit_ids=tuple(query_unit_ids),
-            grounded=grounded,
-            as_of_kst=as_of_kst,
-            time_scope=time_scope,
-            target_start=target_start,
-            target_end=target_end,
-            source_urls=tuple(source_urls),
-        )
+    def publish(self, fact: Fact) -> Conflict | None:
+        key = fact.key
         existing = self._facts.get(key)
         if existing is None:
-            self._facts[key] = incoming
+            self._facts[key] = fact
             return None
-        if isinstance(existing.value, dict) and isinstance(value, dict):
-            merged_value = _deep_merge(existing.value, value)
-            merged_units = tuple(
-                sorted(set(existing.query_unit_ids) | set(tuple(query_unit_ids)))
-            )
-            self._facts[key] = Fact(
-                key=key,
-                value=merged_value,
-                source_task_id=source_task_id,
-                query_unit_ids=merged_units,
-                grounded=grounded,
-                as_of_kst=as_of_kst,
-                time_scope=time_scope,
-                target_start=target_start,
-                target_end=target_end,
-                source_urls=tuple(source_urls),
-            )
+        if existing.value == fact.value:
+            # same value — update metadata only
+            self._facts[key] = fact
             return None
-        if existing.value != value:
-            conflict = Conflict(key=key, existing=existing, incoming=incoming)
-            self._conflicts.append(conflict)
-            return conflict
-        self._facts[key] = incoming
-        return None
+        resolution = _resolve_conflict(existing, fact)
+        if resolution is not None:
+            self._facts[key] = resolution.selected
+            self._conflicts.pop(key, None)
+            self._resolved_conflicts.append(resolution)
+            return None
+        conflict = Conflict(key=key, existing=existing, incoming=fact)
+        self._conflicts[key] = conflict
+        return conflict
 
-    def get(self, key: str) -> Any | None:
+    def get(self, key: str) -> FactValue | None:
         fact = self._facts.get(key)
         return fact.value if fact else None
 
@@ -153,10 +165,15 @@ class SharedState:
     def exposures(self) -> list[FactExposure]:
         return list(self._exposures)
 
+    @property
+    def resolved_conflicts(self) -> list[ResolvedConflict]:
+        return list(self._resolved_conflicts)
+
     def view(self) -> SharedStateView:
         return SharedStateView(
             facts=dict(self._facts),
-            conflicts=list(self._conflicts),
+            conflicts=list(self._conflicts.values()),
+            resolved_conflicts=list(self._resolved_conflicts),
         )
 
     def relevant_fact_keys_for(self, *, task_id: str, query_unit_ids: list[int]) -> frozenset[str]:
@@ -187,7 +204,8 @@ class SharedState:
                 )
             return SharedStateView(
                 facts=facts,
-                conflicts=list(self._conflicts),
+                conflicts=list(self._conflicts.values()),
+                resolved_conflicts=list(self._resolved_conflicts),
             )
         unit_set = set(query_unit_ids)
         relevant = {
@@ -201,4 +219,21 @@ class SharedState:
             self._exposures.append(
                 FactExposure(task_id=task_id, fact_keys=tuple(relevant.keys()))
             )
-        return SharedStateView(facts=relevant, conflicts=list(self._conflicts))
+        return SharedStateView(
+            facts=relevant,
+            conflicts=[
+                conflict
+                for conflict in self._conflicts.values()
+                if _is_relevant(conflict.existing, task_id=task_id, unit_set=unit_set)
+                or _is_relevant(conflict.incoming, task_id=task_id, unit_set=unit_set)
+            ],
+            resolved_conflicts=[
+                resolution
+                for resolution in self._resolved_conflicts
+                if _is_resolution_relevant(
+                    resolution,
+                    task_id=task_id,
+                    unit_set=unit_set,
+                )
+            ],
+        )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from domain.company import CompanySurfaceResolution, resolve_company_surfaces
 from domain.boundary.query_analysis_payload import (
     QueryIntentPayload,
+    _build_query_analysis,
     _company_surfaces_fully_resolved,
     _merge_ticker_enrichment_payload,
 )
@@ -52,3 +53,51 @@ def test_resolve_company_surfaces_returns_unresolved() -> None:
     assert isinstance(r, CompanySurfaceResolution)
     assert r.subjects == ()
     assert r.unresolved_surface_forms == ("TotallyUnknownXyz999",)
+
+
+def test_build_query_analysis_preserves_entity_kinds() -> None:
+    analysis = _build_query_analysis(
+        {
+            "query_intent": {
+                "company_names": [],
+                "tickers": [],
+            },
+            "entities": [
+                {
+                    "id": "industry_shipbuilding",
+                    "label": "조선업",
+                    "kind": "theme",
+                },
+                {
+                    "id": "company_peer",
+                    "label": "HD현대중공업",
+                    "kind": "company",
+                },
+            ],
+            "units": [
+                {
+                    "id": "u0",
+                    "objective": "industry position",
+                    "retrieval_query": "한화오션 조선업 점유율",
+                    "entity_ids": ["industry_shipbuilding", "company_peer"],
+                    "time_scope": "현재",
+                }
+            ],
+            "requirements": [
+                {
+                    "acceptance": "경쟁 구도와 수주 경쟁력이 포함되어야 함",
+                    "unit_ids": ["u0"],
+                    "entity_ids": ["industry_shipbuilding", "company_peer"],
+                    "provenance": "market_research",
+                }
+            ],
+            "intent_tags": [],
+            "rationale": "x",
+        },
+        query="한화오션 분석해줘",
+        on_miss=None,
+    )
+    assert analysis.entity_kinds == {
+        "industry_shipbuilding": "theme",
+        "company_peer": "company",
+    }

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from domain.query import QueryAnalysis
+from domain.query import QueryAnalysis, is_concrete_subject_kind
 
 from valuator.session.browse_tree import to_slug
 from valuator.utils.time_utils import KST
@@ -30,6 +30,9 @@ def _segment_from_unit_entities(analysis: QueryAnalysis) -> str:
     """Prefer labels bound to plan units (same graph as QueryUnit.entity_ids)."""
     for unit in analysis.units:
         for eid in unit.entity_ids:
+            kind = (analysis.entity_kinds.get(eid) or "").strip()
+            if kind and not is_concrete_subject_kind(kind):
+                continue
             raw = (analysis.entities.get(eid) or "").strip()
             if not raw or _is_six_digit_numeric_label(raw):
                 continue

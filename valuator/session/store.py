@@ -17,7 +17,10 @@ from valuator.utils.config import ROOT_DIR
 from valuator.utils.time_utils import kst_isoformat
 
 from .browse_tree import build_browse_tree
-from .citation_links import apply_citation_links_to_tool_payload
+from .citation_links import (
+    apply_citation_links_to_tool_payload,
+    strip_lenticular_source_refs_from_tool_payload,
+)
 from .markdown import (
     render_final_markdown,
     strip_markdown_title,
@@ -25,6 +28,7 @@ from .markdown import (
 from .report_artifacts import artifact_text, load_report_source, render_aggregation_report
 from .task_tree import build_task_tree_snapshot, render_tree_markdown
 from .trace import SessionTraceWriter, task_rel_path
+from valuator.core.shared_state import SharedStateView
 
 CURRENT_ROUND = 1
 
@@ -223,6 +227,11 @@ class ValuatorSessionStore:
                 if result.success
                 else result.result
             )
+            source_ref: list[str] = []
+            if result.success:
+                display_payload, source_ref = (
+                    strip_lenticular_source_refs_from_tool_payload(display_payload)
+                )
 
             domain_summary = ""
             if isinstance(display_payload, dict):
@@ -256,6 +265,10 @@ class ValuatorSessionStore:
                     "raw_result": result.result,
                 },
             )
+            retrieval_meta = dict(result.metadata)
+            if source_ref:
+                retrieval_meta["source_ref"] = source_ref
+
             self._write_json(
                 meta_path,
                 {
@@ -264,7 +277,7 @@ class ValuatorSessionStore:
                     "args": args,
                     "success": result.success,
                     "error": result.error,
-                    "retrieval": result.metadata,
+                    "retrieval": retrieval_meta,
                     "started_at": started_at,
                     "duration_ms": round(duration_ms, 3),
                 },
@@ -280,7 +293,13 @@ class ValuatorSessionStore:
             self._write_session()
             return artifact_refs
 
-    def write_aggregation_report(self, *, task_id: str, output: Any) -> dict[str, str]:
+    def write_aggregation_report(
+        self,
+        *,
+        task_id: str,
+        output: Any,
+        shared_view: SharedStateView | None = None,
+    ) -> dict[str, str]:
         with self._lock:
             plan_task = self._plan_tasks[task_id]
             task_dir = self._task_dir(task_id) / "aggregation"
@@ -315,6 +334,7 @@ class ValuatorSessionStore:
                 output=output,
                 child_sources=child_sources,
                 current_source=current_source,
+                shared_view=shared_view,
             )
             self._write_text(report_path, report_markdown)
 
@@ -338,6 +358,16 @@ class ValuatorSessionStore:
                     ],
                     "output": output,
                     "facts": facts,
+                    "conflicts": (
+                        [asdict(conflict) for conflict in shared_view.conflicts]
+                        if shared_view is not None
+                        else []
+                    ),
+                    "resolved_conflicts": (
+                        [asdict(conflict) for conflict in shared_view.resolved_conflicts]
+                        if shared_view is not None
+                        else []
+                    ),
                     "aspect_facts": [],
                     "uncovered_aspects": [],
                 },
@@ -511,6 +541,7 @@ class ValuatorSessionStore:
                 key: asdict(fact) for key, fact in view.facts.items()
             },
             "conflicts": [asdict(c) for c in view.conflicts],
+            "resolved_conflicts": [asdict(c) for c in view.resolved_conflicts],
             "exposures": [asdict(e) for e in shared.exposures],
         }
         self._write_json(self.session_dir / "shared_facts.json", payload)

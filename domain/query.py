@@ -95,6 +95,7 @@ class QueryAnalysis:
     as_of_kst: str = ""
     query_intent: QueryIntent = field(default_factory=lambda: QueryIntent(query=""))
     entities: dict[str, str] = field(default_factory=dict)
+    entity_kinds: dict[str, str] = field(default_factory=dict)
     units: list[QueryUnit] = field(default_factory=list)
     requirements: list[QueryRequirement] = field(default_factory=list)
     intent_tags: list[str] = field(default_factory=list)

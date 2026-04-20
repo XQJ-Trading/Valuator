@@ -121,20 +121,32 @@ class WebSearchTool(ReActBaseTool):
                         latency_seconds=latency_seconds,
                         started_at=measurement.started_at,
                     )
+                findings = result.answer.strip()
+                metadata = {
+                    "search_type": f"{self.provider.name}_web",
+                    "model": self.provider.model_name,
+                    "search_intent": intent,
+                    "usage": result.usage_meta,
+                    "effective_query": effective_query,
+                    "sources": result.sources,
+                }
+                if not findings:
+                    return ToolResult(
+                        success=False,
+                        result={
+                            "query": query,
+                            "findings": "",
+                        },
+                        error="Search returned no findings",
+                        metadata=metadata,
+                    )
                 return ToolResult(
                     success=True,
                     result={
                         "query": query,
-                        "findings": result.answer,
+                        "findings": findings,
                     },
-                    metadata={
-                        "search_type": f"{self.provider.name}_web",
-                        "model": self.provider.model_name,
-                        "search_intent": intent,
-                        "usage": result.usage_meta,
-                        "effective_query": effective_query,
-                        "sources": result.sources,
-                    },
+                    metadata=metadata,
                 )
             except Exception as exc:
                 latency_seconds = measurement.latency_seconds()

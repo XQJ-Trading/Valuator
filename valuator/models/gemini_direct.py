@@ -22,6 +22,11 @@ if TYPE_CHECKING:
     from .protocol import UsageWriter
 
 
+def _gemini_explicit_cache_too_small(exc: BaseException) -> bool:
+    # Explicit context cache requires a model-dependent minimum token count.
+    return "cached content is too small" in str(exc).lower()
+
+
 @lru_cache(maxsize=1)
 def ensure_supported_google_genai_runtime() -> str:
     try:
@@ -147,6 +152,7 @@ class GeminiClient:
         )
         self._explicit_cache_lock = asyncio.Lock()
         self._explicit_cache_names: dict[str, str] = {}
+        self._explicit_cache_skip: set[str] = set()
         ensure_supported_google_genai_runtime()
 
     def bind_usage_writer(self, usage_writer: "UsageWriter | None") -> None:
@@ -369,21 +375,31 @@ class GeminiClient:
     ) -> str | None:
         if not cache_key:
             return None
+        if cache_key in self._explicit_cache_skip:
+            return None
         existing = self._explicit_cache_names.get(cache_key)
         if existing:
             return existing
 
         async with self._explicit_cache_lock:
+            if cache_key in self._explicit_cache_skip:
+                return None
             existing = self._explicit_cache_names.get(cache_key)
             if existing:
                 return existing
-            cache = await self.create_explicit_cache(
-                contents=contents,
-                system_prompt=system_prompt,
-                ttl_seconds=ttl_seconds,
-                display_name=display_name,
-                trace_method=trace_method,
-            )
+            try:
+                cache = await self.create_explicit_cache(
+                    contents=contents,
+                    system_prompt=system_prompt,
+                    ttl_seconds=ttl_seconds,
+                    display_name=display_name,
+                    trace_method=trace_method,
+                )
+            except Exception as exc:
+                if _gemini_explicit_cache_too_small(exc):
+                    self._explicit_cache_skip.add(cache_key)
+                    return None
+                raise
             self._explicit_cache_names[cache_key] = cache.name
             return cache.name
 

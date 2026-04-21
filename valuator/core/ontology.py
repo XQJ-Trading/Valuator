@@ -21,7 +21,7 @@ class PropertyDef:
     unit_hint: str = ""
 
 
-# ─── Metric Registry ──────────────────────────���──────────────────────────────
+# ─── Metric Registry ───────────────────────────────────────────────────────────
 # Extend by adding a single PropertyDef line.
 
 PROPERTIES: tuple[PropertyDef, ...] = (
@@ -56,7 +56,7 @@ PROPERTIES: tuple[PropertyDef, ...] = (
     PropertyDef("ev_revenue", "indicator", "numeric", "배"),
     PropertyDef("ev_fcf", "indicator", "numeric", "배"),
     PropertyDef("ps_ratio", "indicator", "numeric", "배"),
-    PropertyDef("current_ratio", "indicator", "numeric", "���"),
+    PropertyDef("current_ratio", "indicator", "numeric", "배"),
     PropertyDef("debt_to_equity", "indicator", "numeric", "%"),
     PropertyDef("net_debt", "indicator", "numeric", "KRW"),
     PropertyDef("operating_margin", "indicator", "numeric", "%"),
@@ -67,6 +67,10 @@ PROPERTIES: tuple[PropertyDef, ...] = (
     PropertyDef("net_margin", "indicator", "numeric", "%"),
     # Stock Price
     PropertyDef("stock_price", "price", "numeric", "KRW"),
+    PropertyDef("price_open", "price", "numeric", "KRW"),
+    PropertyDef("price_high", "price", "numeric", "KRW"),
+    PropertyDef("price_low", "price", "numeric", "KRW"),
+    PropertyDef("volume", "price", "numeric", "주"),
     PropertyDef("market_cap", "price", "numeric", "KRW"),
     PropertyDef("target_price", "price", "numeric", "KRW"),
     # Qualitative / Company
@@ -79,7 +83,7 @@ PROPERTIES: tuple[PropertyDef, ...] = (
     PropertyDef("valuation_summary", "qualitative", "text"),
 )
 
-# ─── Lookup index ──────��──────────────────────────���───────────────────────────
+# ─── Lookup index ─────────────────────────────────────────────────────────────
 
 _BY_KEY: dict[str, PropertyDef] = {p.key: p for p in PROPERTIES}
 

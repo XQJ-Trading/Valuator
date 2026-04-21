@@ -10,6 +10,7 @@ from .boundary.query_analysis_payload import (
     _build_query_analysis,
     _response_schema,
 )
+from .boundary import enrich_krx_subjects
 from .company import ListingSeed
 from .query import QueryAnalysis
 
@@ -95,9 +96,13 @@ class QueryAnalyzer:
             response_json_schema=_response_schema(),
             trace_method="query_analysis.analyze",
         )
-        return _build_query_analysis(
+        analysis = _build_query_analysis(
             payload,
             query=query,
             on_miss=self._on_miss,
             as_of_kst=as_of_kst,
         )
+        analysis.query_intent.subjects = enrich_krx_subjects(
+            analysis.query_intent.subjects,
+        )
+        return analysis

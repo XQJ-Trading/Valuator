@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from domain.boundary.krx_stock_price_collector import fetch_krx_daily_price_bar
 from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
 from domain.boundary.opendart_financial import fetch_opendart_financial
 from domain.knowledge.financial import DERIVED_DIFFERENCES, DERIVED_RATIOS
@@ -105,6 +106,15 @@ class OpenDartFinancialTool(BaseTool):
 
         result["corp"] = request.corp
         result["year"] = request.year
+
+        stock_code = record.get("stock_code", "")
+        if stock_code:
+            try:
+                bar = fetch_krx_daily_price_bar(f"KRX:{stock_code}")
+                result["current_price"] = bar.close_krw
+            except Exception:
+                pass
+
         _apply_derived_metrics(result)
         result["findings"] = _build_findings(result)
 

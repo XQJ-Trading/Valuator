@@ -413,11 +413,15 @@ def subject_context_text(ctx: TaskContext) -> str:
             lines.append(f"company_name={subject.company.company_name}")
             continue
         if listing.market == "KRX":
-            lines.append(
+            line = (
                 f"company_name={subject.company.company_name}; exchange={listing.exchange}; "
                 f"corp={subject.company.company_name}; stock_code={listing.security_code}; "
                 f"yahoo_symbol={listing.yahoo_symbol}"
             )
+            ref = subject.company.reference_stock_price
+            if ref is not None:
+                line += f"; stock_price={ref.krw:,}원 (as_of={ref.as_of.isoformat()}, 거래소 종가)"
+            lines.append(line)
             continue
         lines.append(
             f"company_name={subject.company.company_name}; exchange={listing.exchange}; "

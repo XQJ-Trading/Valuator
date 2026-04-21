@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from valuator.core.ontology import FactAddress, NumericValue
-from valuator.core.shared_state import Conflict, Fact, ResolvedConflict, SharedStateView
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.core.types import TaskState
 from valuator.runtime import final_output_text
@@ -166,84 +164,6 @@ def test_write_aggregation_report_preserves_facts_only_output(tmp_path: Path) ->
 
     assert ledger["facts"] == {"price_uplift": "could not verify"}
 
-
-def test_write_aggregation_report_records_conflict_resolution_metadata(
-    tmp_path: Path,
-) -> None:
-    store = ValuatorSessionStore(
-        session_id="S-conflict-report",
-        query="conflict report",
-        model="stub-model",
-        created_at="2026-03-29T00:00:00Z",
-        root_dir=tmp_path,
-    )
-    root = ComplexTask(id="root", description="root task")
-    root.state = TaskState.DONE
-    store.sync_task_tree(root)
-
-    existing = Fact(
-        address=FactAddress(
-            node_type="FinancialStatements",
-            subject="한화오션",
-            property_key="revenue",
-            period="2024",
-        ),
-        value=NumericValue(amount=100.0),
-        source_task_id="root.0",
-        source_tier=2,
-    )
-    incoming = Fact(
-        address=FactAddress(
-            node_type="FinancialStatements",
-            subject="한화오션",
-            property_key="revenue",
-            period="2024",
-        ),
-        value=NumericValue(amount=120.0),
-        source_task_id="root.1",
-        source_tier=5,
-    )
-    shared_view = SharedStateView(
-        facts={},
-        conflicts=[
-            Conflict(
-                key="FinancialStatements:한화오션:operating_income:2024",
-                existing=existing,
-                incoming=incoming,
-            )
-        ],
-        resolved_conflicts=[
-            ResolvedConflict(
-                key="FinancialStatements:한화오션:revenue:2024",
-                existing=existing,
-                incoming=incoming,
-                selected=incoming,
-                discarded=existing,
-                reason="higher source priority preferred (5 > 2)",
-            )
-        ],
-    )
-
-    store.write_aggregation_report(
-        task_id="root",
-        output="루트 요약",
-        shared_view=shared_view,
-    )
-
-    report = (
-        store.session_dir / "tasks" / "root" / "aggregation" / "report.md"
-    ).read_text(encoding="utf-8")
-    raw_results = json.loads(
-        (
-            store.session_dir / "tasks" / "root" / "aggregation" / "raw_results.json"
-        ).read_text(encoding="utf-8")
-    )
-
-    assert "## Conflict Resolution" in report
-    assert "higher source priority preferred (5 > 2)" in report
-    assert "Unresolved `FinancialStatements:한화오션:operating_income:2024`" in report
-    assert len(raw_results["resolved_conflicts"]) == 1
-    assert len(raw_results["conflicts"]) == 1
 
 
 def test_leaf_aggregation_report_preserves_execution_markdown(tmp_path: Path) -> None:

@@ -4,7 +4,6 @@ from collections import deque
 from collections.abc import Iterable
 
 from .context import TaskContext
-from .ontology import parse_raw_fact
 from .shared_state import SharedState
 from .task import AtomicTask, ComplexTask, Task
 from .types import (
@@ -156,15 +155,6 @@ class Scheduler:
                 task.state = TaskState.DONE
                 task.published_facts = dict(decision.facts)
                 task.output = decision.output
-                for key, value in decision.facts.items():
-                    fact = parse_raw_fact(
-                        key,
-                        value,
-                        source_task_id=task.id,
-                        query_unit_ids=tuple(task.query_unit_ids),
-                        as_of_kst=ctx.as_of_kst if ctx is not None else "",
-                    )
-                    shared.publish(fact)
                 newly_ready.extend(self._release_dependents(task.id))
                 newly_ready.extend(self._propagate_completion(task))
 

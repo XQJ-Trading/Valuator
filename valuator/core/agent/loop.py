@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 from time import perf_counter
 from typing import Any, Awaitable, Callable
 
@@ -19,7 +18,6 @@ from ..decomposition import (
     MCTSGateController,
     PassthroughGate,
 )
-from ..ontology import parse_raw_fact
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
@@ -201,8 +199,6 @@ class Agent:
         final_root = self._scheduler.get_task(root_task.id) or root_task
         if final_root.state is TaskState.FAILED:
             raise RuntimeError(f"root task failed: {final_root.error}")
-        if self._session_store is not None:
-            self._session_store.write_shared_facts(self._shared)
         return final_root.completion_payload()
 
     async def _step_one(self, task: Task, query: str) -> None:
@@ -262,7 +258,6 @@ class Agent:
             started_at=decision_started_at,
             duration_ms=decision_duration_ms,
         )
-        conflict_count = len(self._shared.view().conflicts)
 
         if (
             effective_decision.action is Action.EXECUTE
@@ -281,7 +276,6 @@ class Agent:
             task_seq=task_seq,
             ctx=ctx,
             decision=effective_decision,
-            conflict_count=conflict_count,
         )
 
     async def _decide_step(
@@ -584,21 +578,15 @@ class Agent:
         task_seq: int,
         ctx: TaskContext,
         decision: TaskDecision,
-        conflict_count: int,
     ) -> None:
         self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
         if (
             self._session_store is not None
             and decision.action in (Action.AGGREGATE, Action.FINALIZE)
         ):
-            shared_view = self._shared.view_for(
-                task_id=task.id,
-                query_unit_ids=task.query_unit_ids,
-            )
             artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,
                 output=task.completion_payload(),
-                shared_view=shared_view,
             )
             task.artifacts.update(artifact_refs)
         self._sync_session_tree()
@@ -610,19 +598,6 @@ class Agent:
             )
         if decision.action is Action.AGGREGATE and self._gate.has_prediction(task.id):
             self._gate.observe_outcome(task.id, task.children())
-        for conflict in self._shared.view().conflicts[conflict_count:]:
-            await self._emit(
-                AgentEvent(
-                    type=EventType.STEP_COMPLETED,
-                    task_id=task.id,
-                    detail={
-                        "kind": "conflict",
-                        "key": conflict.key,
-                        "existing": asdict(conflict.existing.value),
-                        "incoming": asdict(conflict.incoming.value),
-                    },
-                )
-            )
 
         if decision.action is Action.DECOMPOSE:
             parent = self._scheduler.get_task(task.id) or task
@@ -846,15 +821,6 @@ class Agent:
                 task.child_outputs[child.id] = child.completion_payload()
 
         output, facts = task.implicit_aggregate_payload()
-        if facts:
-            for key, value in facts.items():
-                fact = parse_raw_fact(
-                    key,
-                    value,
-                    source_task_id=task.id,
-                    query_unit_ids=tuple(task.query_unit_ids),
-                )
-                self._shared.publish(fact)
         decision = TaskDecision(
             action=Action.FINALIZE,
             output=output,
@@ -863,14 +829,9 @@ class Agent:
         )
         self._scheduler.apply_decision(task, decision, self._shared)
         if self._session_store is not None:
-            shared_view = self._shared.view_for(
-                task_id=task.id,
-                query_unit_ids=task.query_unit_ids,
-            )
             artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,
                 output=task.completion_payload(),
-                shared_view=shared_view,
             )
             task.artifacts.update(artifact_refs)
         self._sync_session_tree()

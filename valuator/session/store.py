@@ -10,7 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from valuator.core.shared_state import SharedState
 from valuator.core.task import Task
 from valuator.core.types import ToolResult
 from valuator.utils.config import ROOT_DIR
@@ -28,7 +27,6 @@ from .markdown import (
 from .report_artifacts import artifact_text, load_report_source, render_aggregation_report
 from .task_tree import build_task_tree_snapshot, render_tree_markdown
 from .trace import SessionTraceWriter, task_rel_path
-from valuator.core.shared_state import SharedStateView
 
 CURRENT_ROUND = 1
 
@@ -298,7 +296,6 @@ class ValuatorSessionStore:
         *,
         task_id: str,
         output: Any,
-        shared_view: SharedStateView | None = None,
     ) -> dict[str, str]:
         with self._lock:
             plan_task = self._plan_tasks[task_id]
@@ -334,7 +331,6 @@ class ValuatorSessionStore:
                 output=output,
                 child_sources=child_sources,
                 current_source=current_source,
-                shared_view=shared_view,
             )
             self._write_text(report_path, report_markdown)
 
@@ -358,18 +354,6 @@ class ValuatorSessionStore:
                     ],
                     "output": output,
                     "facts": facts,
-                    "conflicts": (
-                        [asdict(conflict) for conflict in shared_view.conflicts]
-                        if shared_view is not None
-                        else []
-                    ),
-                    "resolved_conflicts": (
-                        [asdict(conflict) for conflict in shared_view.resolved_conflicts]
-                        if shared_view is not None
-                        else []
-                    ),
-                    "aspect_facts": [],
-                    "uncovered_aspects": [],
                 },
             )
 
@@ -534,17 +518,6 @@ class ValuatorSessionStore:
     def _rel(self, path: Path) -> str:
         return str(path.relative_to(self.session_dir))
 
-    def write_shared_facts(self, shared: SharedState) -> None:
-        view = shared.view()
-        payload = {
-            "facts": {
-                key: asdict(fact) for key, fact in view.facts.items()
-            },
-            "conflicts": [asdict(c) for c in view.conflicts],
-            "resolved_conflicts": [asdict(c) for c in view.resolved_conflicts],
-            "exposures": [asdict(e) for e in shared.exposures],
-        }
-        self._write_json(self.session_dir / "shared_facts.json", payload)
 
     @staticmethod
     def _args_hash(args: dict[str, Any]) -> str:

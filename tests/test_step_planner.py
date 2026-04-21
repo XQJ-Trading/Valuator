@@ -7,8 +7,7 @@ import pytest
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
-from valuator.core.ontology import FactAddress, NumericValue
-from valuator.core.shared_state import Conflict, Fact, SharedStateView
+from valuator.core.shared_state import SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
 from valuator.core.types import Action, FailedAttempt, TaskState, TaskWorkPhase, ToolResult
@@ -675,24 +674,7 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
         description="root task",
         step_count=1,
         as_of_kst="2026-03-30 09:00:00",
-        shared=SharedStateView(
-            {
-                "Observation:iran:enrichment_level:2024": Fact(
-                    address=FactAddress(
-                        node_type="Observation",
-                        subject="iran",
-                        property_key="enrichment_level",
-                        period="2024",
-                    ),
-                    value=NumericValue(amount=60.0, unit="%"),
-                    source_task_id="root.0",
-                    grounded=True,
-                    as_of_kst="2026-03-30 09:00:00",
-                    source_urls=("https://example.com/source",),
-                )
-            },
-            [],
-        ),
+        shared=SharedStateView({}, []),
         query="2026-03-30 기준으로 2024년 이란 상황 분석",
         query_analysis=QueryAnalysis(
             as_of_kst="2026-03-30 09:00:00",
@@ -737,8 +719,7 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     assert "[TEMPORAL_CONTRACT]" in prompt
     assert "time_scope=historical" in prompt
     assert "target_period=2024-01-01..2024-12-31" in prompt
-    assert "iran:enrichment_level(2024)" in prompt
-    assert "60" in prompt
+    assert "[SHARED_FACTS]" not in prompt  # fact layer removed
     assert "As-of KST timestamp: 2026-03-30 09:00:00" in prompt
 
 
@@ -973,72 +954,8 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
 
 
 @pytest.mark.asyncio
-async def test_step_planner_prompt_requires_conflict_resolution_when_conflicts_present() -> None:
-    llm = ScriptedLLM(
-        [
-            {
-                "action": "finalize",
-                "output": "done",
-            }
-        ]
-    )
-    planner = StepPlanner(llm, repair_retries=0)
-    task = ComplexTask(id="root", description="resolve conflicting metrics")
-    conflict = Conflict(
-        key="FinancialStatements:LS전선:revenue:2024",
-        existing=Fact(
-            address=FactAddress(
-                node_type="FinancialStatements",
-                subject="LS전선",
-                property_key="revenue",
-                period="2024",
-            ),
-            value=NumericValue(amount=100.0),
-            source_task_id="root.0",
-            grounded=True,
-        ),
-        incoming=Fact(
-            address=FactAddress(
-                node_type="FinancialStatements",
-                subject="LS전선",
-                property_key="revenue",
-                period="2024",
-            ),
-            value=NumericValue(amount=120.0),
-            source_task_id="root.1",
-            grounded=False,
-        ),
-    )
-    ctx = TaskContext(
-        task_id="root",
-        description="resolve conflicting metrics",
-        step_count=0,
-        as_of_kst="2026-03-30 09:00:00",
-        child_outputs={
-            "root.0": {"summary": "dart value"},
-            "root.1": {"summary": "news value"},
-        },
-        shared=SharedStateView({}, [conflict]),
-        query="LS전선 2024 매출 충돌 해결",
-        query_analysis=QueryAnalysis(),
-        available_tools=["web_search_tool"],
-    )
-
-    await planner.decide(task, ctx)
-
-    prompt = llm.calls[0]["prompt"]
-    assert "[CONFLICTS]" in prompt
-    assert "LS전선:revenue(2024): 100.00" in prompt
-    assert "LS전선:revenue(2024): 120.00" in prompt
-    assert "[CONFLICT_RESOLUTION]" in prompt
-    assert "explicitly resolve each conflict or classify it as an information gap" in prompt
-    assert "[CONFLICT RESOLUTION]" in prompt
-    assert "공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티" in prompt
-    assert "Do not silently drop a conflicting value" in prompt
-
-
-@pytest.mark.asyncio
-async def test_step_planner_omits_shared_facts_during_synthesize_with_child_outputs() -> None:
+async def test_step_planner_no_shared_facts_or_conflicts_in_prompt() -> None:
+    """After fact layer removal, [SHARED_FACTS] and [CONFLICTS] never appear."""
     llm = ScriptedLLM(
         [
             {
@@ -1055,23 +972,8 @@ async def test_step_planner_omits_shared_facts_during_synthesize_with_child_outp
         description="root task",
         step_count=0,
         child_outputs={"root.0": {"summary": "done"}},
-        shared=SharedStateView(
-            {
-                "FinancialStatements:LS전선:revenue:2024": Fact(
-                    address=FactAddress(
-                        node_type="FinancialStatements",
-                        subject="LS전선",
-                        property_key="revenue",
-                        period="2024",
-                    ),
-                    value=NumericValue(amount=100.0),
-                    source_task_id="root.0",
-                    grounded=True,
-                )
-            },
-            [],
-        ),
-        query="LS전선 분석",
+        shared=SharedStateView({}, []),
+        query="분석",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],
     )
@@ -1081,3 +983,4 @@ async def test_step_planner_omits_shared_facts_during_synthesize_with_child_outp
     prompt = llm.calls[0]["prompt"]
     assert "[CHILD_OUTPUTS]" in prompt
     assert "[SHARED_FACTS]" not in prompt
+    assert "[CONFLICTS]" not in prompt

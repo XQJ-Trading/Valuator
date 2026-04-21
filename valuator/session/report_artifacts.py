@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from valuator.core.shared_state import SharedStateView
-
 from .markdown import render_report_markdown, strip_markdown_title
 
 
@@ -110,7 +108,6 @@ def render_aggregation_report(
     output: Any,
     child_sources: list[ReportSource],
     current_source: ReportSource,
-    shared_view: SharedStateView | None = None,
 ) -> tuple[str, dict[str, Any]]:
     lines = [f"# {title}", ""]
     summary = render_report_markdown(output)
@@ -134,23 +131,6 @@ def render_aggregation_report(
     if not summary and not evidence_started:
         lines = [f"# {title}", "", "(no report content)"]
 
-    if shared_view is not None and (
-        shared_view.resolved_conflicts or shared_view.conflicts
-    ):
-        lines.extend(["", "## Conflict Resolution", ""])
-        for resolution in shared_view.resolved_conflicts:
-            lines.append(
-                f"- Resolved `{resolution.key}`: "
-                f"{_render_fact_value(resolution.selected.value)} "
-                f"({resolution.reason})"
-            )
-        for conflict in shared_view.conflicts:
-            lines.append(
-                f"- Unresolved `{conflict.key}`: "
-                f"{_render_fact_value(conflict.existing.value)} vs "
-                f"{_render_fact_value(conflict.incoming.value)}"
-            )
-
     if isinstance(output, Mapping):
         facts = (
             dict(output["facts"])
@@ -167,16 +147,6 @@ def render_aggregation_report(
 
     return "\n".join(lines).strip() + "\n", facts
 
-
-def _render_fact_value(value: Any) -> str:
-    amount = getattr(value, "amount", None)
-    if isinstance(amount, (int, float)):
-        unit = getattr(value, "unit", "") or ""
-        return f"{amount:.2f} {unit}".strip()
-    text = getattr(value, "text", None)
-    if isinstance(text, str):
-        return text
-    return str(value)
 
 
 def read_json_if_exists(path: Path) -> dict[str, Any] | None:

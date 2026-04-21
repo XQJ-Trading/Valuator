@@ -9,11 +9,12 @@ from valuator.tools.base import ToolRegistry
 from ..context import TaskContext, TaskSummary
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
-from ..task import ComplexTask, Task
-from ..types import TaskState, TaskWorkPhase, ToolRequest
+from ..task import Task
+from ..types import TaskState, ToolRequest
 
 
 def _fact_keys_from_child_completion_payload(payload: Any) -> set[str]:
+    """Legacy — retained for compatibility but unused after fact layer removal."""
     if not isinstance(payload, dict):
         return set()
     if payload.get("status") == "facts_only" and isinstance(payload.get("facts"), dict):
@@ -68,21 +69,6 @@ def build_task_context(
         if evidence_store is not None and evidence_session_id
         else []
     )
-    include_fact_keys: frozenset[str] | None = None
-    if (
-        isinstance(task, ComplexTask)
-        and task.work_phase is TaskWorkPhase.SYNTHESIZE
-        and task.child_outputs
-    ):
-        from_child: set[str] = set()
-        for payload in task.child_outputs.values():
-            from_child |= _fact_keys_from_child_completion_payload(payload)
-        if from_child:
-            relevant = shared.relevant_fact_keys_for(
-                task_id=task.id,
-                query_unit_ids=task.query_unit_ids,
-            )
-            include_fact_keys = frozenset(relevant - from_child)
     return TaskContext(
         task_id=task.id,
         description=task.description,
@@ -108,11 +94,7 @@ def build_task_context(
         ],
         ancestry=build_ancestry(task=task, scheduler=scheduler),
         siblings=build_siblings(task=task, scheduler=scheduler),
-        shared=shared.view_for(
-            task_id=task.id,
-            query_unit_ids=task.query_unit_ids,
-            include_fact_keys=include_fact_keys,
-        ),
+        shared=shared.view_for(),
         query=query,
         query_analysis=analysis,
         query_units=query_units,

@@ -8,8 +8,9 @@ from domain.query import summarize_temporal_contract
 
 from ...tools.specs import get_tool_spec
 from ..context import TaskContext, TaskSummary
+from ..ontology import schema_for_prompt
 from ..task import Task
-from ..types import Action, TaskState, TaskWorkPhase
+from ..types import Action, TaskState
 
 _TEMPORAL_ARG_KEYS = frozenset(
     {"as_of_kst", "time_scope", "target_start", "target_end"}
@@ -18,7 +19,6 @@ _LAST_TOOL_RESULT_MAX_CHARS = 4_000
 _CHILD_OUTPUT_MAX_CHARS = 2_500
 _CHILD_OUTPUT_SECTION_MAX_CHARS = 8_000
 _CURRENT_CHILD_OUTPUT_MAX_CHARS = 800
-_SHARED_FACTS_MAX_CHARS = 3_000
 _EVIDENCE_SUMMARY_MAX_CHARS = 280
 
 
@@ -56,8 +56,8 @@ AGGREGATE: collect child outputs and complete this task. Must include output or 
   - child output에 status='facts_only'가 있거나 미검증/공백이 표시되면, 그 불확실성을 유지하라.
   - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.
   - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.
-  - [CONFLICTS]가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.
-  - 동일 신뢰도에서 값이 다르면 [INFORMATION GAPS]로 분류하라.
+  - 상충하는 데이터가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.
+  - 동일 신뢰도에서 값이 다르면 정보 공백(information gap)으로 분류하라.
 FAIL: stop the task when it cannot continue with the available tools or facts.
 
 Use web_search_tool with search_intent='financial' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.
@@ -131,21 +131,12 @@ def build_system_prompt_suffix(
         )
     if Action.FINALIZE not in allowed:
         lines.append("FINALIZE is only allowed for the root task.")
-    if ctx.shared.conflicts and (
-        Action.AGGREGATE in allowed or Action.FINALIZE in allowed
-    ):
-        lines.extend(
-            [
-                f"[CONFLICTS] contains {len(ctx.shared.conflicts)} conflicting fact(s).",
-                "When conflicts exist, AGGREGATE/FINALIZE output must explicitly resolve each conflict or classify it as an information gap with decision impact.",
-            ]
-        )
     if task.last_tool_success is True:
         lines.extend(
             [
                 "This task already has a successful tool result. You must not return EXECUTE.",
                 "Extract key numeric values from the tool result into the facts dict as key-value pairs.",
-                "Use keys of the form '{company}:{metric}:{fiscal_period}'.",
+                schema_for_prompt(),
                 "Put interpretation and context in output; keep facts to numbers (and minimal labels) only.",
             ]
         )
@@ -278,32 +269,10 @@ def build_step_prompt(
                     + "\nSome children failed. Aggregate available results and note gaps.",
                 )
             )
-    if ctx.shared.facts and not (
-        task.work_phase is TaskWorkPhase.SYNTHESIZE and ctx.child_outputs
-    ):
-        fact_lines = [
-            shared_fact_line(key=key, fact=fact)
-            for key, fact in ctx.shared.facts.items()
-        ]
-        sections.append(
-            (
-                "[SHARED_FACTS]",
-                limit_text("\n".join(fact_lines), max_chars=_SHARED_FACTS_MAX_CHARS),
-            )
-        )
     if ctx.evidence and (
         Action.EXECUTE in allowed_actions or Action.DECOMPOSE in allowed_actions
     ):
         sections.append(("[EVIDENCE]", evidence_text(ctx, task_id=task.id)))
-    if ctx.shared.conflicts:
-        conflict_lines = [
-            f"{conflict.key}:\n"
-            f"existing: {shared_fact_line(key=conflict.key, fact=conflict.existing)}\n"
-            f"incoming: {shared_fact_line(key=conflict.key, fact=conflict.incoming)}"
-            for conflict in ctx.shared.conflicts
-        ]
-        sections.append(("[CONFLICTS]", "\n\n".join(conflict_lines)))
-        sections.append(("[CONFLICT_RESOLUTION]", conflict_resolution_text(ctx)))
     subject_text = subject_context_text(ctx)
     if subject_text:
         sections.append(("[SUBJECTS]", subject_text))
@@ -381,17 +350,6 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
         "- Distinguish between gaps that are resolvable (with more data) and structural unknowns.",
         "- facts_only, unverified, data gap, grounded=false, could not verify 성격의 정보는 확정 사실로 쓰지 마라.",
     ]
-    if ctx.shared.conflicts:
-        lines.extend(
-            [
-                "",
-                "[CONFLICT RESOLUTION]",
-                "- Resolve every item from [CONFLICTS] explicitly in the relevant section or in a dedicated subsection.",
-                "- Use the [CONFLICTS] source-reliability order directly: 공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티.",
-                "- If sources are at the same reliability tier and still disagree, keep both values visible and move the blocked conclusion into [INFORMATION GAPS].",
-                "- Do not silently drop a conflicting value or average conflicting values without support.",
-            ]
-        )
     lines.extend(
         [
             "",
@@ -418,18 +376,6 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
         ]
     )
     return "\n".join(lines)
-
-
-def conflict_resolution_text(ctx: TaskContext) -> str:
-    return "\n".join(
-        [
-            f"{len(ctx.shared.conflicts)} conflicting fact(s) require explicit handling.",
-            "- Apply the [CONFLICTS] source-reliability order directly: 공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티.",
-            "- If the values still conflict within the same reliability tier, keep both visible and classify the blocked conclusion under [INFORMATION GAPS].",
-            "- Do not silently drop a conflicting value or blend conflicting values into an invented midpoint/range.",
-        ]
-    )
-
 
 def available_tools_text(ctx: TaskContext, *, compact: bool = False) -> str:
     if not ctx.available_tools:
@@ -523,21 +469,6 @@ def query_units_text(task: Task, ctx: TaskContext) -> str:
     return "\n".join(lines) or "(none)"
 
 
-def shared_fact_line(*, key: str, fact: Any) -> str:
-    from ..ontology import NumericValue, TextValue
-
-    addr = fact.address
-    match fact.value:
-        case NumericValue(amount=a, unit=u):
-            val_str = f"{a:,.2f} {u}".strip() if u else f"{a:,.2f}"
-        case TextValue(text=t):
-            val_str = t
-        case _:
-            val_str = str(fact.value)
-    label = f"{addr.subject}:{addr.property_key}"
-    if addr.period:
-        label += f"({addr.period})"
-    return f"{label}: {val_str}"
 
 
 def evidence_text(ctx: TaskContext, *, task_id: str, max_items: int = 8) -> str:

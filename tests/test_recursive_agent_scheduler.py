@@ -3,7 +3,6 @@ from __future__ import annotations
 from domain.query import QueryAnalysis, QueryUnit
 from valuator.core.context import TaskContext
 from valuator.core import Action, AtomicTask, ComplexTask, Scheduler, SharedState
-from valuator.core.ontology import NumericValue
 from valuator.core.types import TaskDecision, TaskSpec, TaskState
 
 
@@ -69,11 +68,8 @@ def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
         shared,
     )
 
-    # fact is now stored under canonical key; verify via view
-    facts = shared.view().facts
-    assert any(
-        f.value == NumericValue(amount=0.095) for f in facts.values()
-    )
+    # fact layer removed — published_facts stored on task
+    assert producer.published_facts == {"wacc": 0.095}
     assert consumer.state is TaskState.READY
     assert newly_ready == ["consumer"]
 
@@ -416,39 +412,11 @@ def test_scheduler_turns_facts_only_aggregate_into_structured_output() -> None:
     assert root.child_outputs["root.0"] == child.completion_payload()
 
 
-def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
+def test_scheduler_stores_aggregate_facts_on_task() -> None:
+    """After fact layer removal, facts are stored on task.published_facts only."""
     scheduler = Scheduler()
     shared = SharedState()
     root = ComplexTask(id="root", description="root", query_unit_ids=[0])
-    ctx = TaskContext(
-        task_id="root",
-        description="root",
-        step_count=0,
-        as_of_kst="2026-03-30 09:00:00",
-        query_analysis=QueryAnalysis(
-            as_of_kst="2026-03-30 09:00:00",
-            units=[
-                QueryUnit(
-                    id="U-001",
-                    objective="collect 2024 facts",
-                    retrieval_query="2024 facts",
-                    time_scope="historical",
-                    target_start="2024-01-01",
-                    target_end="2024-12-31",
-                )
-            ],
-        ),
-        query_units=[
-            QueryUnit(
-                id="U-001",
-                objective="collect 2024 facts",
-                retrieval_query="2024 facts",
-                time_scope="historical",
-                target_start="2024-01-01",
-                target_end="2024-12-31",
-            )
-        ],
-    )
 
     scheduler.register(root)
     scheduler.apply_decision(
@@ -458,15 +426,13 @@ def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
             facts={"iran_enrichment_level": {"value": 60, "grounded": True}},
         ),
         shared,
-        ctx=ctx,
     )
 
-    view = shared.view()
-    assert len(view.facts) == 1
-    fact = next(iter(view.facts.values()))
-    assert fact.value == NumericValue(amount=60.0)
-    assert fact.query_unit_ids == (0,)
-    assert fact.grounded is True
+    assert root.published_facts == {
+        "iran_enrichment_level": {"value": 60, "grounded": True},
+    }
+    # SharedState is now a no-op
+    assert shared.view().facts == {}
 
 
 def test_scheduler_inherits_single_parent_query_unit_id() -> None:

@@ -1,101 +1,264 @@
-# 공유 상태 (SharedState)
+# 공유 상태 및 작업 통신
 
-`SharedState`는 에이전트 내의 모든 작업(Task)이 접근할 수 있는 **중앙 집중형 팩트(Fact) 저장소**입니다. 작업 간 직접적인 정보 전달을 금지하고, 모든 데이터 교환은 이 저장소를 통해서만 이루어집니다.
+Task 간의 정보 흐름을 이해하기 위한 실제 통신 메커니즘입니다. `SharedState`는 현재 no-op stub이며, 모든 정보는 Task의 `outputs` 필드와 `TaskSummary`를 통해 계층 구조로 전달됩니다.
 
+---
 
+## 1. 핵심 개념: 계층적 정보 흐름
 
-## 1. 데이터 구조: Fact
+### 정보가 흐르는 방향
 
-모든 정보는 `Fact`라는 단위로 저장되며, 단순한 값을 넘어 출처와 시간 정보 등 풍부한 메타데이터를 포함합니다.
+```
+     Parent Task
+         ↑
+    [child_outputs]
+         ↑
+   ┌─────┴─────┬─────────┬──────┐
+   ↓           ↓         ↓      ↓
+Child 1    Child 2   Child 3  Child 4
+```
+
+- **Parent → Children**: `TaskContext`를 통해 부모 작업의 `evidence` 및 배경 정보 전달
+- **Children → Parent**: 각 자식의 `outputs` (TaskSummary)가 부모의 `child_outputs`에 수집됨
+- **Siblings**: 같은 부모의 자식들은 직접 통신 불가. 부모 또는 LLM을 통해서만 상호 참조 가능
+
+---
+
+## 2. Task 데이터 구조
+
+### TaskSummary (자식이 부모로 반환)
+
+```python
+@dataclass
+class TaskSummary:
+    task_id: str
+    name: str
+    output: str                    # 핵심: 자식의 실행 결과
+    work_phase: str                # COLLECT, SYNTHESIZE
+    consumed_tokens: dict[str, int]
+```
+
+자식 Task가 완료되면 `TaskSummary` 형태로 부모의 `child_outputs` 딕셔너리에 저장됩니다.
+
+### TaskContext (부모에서 자식으로 전달)
 
 ```python
 @dataclass(frozen=True)
-class Fact:
-    key: str                    # 식별자 (예: "apple_revenue_2024")
-    value: Any                  # 실제 데이터
-    source_task_id: str         # 팩트를 생성한 작업 ID
-    grounded: bool              # 근거 여부 (도구 결과 기반이면 True, LLM 추론이면 False)
-    source_urls: tuple[str, ...] # 출처 URL 리스트
-    
-    # 시간 관련 메타데이터
-    as_of_utc: str              # 데이터 기준 시점
-    time_scope: str             # 시간 범위 (예: "FY2024")
-    target_start: str           # 데이터 유효 시작일
-    target_end: str             # 데이터 유효 종료일
-    
-    published_at: str           # 저장소 발행 시각
+class TaskContext:
+    task_id: str
+    evidence: list[EvidenceRow] = field(default_factory=list)  # 축적된 증거
+    as_of_kst: str = ""                                         # 타임스탬프
+    shared: SharedStateView = field(...)                        # [현재 미사용]
+    # ... 기타 필드
 ```
 
 ---
 
-## 2. 팩트 발행 및 조회 흐름
+## 3. 실제 통신 흐름 (예시)
 
-### 발행 (Publishing)
-작업이 완료되거나 중간 결과를 집계할 때 `AGGREGATE` 액션을 통해 팩트를 저장합니다.
+### 시나리오: "애플 주가 분석" 작업 분해
 
-1.  **계획 단계:** LLM이 발견된 정보와 출처를 정리하여 `TaskDecision`에 포함합니다.
-2.  **반영 단계:** 스케줄러가 `SharedState.publish()`를 호출하여 저장소에 기록합니다.
+```
+[Query: 애플 주가 분석]
+        ↓
+[Parent Task] (id: "root", name: "Apple Stock Analysis")
+        ↓
+    [DECOMPOSE 결정]
+        ↓
+    ┌───────────────────────────────────────┐
+    │   3개 자식 작업 생성                    │
+    └───────────────────────────────────────┘
+        ↓
+    ┌─────────────────┬─────────────────┬─────────────────┐
+    ↓                 ↓                 ↓                 ↓
+[Child 1]        [Child 2]        [Child 3]        [Parent]
+(5yr Revenue)    (PE Ratio)       (Analyst Report)
+    ↓                 ↓                 ↓
+ [EXECUTE]        [EXECUTE]        [EXECUTE]
+ YFinance         SEC Filing       Web Search
+    ↓                 ↓                 ↓
+ $195B            PE: 28x          Bullish
+    ↓                 ↓                 ↓
+┌──────────────────────────────────────────────┐
+│  Parent의 child_outputs에 수집               │
+│  {                                            │
+│    "root-c1": TaskSummary("5yr Revenue", "$195B"),
+│    "root-c2": TaskSummary("PE Ratio", "PE: 28x"),
+│    "root-c3": TaskSummary("Analyst", "Bullish")
+│  }                                            │
+└──────────────────────────────────────────────┘
+    ↓
+[AGGREGATE]
+부모 Task는 child_outputs를 조회하고,
+LLM에 요청: "이 세 정보를 종합하여 분석 결론을 도출하시오"
+    ↓
+최종 output: "종합 분석 결과: ..."
+```
+
+---
+
+## 4. 정보 접근 패턴
+
+### Task가 자신의 자식들 정보 조회
 
 ```python
-# Scheduler 내 반영 로직 예시
-shared.publish(
-    key="market_cap",
-    value=3_200_000_000_000,
-    grounded=True,
-    source_urls=("https://finance.yahoo.com/quote/AAPL",),
-    # ... 기타 시간 메타데이터
-)
+class ComplexTask:
+    def __init__(self, ...):
+        self.child_outputs: dict[str, TaskSummary] = {}  # 자식들의 결과 저장
+    
+    async def process(self, ctx: TaskContext) -> TaskSummary:
+        # 자식들이 완료될 때까지 기다림
+        # (Scheduler가 의존성 추적)
+        
+        # 자식들의 output을 조회
+        for child_id, summary in self.child_outputs.items():
+            print(f"{child_id}: {summary.output}")
+        
+        # LLM에 자식들 정보 주입
+        child_info = "\n".join(
+            f"- {s.name}: {s.output}"
+            for s in self.child_outputs.values()
+        )
+        
+        # LLM에 요청
+        final_output = await llm.generate(
+            system="종합 분석가",
+            user=f"다음 정보들을 종합하시오:\n{child_info}"
+        )
+        
+        return TaskSummary(
+            task_id=self.id,
+            name=self.name,
+            output=final_output
+        )
 ```
 
-### 조회 (Querying)
-플래너가 다음 단계를 결정하기 위해 컨텍스트를 구성할 때 저장된 팩트를 읽어옵니다.
-
-* **`get(key)`**: 특정 키에 해당하는 값 반환.
-* **`find_all()`**: 현재까지 수집된 모든 팩트를 딕셔너리 형태로 반환.
-* **`view_for(task_id)`**: 특정 작업 시점에서 유효한 팩트들만 필터링된 뷰(View)를 제공.
-
----
-
-## 3. 핵심 메커니즘
-
-### 팩트 유효성 및 덮어쓰기
-동일한 `key`로 새로운 팩트가 발행되면 **마지막에 발행된 값이 이전 값을 덮어씁니다.** 이는 최신 정보가 우선시되는 정책을 따릅니다.
-
-### 암시적 집계 (Implicit Aggregation)
-하위 작업들이 모두 완료되고 정보를 반환할 때, 에이전트는 자식 작업들이 생산한 팩트들을 자동으로 병합(Merge)하여 부모 작업의 컨텍스트에 주입합니다.
-
-### 프롬프트 주입
-플래너는 수집된 팩트들을 기반으로 다음과 같이 프롬프트를 구성합니다.
-> **지금까지 발견된 사실들:**
-> - apple_revenue: 195B (근거: 있음, 출처: SEC 10-K)
-> - analysis_summary: "성장세 유지" (근거: 없음, LLM 추론)
-
----
-
-## 4. 설계 원칙 (Design Principles)
-
-1.  **유일한 정보 경로 (Single Source of Truth):**
-    작업은 다른 작업의 내부 상태를 직접 참조할 수 없습니다. 오직 `SharedState`에 발행된 팩트만을 신뢰합니다.
-2.  **메타데이터 보존 (Preserve Provenance):**
-    "무엇이" 맞는가보다 "왜" 맞는가가 중요합니다. 모든 팩트는 `source_urls`와 `grounded` 플래그를 통해 검증 가능해야 합니다.
-3.  **불변성 (Immutability):**
-    한 번 생성된 `Fact` 객체는 수정될 수 없습니다(`frozen=True`). 데이터가 변경되어야 한다면 새로운 `Fact`를 발행하여 교체해야 합니다.
-
----
-
-## 5. 시간 범위(Temporal) 처리 예시
-
-질의 내용에 따라 팩트의 유효 범위를 엄격하게 관리합니다.
+### Task가 부모 Task의 evidence 조회
 
 ```python
-# "2024년 수익" 질의 처리 시
-shared.publish(
-    key="apple_revenue",
-    value=195_000_000_000,
-    time_scope="FY2024",
-    target_start="2024-01-01",
-    target_end="2024-12-31"
-)
+class AtomicTask:
+    async def process(self, ctx: TaskContext) -> TaskSummary:
+        # evidence: 부모가 누적한 증거들
+        for evidence in ctx.evidence:
+            print(f"기존 증거: {evidence.content}")
+        
+        # 기존 증거를 바탕으로 새로운 조사 수행
+        # ...
 ```
 
-이 구조를 통해 에이전트는 서로 다른 시점의 데이터를 혼동하지 않고 정확한 비교 분석을 수행할 수 있습니다. 특히 `grounded` 메타데이터는 최종 답변의 신뢰도를 높이는 결정적인 역할을 합니다.
+---
+
+## 5. SharedState는 왜 no-op인가?
+
+**설계 변경 (2026-04-21 커밋 e7f3f77)**
+
+초기 설계에서는 모든 Task가 `SharedState.publish(key, value)`를 통해 사실을 중앙 저장소에 기록하고, 다른 Task가 `shared.view()`로 조회하도록 했습니다.
+
+**문제점:**
+- 모든 Task가 SharedState에 접근하면서 경합(contention) 발생
+- Task 간 암시적 의존성이 증가 (언제 어느 사실이 발행될지 불명확)
+- 디버깅 어려움 (사실의 출처를 추적하기 어려움)
+
+**현재 접근법 (명시적 계층 구조):**
+- Parent → Child: `TaskContext.evidence` (명시적 인자)
+- Child → Parent: `TaskSummary.output` (명시적 반환값)
+- Sibling: 직접 통신 불가 (부모를 통해서만)
+
+**장점:**
+- ✅ 의존성이 명시적이며 Task 그래프로 시각화 가능
+- ✅ 정보 출처가 명확함 (어느 Task가 생성했는지 추적 가능)
+- ✅ 동시성 문제 없음 (계층 구조 자체가 직렬화를 강제)
+
+---
+
+## 6. Evidence: 부모에서 자식으로의 정보 전달
+
+EvidenceRow는 Task가 축적한 증거(팩트)를 다음 단계로 전달합니다.
+
+```python
+@dataclass
+class EvidenceRow:
+    content: str                    # 실제 정보
+    source: str                     # 어디서 나왔는가 (task_id, tool_name 등)
+    grounded: bool                  # 도구 결과 기반인가 아니면 LLM 추론인가
+    urls: list[str] = field(...)    # 참조 URL
+```
+
+### 사용 예시
+
+```python
+# 부모 Task: planning/execution 단계에서 증거 축적
+parent_ctx = TaskContext(
+    task_id="root",
+    evidence=[
+        EvidenceRow(
+            content="2024 수익: $195B",
+            source="sec_tool",
+            grounded=True,
+            urls=["https://sec.gov/..."]
+        ),
+        EvidenceRow(
+            content="분기별 성장률 4%",
+            source="analysis_summary",
+            grounded=False,
+            urls=[]
+        )
+    ]
+)
+
+# 자식 Task: parent_ctx.evidence를 읽고, 기존 증거 위에 새로운 분석 추가
+child_summary = await child_task.process(parent_ctx)
+
+# 자식이 새로운 증거를 추가한다면?
+# → TaskSummary.output에 포함하고, 부모가 다시 집계할 때 LLM이 병합
+```
+
+---
+
+## 7. 정보 보존 원칙
+
+| 항목 | 책임 | 방법 |
+|------|------|------|
+| **출처 추적** | 각 Task | EvidenceRow.source, TaskSummary.task_id |
+| **신뢰도 표시** | 각 Task | EvidenceRow.grounded |
+| **시간 정보** | TaskContext | as_of_kst, evidence의 타임스탬프 |
+| **URL 참조** | 각 Task | EvidenceRow.urls |
+
+---
+
+## 8. 마이그레이션 가이드 (SharedState 사용 코드)
+
+기존에 `SharedState`를 사용하던 코드가 있다면:
+
+```python
+# ❌ 이전 (더 이상 작동하지 않음)
+await shared.publish(key="apple_revenue", value=195_000_000_000)
+revenue = shared.view().get("apple_revenue")
+
+# ✅ 새로운 방식
+# 1. 부모 Task에서:
+ctx.evidence.append(EvidenceRow(
+    content="$195B",
+    source="yfinance",
+    grounded=True
+))
+
+# 2. 자식 Task에서 output으로 반환:
+return TaskSummary(..., output="분석 결과: ...")
+
+# 3. 부모에서 child_outputs 조회:
+for child_id, summary in self.child_outputs.items():
+    use_data(summary.output)
+```
+
+---
+
+## 요약
+
+**SharedState는 더 이상 활성 메커니즘이 아닙니다.** 대신:
+
+- ✅ **명시적 계층 구조** (Parent → Children → Outputs)
+- ✅ **Evidence 기반 정보 전달** (출처 명확)
+- ✅ **TaskSummary를 통한 결과 수집** (부모가 child_outputs에서 조회)
+
+이 접근법은 **의존성이 명확하고, 디버깅이 쉽고, 동시성 문제가 없는** 설계입니다.

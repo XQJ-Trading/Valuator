@@ -48,9 +48,9 @@ system_prompt = prompts.build_system_prompt(
 
 **프롬프트 내용**:
 - Task description
+- 지금까지의 증거들 (evidence) — 부모로부터 축적된 정보
 - 지금까지의 도구 결과 (tool_results)
 - 자식 작업들의 출력 (child_outputs) — 예산 제한 있음
-- SharedState의 팩트들 (공개된 사실)
 - 질의 내용
 - 사용 가능한 도구 목록
 - JSON 스키마 (응답 형식)
@@ -77,17 +77,28 @@ decision = parse_decision(response)
 ## TaskContext 구성
 
 ```python
-@dataclass
+@dataclass(frozen=True)
 class TaskContext:
     task_id: str
     description: str
     step_count: int                    # 이 작업의 단계 수
-    tool_results: list[ToolResult]     # 도구 실행 결과들
-    child_outputs: dict[str, Any]      # 자식 작업 출력들
+    
+    # 정보 축적
+    evidence: list[EvidenceRow] = field(default_factory=list)  # 부모로부터 전달된 증거
+    tool_results: list[ToolResult]     # 이 작업이 실행한 도구 결과들
+    child_outputs: dict[str, TaskSummary]  # 자식 작업들의 결과
+    as_of_kst: str = ""                # 정보 기준 시각 (KST)
+    
+    # 작업 구조
     current_children: list[TaskSummary] # 현재 자식들 (상태 포함)
     ancestry: list[TaskSummary]        # 부모들 (루트까지)
     siblings: dict[str, TaskSummary]   # 형제들 (상태 포함)
-    shared: SharedStateView            # 팩트 저장소 뷰
+    
+    # [deprecated] SharedState: 현재 no-op
+    # 모든 정보는 evidence와 child_outputs를 통해 명시적으로 전달됨
+    shared: SharedStateView            
+    
+    # 질의
     query: str                         # 원래 질의
     query_analysis: QueryAnalysis      # 질의 구조 분석
     query_units: list[QueryUnit]       # 질의의 세부 단위들

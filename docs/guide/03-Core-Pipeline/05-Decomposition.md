@@ -4,12 +4,12 @@
 
 
 
-## 1. GateController: 시스템의 수문장
+## 1. MCTSGateController: 시스템의 수문장
 
-`GateController`는 모든 `DECOMPOSE` 결정에 대해 3단계 검증을 수행합니다. 검증에 실패하면 에이전트는 분해 대신 다른 전략(직접 실행 등)을 세워야 합니다.
+`MCTSGateController`는 모든 `DECOMPOSE` 결정에 대해 3단계 검증을 수행합니다. 검증에 실패하면 에이전트는 분해 대신 다른 전략(직접 실행 등)을 세워야 합니다.
 
 ```python
-class GateController:
+class MCTSGateController:
     async def gate(self, task: Task, decision: TaskDecision, ctx: TaskContext) -> TaskDecision:
         if not self._config.enabled or decision.action != Action.DECOMPOSE:
             return decision 
@@ -20,7 +20,7 @@ class GateController:
             return self._create_rejection_decision(filter_result.reason)
         
         # 2단계: LLM Critic (의미론적 품질 평가)
-        critique = await self._critic.evaluate_decomposition(task, decision, ctx)
+        critique = await self._critic.evaluate(task, decision, ctx)
         
         # 3단계: Dynamic Threshold (동적 임계값 적용 및 학습)
         threshold = self._tracker.current_threshold()

@@ -68,7 +68,8 @@ def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
         shared,
     )
 
-    assert shared.get("wacc") == 0.095
+    # fact layer removed — published_facts stored on task
+    assert producer.published_facts == {"wacc": 0.095}
     assert consumer.state is TaskState.READY
     assert newly_ready == ["consumer"]
 
@@ -411,39 +412,11 @@ def test_scheduler_turns_facts_only_aggregate_into_structured_output() -> None:
     assert root.child_outputs["root.0"] == child.completion_payload()
 
 
-def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
+def test_scheduler_stores_aggregate_facts_on_task() -> None:
+    """After fact layer removal, facts are stored on task.published_facts only."""
     scheduler = Scheduler()
     shared = SharedState()
     root = ComplexTask(id="root", description="root", query_unit_ids=[0])
-    ctx = TaskContext(
-        task_id="root",
-        description="root",
-        step_count=0,
-        as_of_utc="2026-03-30T00:00:00Z",
-        query_analysis=QueryAnalysis(
-            as_of_utc="2026-03-30T00:00:00Z",
-            units=[
-                QueryUnit(
-                    id="U-001",
-                    objective="collect 2024 facts",
-                    retrieval_query="2024 facts",
-                    time_scope="historical",
-                    target_start="2024-01-01",
-                    target_end="2024-12-31",
-                )
-            ],
-        ),
-        query_units=[
-            QueryUnit(
-                id="U-001",
-                objective="collect 2024 facts",
-                retrieval_query="2024 facts",
-                time_scope="historical",
-                target_start="2024-01-01",
-                target_end="2024-12-31",
-            )
-        ],
-    )
 
     scheduler.register(root)
     scheduler.apply_decision(
@@ -453,17 +426,13 @@ def test_scheduler_publishes_aggregate_facts_with_raw_keys() -> None:
             facts={"iran_enrichment_level": {"value": 60, "grounded": True}},
         ),
         shared,
-        ctx=ctx,
     )
 
-    view = shared.view()
-    assert "iran_enrichment_level" in view.facts
-    fact = view.facts["iran_enrichment_level"]
-    assert fact.value == 60
-    assert fact.grounded is True
-    assert fact.time_scope == "historical"
-    assert fact.target_start == "2024-01-01"
-    assert fact.target_end == "2024-12-31"
+    assert root.published_facts == {
+        "iran_enrichment_level": {"value": 60, "grounded": True},
+    }
+    # SharedState is now a no-op
+    assert shared.view().facts == {}
 
 
 def test_scheduler_inherits_single_parent_query_unit_id() -> None:

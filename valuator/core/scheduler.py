@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Mapping
-
-from domain.query import summarize_temporal_contract
+from collections.abc import Iterable
 
 from .context import TaskContext
 from .shared_state import SharedState
 from .task import AtomicTask, ComplexTask, Task
-from .types import Action, TaskDecision, TaskSpec, TaskState, ToolResult
+from .types import (
+    Action,
+    TaskDecision,
+    TaskSpec,
+    TaskState,
+    TaskWorkPhase,
+    ToolResult,
+)
 
 
 class Scheduler:
@@ -150,29 +155,6 @@ class Scheduler:
                 task.state = TaskState.DONE
                 task.published_facts = dict(decision.facts)
                 task.output = decision.output
-                temporal = (
-                    summarize_temporal_contract(
-                        as_of_utc=ctx.as_of_utc,
-                        units=ctx.query_units,
-                    )
-                    if ctx is not None
-                    else None
-                )
-                for key, value in decision.facts.items():
-                    fact_value, grounded, source_urls = self._fact_payload(value)
-                    shared.publish(
-                        key,
-                        fact_value,
-                        task.id,
-                        grounded=grounded,
-                        as_of_utc=ctx.as_of_utc if ctx is not None else "",
-                        time_scope=temporal.time_scope if temporal is not None else "",
-                        target_start=(
-                            temporal.target_start if temporal is not None else ""
-                        ),
-                        target_end=temporal.target_end if temporal is not None else "",
-                        source_urls=source_urls,
-                    )
                 newly_ready.extend(self._release_dependents(task.id))
                 newly_ready.extend(self._propagate_completion(task))
 
@@ -413,6 +395,8 @@ class Scheduler:
         )
         has_success = any(s == TaskState.DONE for s in child_states)
         if all_terminal and has_success:
+            if isinstance(parent, ComplexTask):
+                parent.work_phase = TaskWorkPhase.SYNTHESIZE
             self._mark_ready(parent)
             return [parent.id]
         return []
@@ -428,6 +412,8 @@ class Scheduler:
         if not all_terminal:
             return
         if any(s == TaskState.DONE for s in child_states):
+            if isinstance(parent, ComplexTask):
+                parent.work_phase = TaskWorkPhase.SYNTHESIZE
             self._mark_ready(parent)
         else:
             self.mark_failed(parent, f"all children failed (last: {task.id})")
@@ -461,17 +447,6 @@ class Scheduler:
         if len(parent.query_unit_ids) > 1:
             raise ValueError("decompose action requires child query_unit_ids")
         return []
-
-    @staticmethod
-    def _fact_payload(value: object) -> tuple[object, bool, tuple[str, ...]]:
-        if isinstance(value, Mapping) and "value" in value:
-            grounded = bool(value.get("grounded", False))
-            raw_urls = value.get("source_urls") or ()
-            source_urls = tuple(
-                str(item).strip() for item in raw_urls if str(item).strip()
-            )
-            return value.get("value"), grounded, source_urls
-        return value, False, ()
 
     def _set_task_dependencies(self, task_id: str, dependency_ids: list[str]) -> None:
         self._clear_task_dependencies(task_id)

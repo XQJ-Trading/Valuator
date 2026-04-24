@@ -16,6 +16,13 @@ class TaskState(Enum):
     FAILED = "failed"
 
 
+class TaskWorkPhase(Enum):
+    """Work phase for allowed-action narrowing (orchestration, not TaskState)."""
+
+    COLLECT = "collect"
+    SYNTHESIZE = "synthesize"
+
+
 class Action(Enum):
     DECOMPOSE = "decompose"
     EXECUTE = "execute"
@@ -50,6 +57,14 @@ class ToolResult(BaseModel):
 class ToolRequest:
     tool_name: str
     args: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class FailedAttempt:
+    tool_name: str
+    args: dict[str, Any]
+    error: str
+    kind: str
 
 
 @dataclass

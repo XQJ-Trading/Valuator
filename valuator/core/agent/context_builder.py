@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from domain.query import QueryAnalysis, QueryUnit, summarize_temporal_contract
+from valuator.evidence import SqliteEvidenceStore
 from valuator.tools.base import ToolRegistry
 
 from ..context import TaskContext, TaskSummary
@@ -10,6 +11,45 @@ from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..task import Task
 from ..types import TaskState, ToolRequest
+
+
+def _fact_keys_from_child_completion_payload(payload: Any) -> set[str]:
+    """Legacy — retained for compatibility but unused after fact layer removal."""
+    if not isinstance(payload, dict):
+        return set()
+    if payload.get("status") == "facts_only" and isinstance(payload.get("facts"), dict):
+        return set(payload["facts"].keys())
+    return set()
+
+
+def _task_scoped_evidence(
+    *,
+    task: Task,
+    scheduler: Scheduler,
+    evidence_rows: list[Any],
+) -> list[Any]:
+    if not evidence_rows or task.parent_id is None:
+        return evidence_rows
+
+    related_task_ids = {task.id}
+    parent_id = task.parent_id
+    while parent_id:
+        related_task_ids.add(parent_id)
+        parent = scheduler.get_task(parent_id)
+        if parent is None:
+            break
+        parent_id = parent.parent_id
+
+    descendant_prefix = f"{task.id}."
+    scoped: list[Any] = []
+    for row in evidence_rows:
+        row_task_id = getattr(row, "task_id", "") or ""
+        if not row_task_id:
+            scoped.append(row)
+            continue
+        if row_task_id in related_task_ids or row_task_id.startswith(descendant_prefix):
+            scoped.append(row)
+    return scoped
 
 
 def build_task_context(
@@ -20,13 +60,20 @@ def build_task_context(
     analysis: QueryAnalysis,
     shared: SharedState,
     tools: ToolRegistry,
+    evidence_store: SqliteEvidenceStore | None = None,
+    evidence_session_id: str = "",
 ) -> TaskContext:
     query_units = query_units_for_task(task=task, analysis=analysis)
+    evidence_rows = (
+        evidence_store.list_for_session(evidence_session_id)
+        if evidence_store is not None and evidence_session_id
+        else []
+    )
     return TaskContext(
         task_id=task.id,
         description=task.description,
         step_count=task.step_count,
-        as_of_utc=analysis.as_of_utc,
+        as_of_kst=analysis.as_of_kst,
         tool_results=list(task.tool_results),
         child_outputs=dict(task.child_outputs),
         current_children=[
@@ -36,20 +83,27 @@ def build_task_context(
                 state=child.state,
                 output=(
                     child.completion_payload()
-                    if child.state is TaskState.DONE
+                    if (
+                        child.state is TaskState.DONE
+                        and child.id not in task.child_outputs
+                    )
                     else None
                 ),
-                artifacts=dict(child.artifacts),
             )
             for child in task.children()
         ],
         ancestry=build_ancestry(task=task, scheduler=scheduler),
         siblings=build_siblings(task=task, scheduler=scheduler),
-        shared=shared.view(),
+        shared=shared.view_for(),
         query=query,
         query_analysis=analysis,
         query_units=query_units,
         available_tools=analysis.allowed_tools or registered_tools(tools),
+        evidence=_task_scoped_evidence(
+            task=task,
+            scheduler=scheduler,
+            evidence_rows=evidence_rows,
+        ),
     )
 
 
@@ -70,7 +124,6 @@ def build_ancestry(*, task: Task, scheduler: Scheduler) -> list[TaskSummary]:
                     if parent.state is TaskState.DONE
                     else None
                 ),
-                artifacts=dict(parent.artifacts),
             )
         )
         parent_id = parent.parent_id
@@ -93,7 +146,6 @@ def build_siblings(*, task: Task, scheduler: Scheduler) -> dict[str, TaskSummary
                 if sibling.state is TaskState.DONE
                 else None
             ),
-            artifacts=dict(sibling.artifacts),
         )
         for sibling in parent.children()
         if sibling.id != task.id
@@ -122,14 +174,19 @@ def query_units_for_task(*, task: Task, analysis: QueryAnalysis) -> list[QueryUn
     return []
 
 
+# Tools whose args receive temporal fields here must match evidence lookup/record keys
+# (same dict passed to stable_args_hash after this enrichment).
+_TEMPORAL_ENRICH_TOOLS = frozenset({"web_search_tool"})
+
+
 def enrich_tool_request(*, tool_request: Any, ctx: TaskContext) -> ToolRequest:
     args = dict(tool_request.args)
     temporal = summarize_temporal_contract(
-        as_of_utc=ctx.as_of_utc,
+        as_of_kst=ctx.as_of_kst,
         units=ctx.query_units,
     )
-    if tool_request.tool_name == "web_search_tool":
-        for key in ("as_of_utc", "time_scope", "target_start", "target_end"):
+    if tool_request.tool_name in _TEMPORAL_ENRICH_TOOLS:
+        for key in ("as_of_kst", "time_scope", "target_start", "target_end"):
             value = getattr(temporal, key)
             if value:
                 args.setdefault(key, value)

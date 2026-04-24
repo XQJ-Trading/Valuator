@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from functools import lru_cache
+from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from valuator.utils.hangul_fuzzy_key import jamo_fuzzy_key
 
@@ -39,12 +40,32 @@ _SEC_PRIMARY_SUFFIXES = frozenset(
 _SEC_SECONDARY_SUFFIXES = frozenset({"GROUP", "HOLDING", "HOLDINGS"})
 _FUZZY_NAME_THRESHOLD = 0.7
 
+if TYPE_CHECKING:
+    from domain.price_bar import DailyPriceBar
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceStockPrice:
+    """기준 주가 — 온톨로지 `stock_price`(KRW 종가)와 동일 시점·종목."""
+
+    krw: int
+    as_of: date
+    listing_id: str
+
 
 @dataclass(frozen=True, slots=True)
 class Company:
     company_id: str
     company_name: str
     aliases: tuple[str, ...]
+    reference_stock_price: ReferenceStockPrice | None = None
+
+    @property
+    def baseline_stock_price_krw(self) -> int | None:
+        """기준 주가(KRW). 수집 전이면 None."""
+        if self.reference_stock_price is None:
+            return None
+        return self.reference_stock_price.krw
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +85,6 @@ class Listing:
     @property
     def market(self) -> str:
         return market_for_exchange(self.exchange)
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +157,11 @@ def resolve_subjects(
     normalized_company_names = tuple(
         dict.fromkeys(name.strip() for name in company_names if name.strip())
     )
-    if not normalized_ticker and not normalized_security_code and not normalized_company_names:
+    if (
+        not normalized_ticker
+        and not normalized_security_code
+        and not normalized_company_names
+    ):
         return ()
 
     index = _entity_index()
@@ -184,7 +208,10 @@ def merge_subjects(*groups: Iterable[Subject]) -> tuple[Subject, ...]:
                 ]
                 merged.append(subject)
                 continue
-            if any(existing.company.company_id == subject.company.company_id for existing in merged):
+            if any(
+                existing.company.company_id == subject.company.company_id
+                for existing in merged
+            ):
                 continue
             merged.append(subject)
     return tuple(merged)
@@ -291,10 +318,7 @@ def _fuzzy_company_by_name(
             continue
         if score > best_score:
             best_score = score
-            best_matches = {
-                candidate.company_id: candidate
-                for candidate in candidates
-            }
+            best_matches = {candidate.company_id: candidate for candidate in candidates}
             continue
         if score == best_score:
             for candidate in candidates:
@@ -357,8 +381,7 @@ def _entity_index() -> _EntityIndex:
         _bind_company(name_index, company)
 
     index.companies_by_name = {
-        key: tuple(companies)
-        for key, companies in name_index.items()
+        key: tuple(companies) for key, companies in name_index.items()
     }
     return index
 
@@ -448,8 +471,7 @@ def _rebuild_company_name_index(index: _EntityIndex) -> None:
     for company in index.companies_by_id.values():
         _bind_company(name_index, company)
     index.companies_by_name = {
-        key: tuple(companies)
-        for key, companies in name_index.items()
+        key: tuple(companies) for key, companies in name_index.items()
     }
 
 
@@ -457,10 +479,7 @@ def _merge_company_listings(
     existing: tuple[Listing, ...],
     incoming: list[Listing],
 ) -> tuple[Listing, ...]:
-    listings_by_id = {
-        listing.listing_id: listing
-        for listing in existing
-    }
+    listings_by_id = {listing.listing_id: listing for listing in existing}
     for listing in incoming:
         listings_by_id[listing.listing_id] = listing
     return tuple(listings_by_id.values())
@@ -597,17 +616,11 @@ def _display_sec_name(alias: str) -> str:
     if not alias.isupper():
         return alias
     words = alias.split()
-    return " ".join(
-        word if len(word) <= 4 else word.capitalize()
-        for word in words
-    )
+    return " ".join(word if len(word) <= 4 else word.capitalize() for word in words)
 
 
 def _title_words(text: str) -> list[str]:
-    cleaned = "".join(
-        char if char.isalnum() else " "
-        for char in text.strip().upper()
-    )
+    cleaned = "".join(char if char.isalnum() else " " for char in text.strip().upper())
     return [word for word in cleaned.split() if word]
 
 
@@ -625,3 +638,10 @@ def _name_key(text: str) -> str:
 def normalized_name_key(text: str) -> str:
     """Stable key for company/title matching (shared with SEC resolve boundary)."""
     return _name_key(text)
+
+
+def company_with_reference_from_daily_bar(
+    company: Company, bar: DailyPriceBar
+) -> Company:
+    """DailyPriceBar 종가·시점을 company.reference_stock_price(기준 주가)로 붙인다."""
+    return replace(company, reference_stock_price=bar.as_reference_stock_price())

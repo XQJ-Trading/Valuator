@@ -15,6 +15,7 @@ from ...tools.specs import get_tool_spec
 from ..task import Task
 from ..types import Action, TaskDecision, TaskSpec, ToolRequest
 from .actions import allowed_actions_for_task
+from .plan_spec import validate_root_decomposition
 
 TASK_NAME_MAX_CHARS = 30
 
@@ -173,6 +174,7 @@ def map_intent_to_task_decision(
     if intent.action is Action.EXECUTE:
         if not has_tool:
             raise _invalid_task_decision("execute action requires tool_request", raw_for_error)
+        _ensure_allowed(Action.EXECUTE)
         tr = intent.tool_request
         assert tr is not None
         return TaskDecision(
@@ -201,18 +203,23 @@ def map_intent_to_task_decision(
                 )
             raise _invalid_task_decision("decompose action requires children", raw_for_error)
         _ensure_allowed(Action.DECOMPOSE)
+        children = tuple(
+            TaskSpec(
+                description=child.description,
+                task_name=child.task_name,
+                tool_hint=child.tool_hint,
+                depends_on_siblings=list(child.depends_on_siblings),
+                query_unit_ids=list(child.query_unit_ids),
+            )
+            for child in intent.children
+        )
+        if task.parent_id is None:
+            root_err = validate_root_decomposition(children)
+            if root_err is not None:
+                raise _invalid_task_decision(root_err, raw_for_error)
         return TaskDecision(
             action=Action.DECOMPOSE,
-            children=tuple(
-                TaskSpec(
-                    description=child.description,
-                    task_name=child.task_name,
-                    tool_hint=child.tool_hint,
-                    depends_on_siblings=list(child.depends_on_siblings),
-                    query_unit_ids=list(child.query_unit_ids),
-                )
-                for child in intent.children
-            ),
+            children=children,
             tool_request=None,
             wait_for=(),
             output=None,
@@ -285,6 +292,7 @@ def map_intent_to_task_decision(
         )
 
     if has_tool:
+        _ensure_allowed(Action.EXECUTE)
         tr = intent.tool_request
         assert tr is not None
         return TaskDecision(

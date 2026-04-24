@@ -13,9 +13,13 @@ from typing import Any
 from valuator.core.task import Task
 from valuator.core.types import ToolResult
 from valuator.utils.config import ROOT_DIR
-from valuator.utils.time_utils import utc_isoformat
+from valuator.utils.time_utils import kst_isoformat
 
 from .browse_tree import build_browse_tree
+from .citation_links import (
+    apply_citation_links_to_tool_payload,
+    strip_lenticular_source_refs_from_tool_payload,
+)
 from .markdown import (
     render_final_markdown,
     strip_markdown_title,
@@ -49,7 +53,7 @@ class ValuatorSessionStore:
         self.session_id = session_id
         self.query = query
         self.model = model
-        self.created_at = utc_isoformat(created_at)
+        self.created_at = kst_isoformat(created_at)
         self.effective_query = query
         self.current_round = CURRENT_ROUND
         self.round_dir = round_dir_name(self.current_round)
@@ -128,7 +132,7 @@ class ValuatorSessionStore:
         with self._lock:
             self.effective_query = query
             self._session_payload["effective_query"] = query
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
 
     def write_plan(
@@ -140,7 +144,7 @@ class ValuatorSessionStore:
             self._root_task_id = root_task.id
             self._session_payload["effective_query"] = effective_query
             self._session_payload["root_task_id"] = root_task.id
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
             self.sync_task_tree(root_task)
 
@@ -187,7 +191,7 @@ class ValuatorSessionStore:
                     self.plan_round_dir / "decomposition.json", decomposition
                 )
 
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
 
     def save_decomposition_snapshot(self, task: Task, children: list[Task]) -> None:
@@ -216,8 +220,19 @@ class ValuatorSessionStore:
             result_json_path = task_dir / "result.json"
             meta_path = task_dir / "result.md.meta.json"
 
+            display_payload = (
+                apply_citation_links_to_tool_payload(result.result, result.metadata)
+                if result.success
+                else result.result
+            )
+            source_ref: list[str] = []
+            if result.success:
+                display_payload, source_ref = (
+                    strip_lenticular_source_refs_from_tool_payload(display_payload)
+                )
+
             domain_summary = ""
-            if isinstance(result.result, dict):
+            if isinstance(display_payload, dict):
                 for key in (
                     "domain_summary",
                     "summary",
@@ -225,15 +240,15 @@ class ValuatorSessionStore:
                     "result",
                     "content",
                 ):
-                    candidate = result.result.get(key)
+                    candidate = display_payload.get(key)
                     if isinstance(candidate, str) and candidate.strip():
                         domain_summary = candidate.strip()
                         break
-            elif isinstance(result.result, str) and result.result.strip():
-                domain_summary = result.result.strip()
+            elif isinstance(display_payload, str) and display_payload.strip():
+                domain_summary = display_payload.strip()
 
             self._write_text(
-                result_path, artifact_text(result.result, result.error)
+                result_path, artifact_text(display_payload, result.error)
             )
             self._write_json(
                 result_json_path,
@@ -248,6 +263,10 @@ class ValuatorSessionStore:
                     "raw_result": result.result,
                 },
             )
+            retrieval_meta = dict(result.metadata)
+            if source_ref:
+                retrieval_meta["source_ref"] = source_ref
+
             self._write_json(
                 meta_path,
                 {
@@ -256,7 +275,7 @@ class ValuatorSessionStore:
                     "args": args,
                     "success": result.success,
                     "error": result.error,
-                    "retrieval": result.metadata,
+                    "retrieval": retrieval_meta,
                     "started_at": started_at,
                     "duration_ms": round(duration_ms, 3),
                 },
@@ -268,11 +287,16 @@ class ValuatorSessionStore:
                 "execution_meta_path": self._task_rel(task_id, meta_path),
             }
             artifacts.update(artifact_refs)
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
             return artifact_refs
 
-    def write_aggregation_report(self, *, task_id: str, output: Any) -> dict[str, str]:
+    def write_aggregation_report(
+        self,
+        *,
+        task_id: str,
+        output: Any,
+    ) -> dict[str, str]:
         with self._lock:
             plan_task = self._plan_tasks[task_id]
             task_dir = self._task_dir(task_id) / "aggregation"
@@ -330,8 +354,6 @@ class ValuatorSessionStore:
                     ],
                     "output": output,
                     "facts": facts,
-                    "aspect_facts": [],
-                    "uncovered_aspects": [],
                 },
             )
 
@@ -343,7 +365,7 @@ class ValuatorSessionStore:
                 ),
             }
             artifacts.update(artifact_refs)
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
             return artifact_refs
 
@@ -382,7 +404,7 @@ class ValuatorSessionStore:
                     "session_id": self.session_id,
                     "root_task_id": self._root_task_id,
                     "model": self.model,
-                    "updated_at": utc_isoformat(),
+                    "updated_at": kst_isoformat(),
                 },
             )
             self._write_json(
@@ -410,7 +432,7 @@ class ValuatorSessionStore:
                     self.output_dir / "final.trace.md",
                     f"# Final Trace\n\n{render_tree_markdown(root_task)}\n",
                 )
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
 
     def write_review(
@@ -426,7 +448,7 @@ class ValuatorSessionStore:
             "round": self.current_round,
             "actions": actions or [],
             "coverage_feedback": coverage_feedback or {},
-            "now_utc": utc_isoformat(),
+            "now_kst": kst_isoformat(),
             "quant_axes": quant_axes or {},
         }
         self._write_json(self.review_dir / "latest.json", payload)
@@ -441,7 +463,7 @@ class ValuatorSessionStore:
     ) -> None:
         with self._lock:
             self._session_payload["status"] = status
-            self._session_payload["updated_at"] = utc_isoformat(updated_at)
+            self._session_payload["updated_at"] = kst_isoformat(updated_at)
             if error:
                 self._session_payload["error"] = error
             else:
@@ -456,7 +478,7 @@ class ValuatorSessionStore:
                 root_task_id=self._root_task_id,
             ):
                 return
-            self._session_payload["updated_at"] = utc_isoformat()
+            self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
 
     def _collect_all_task_ids(self) -> list[str]:
@@ -479,7 +501,7 @@ class ValuatorSessionStore:
     def _merge_trace_fields(self, fields: Mapping[str, Any]) -> None:
         with self._lock:
             self._session_payload.update(fields)
-            self._session_payload["updated_at"] = utc_isoformat(
+            self._session_payload["updated_at"] = kst_isoformat(
                 fields.get("updated_at") if "updated_at" in fields else None
             )
             self._write_session()
@@ -495,6 +517,7 @@ class ValuatorSessionStore:
 
     def _rel(self, path: Path) -> str:
         return str(path.relative_to(self.session_dir))
+
 
     @staticmethod
     def _args_hash(args: dict[str, Any]) -> str:

@@ -7,10 +7,13 @@ from .company import (
     CompanySurfaceResolution,
     Listing,
     ListingSeed,
+    ReferenceStockPrice,
     Subject,
+    company_with_reference_from_daily_bar,
     resolve_company_surfaces,
     resolve_subjects,
 )
+from .price_bar import DailyPriceBar
 from .query import (
     QueryAnalysis,
     QueryBreakdown,
@@ -29,10 +32,12 @@ from .query import (
 __all__ = [
     "Company",
     "CompanySurfaceResolution",
+    "DailyPriceBar",
     "DomainRouter",
     "Listing",
     "ListingSeed",
     "QueryBreakdown",
+    "ReferenceStockPrice",
     "QueryEntity",
     "QueryAnalysis",
     "QueryAnalyzer",
@@ -45,6 +50,7 @@ __all__ = [
     "Subject",
     "analyze_query",
     "build_query_breakdown",
+    "company_with_reference_from_daily_bar",
     "fill_routing_defaults",
     "resolve_company_surfaces",
     "resolve_subjects",

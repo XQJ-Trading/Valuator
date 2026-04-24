@@ -1,4 +1,8 @@
-import { loadAgentConfig } from "./agentConfigStorage";
+import {
+  loadAgentConfig,
+  type SavedLlmBackend,
+  type SavedWebSearchProvider,
+} from "./agentConfigStorage";
 
 export type DataSource = "session" | "guide";
 
@@ -107,16 +111,34 @@ export async function fetchChatMessages(sessionId: string): Promise<ChatMessage[
 export async function postChatMessage(
   sessionId: string,
   text: string,
-  webSearchProvider: WebSearchProvider | "",
 ): Promise<ChatMessage> {
+  const cfg = loadAgentConfig();
+  let webSearchProvider = cfg.webSearchProvider;
+  if (!webSearchProvider) {
+    try {
+      webSearchProvider = (await fetchWebSearchProviders()).available[0] ?? "";
+    } catch {
+      webSearchProvider = "";
+    }
+  }
+  const body: {
+    text: string;
+    web_search_provider?: SavedWebSearchProvider;
+    llm_backend?: SavedLlmBackend;
+    model?: string;
+  } = { text };
+  if (webSearchProvider) {
+    body.web_search_provider = webSearchProvider;
+  }
+  body.llm_backend = cfg.llmBackend;
+  const model = cfg.model.trim();
+  if (model) {
+    body.model = model;
+  }
   const res = await fetch(chatApiPath("/api/chat/messages", sessionId), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(
-      webSearchProvider
-        ? { text, web_search_provider: webSearchProvider }
-        : { text },
-    ),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await parseErrorBody(res));
   return res.json() as Promise<ChatMessage>;

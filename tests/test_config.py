@@ -4,6 +4,8 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
@@ -78,6 +80,14 @@ def test_load_config_defaults_to_flash_preview(monkeypatch) -> None:
     assert loaded.agent_model == config_module.DEFAULT_AGENT_MODEL
     assert loaded.supported_models == (config_module.DEFAULT_AGENT_MODEL,)
     assert loaded.log_level == "INFO"
+    assert (
+        loaded.gemini_explicit_cache_ttl_seconds
+        == config_module.DEFAULT_GEMINI_EXPLICIT_CACHE_TTL_SECONDS
+    )
+    assert (
+        loaded.gemini_implicit_cache_cost_mode
+        == config_module.DEFAULT_GEMINI_IMPLICIT_CACHE_COST_MODE
+    )
     assert loaded.mongodb_enabled is False
     assert loaded.mongodb_database == "valuator"
     assert loaded.mongodb_collection == "sessions"
@@ -112,6 +122,8 @@ def test_load_config_normalizes_supported_models(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_CONCURRENCY", "8")
     monkeypatch.setenv("WEB_SEARCH_PROVIDER", "tavily")
     monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+    monkeypatch.setenv("GEMINI_EXPLICIT_CACHE_TTL_SECONDS", "7200")
+    monkeypatch.setenv("GEMINI_IMPLICIT_CACHE_COST_MODE", "bill_uncached_only")
 
     loaded = config_module.load_config()
 
@@ -131,3 +143,41 @@ def test_load_config_normalizes_supported_models(monkeypatch) -> None:
     assert loaded.agent_concurrency == 8
     assert loaded.web_search_provider == "tavily"
     assert loaded.tavily_api_key == "tavily-key"
+    assert loaded.gemini_explicit_cache_ttl_seconds == 7200
+    assert loaded.gemini_implicit_cache_cost_mode == "bill_uncached_only"
+
+
+def test_load_config_rejects_invalid_gemini_implicit_cache_cost_mode(
+    monkeypatch,
+) -> None:
+    config_module.load_project_env.cache_clear()
+    monkeypatch.setattr(
+        config_module,
+        "load_dotenv",
+        lambda *, dotenv_path: False,
+    )
+    monkeypatch.setenv("GEMINI_IMPLICIT_CACHE_COST_MODE", "invalid")
+
+    with pytest.raises(
+        ValueError,
+        match="GEMINI_IMPLICIT_CACHE_COST_MODE must be one of",
+    ):
+        config_module.load_config()
+
+
+def test_load_config_rejects_non_positive_gemini_explicit_cache_ttl(
+    monkeypatch,
+) -> None:
+    config_module.load_project_env.cache_clear()
+    monkeypatch.setattr(
+        config_module,
+        "load_dotenv",
+        lambda *, dotenv_path: False,
+    )
+    monkeypatch.setenv("GEMINI_EXPLICIT_CACHE_TTL_SECONDS", "0")
+
+    with pytest.raises(
+        ValueError,
+        match="GEMINI_EXPLICIT_CACHE_TTL_SECONDS must be > 0",
+    ):
+        config_module.load_config()

@@ -195,8 +195,10 @@ class _DummyUsageMetadata:
     def model_dump(self) -> dict[str, int]:
         return {
             "prompt_tokens": 12,
+            "cached_content_token_count": 9,
             "completion_tokens": 8,
-            "total_tokens": 20,
+            "thoughts_token_count": 2,
+            "total_tokens": 22,
         }
 
 
@@ -229,6 +231,53 @@ class _NoisyModels:
 class _DummyClient:
     def __init__(self) -> None:
         self.models = _DummyModels()
+
+
+class _DummyCachedContent:
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "name": "cachedContents/test-cache",
+            "model": "models/gemini-3-flash-preview",
+            "usage_metadata": {"total_token_count": 1200},
+            "create_time": "2026-03-21T02:31:05Z",
+            "expire_time": "2026-03-21T04:31:05Z",
+        }
+
+
+class _DummyCaches:
+    def __init__(self) -> None:
+        self.create_calls = 0
+
+    def create(self, *, model: str, config: object) -> _DummyCachedContent:
+        del model, config
+        self.create_calls += 1
+        return _DummyCachedContent()
+
+
+class _DummyCacheClient:
+    def __init__(self) -> None:
+        self.models = _DummyModels()
+        self.caches = _DummyCaches()
+
+
+class _TooSmallCaches:
+    def __init__(self) -> None:
+        self.create_calls = 0
+
+    def create(self, *, model: str, config: object) -> _DummyCachedContent:
+        del model, config
+        self.create_calls += 1
+        raise ValueError(
+            "400 INVALID_ARGUMENT. {'error': {'message': "
+            "'Cached content is too small. total_token_count=204, "
+            "min_total_token_count=1024', 'status': 'INVALID_ARGUMENT'}}"
+        )
+
+
+class _TooSmallCacheClient:
+    def __init__(self) -> None:
+        self.models = _DummyModels()
+        self.caches = _TooSmallCaches()
 
 
 class _NoisyClient:
@@ -271,15 +320,127 @@ async def test_gemini_client_writes_llm_call_under_task_dir_and_usage(
         .read_text(encoding="utf-8")
         .splitlines()
     )
+    usage_row = json.loads(usage_rows[0])
     step_data = json.loads(
         (session_dir / "debug" / "steps" / "step_0001.json").read_text(encoding="utf-8")
     )
 
     assert payload == {"answer": "ok"}
     assert len(usage_rows) == 1
+    assert usage_row["cache_source"] == "implicit"
+    assert usage_row["usage"]["cached_prompt_tokens"] == 9
+    assert usage_row["usage"]["uncached_prompt_tokens"] == 3
+    assert usage_row["usage"]["thought_tokens"] == 2
     assert step_data["prompt"] == "return answer"
     assert step_data["system_prompt"] == "system prompt"
+    assert step_data["cache_source"] == "implicit"
     assert step_data["task_id"] == "root"
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_creates_explicit_cache_and_records_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "valuator.models.gemini_direct.ensure_supported_google_genai_runtime",
+        lambda: "test-runtime",
+    )
+    writer = SessionTraceWriter(
+        session_id="S-cache",
+        query="cache query",
+        model="gemini-3-flash-preview",
+        created_at="2026-03-21T02:31:05.577471Z",
+        base_dir=tmp_path,
+    )
+    client = GeminiClient(
+        model="gemini-3-flash-preview",
+        api_key="test-key",
+        client=_DummyCacheClient(),
+        usage_writer=writer,
+    )
+
+    cache = await client.create_explicit_cache(
+        contents="long cached prompt",
+        system_prompt="cache system",
+        ttl_seconds=7200,
+        display_name="cache",
+    )
+
+    session_dir = tmp_path / "session_S-cache"
+    usage_row = json.loads(
+        (session_dir / "trace" / "llm_usage.jsonl").read_text(encoding="utf-8")
+    )
+
+    assert cache.name == "cachedContents/test-cache"
+    assert cache.token_count == 1200
+    assert cache.ttl_seconds == 7200
+    assert usage_row["method"] == "gemini.cache.create"
+    assert usage_row["cache_source"] == "explicit"
+    assert usage_row["cache_storage_hours"] == 2.0
+    assert usage_row["usage"]["cache_write_tokens"] == 1200
+    assert usage_row["cost_breakdown"]["cache_write_cost_usd"] == pytest.approx(0.00006)
+    assert usage_row["cost_breakdown"]["cache_storage_cost_usd"] == pytest.approx(
+        0.0024
+    )
+    assert usage_row["cost_usd"] == pytest.approx(0.00246)
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_reuses_explicit_cache_by_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "valuator.models.gemini_direct.ensure_supported_google_genai_runtime",
+        lambda: "test-runtime",
+    )
+    backend = _DummyCacheClient()
+    client = GeminiClient(
+        model="gemini-3-flash-preview",
+        api_key="test-key",
+        client=backend,
+    )
+
+    first = await client.get_or_create_explicit_cache(
+        cache_key="planner:system-prefix:v1",
+        system_prompt="cache system",
+    )
+    second = await client.get_or_create_explicit_cache(
+        cache_key="planner:system-prefix:v1",
+        system_prompt="cache system",
+    )
+
+    assert first == "cachedContents/test-cache"
+    assert second == "cachedContents/test-cache"
+    assert backend.caches.create_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_client_skips_explicit_cache_key_when_too_small(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "valuator.models.gemini_direct.ensure_supported_google_genai_runtime",
+        lambda: "test-runtime",
+    )
+    backend = _TooSmallCacheClient()
+    client = GeminiClient(
+        model="gemini-3-flash-preview",
+        api_key="test-key",
+        client=backend,
+    )
+
+    first = await client.get_or_create_explicit_cache(
+        cache_key="critic:root-system:v1",
+        system_prompt="short",
+    )
+    second = await client.get_or_create_explicit_cache(
+        cache_key="critic:root-system:v1",
+        system_prompt="short",
+    )
+
+    assert first is None
+    assert second is None
+    assert backend.caches.create_calls == 1
 
 
 @pytest.mark.asyncio

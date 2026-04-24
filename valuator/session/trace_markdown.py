@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from valuator.utils.time_utils import utc_isoformat
+from valuator.utils.time_utils import KST, kst_isoformat
 
 
 def write_task_markdown(
@@ -158,10 +158,14 @@ def timeline_summary(row: Mapping[str, Any]) -> str:
 
 
 def display_time(value: Any) -> str:
-    timestamp = utc_isoformat(value)
+    timestamp = kst_isoformat(value)
     try:
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except ValueError:
         return timestamp
-    return parsed.strftime("%H:%M:%SZ")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=KST)
+    else:
+        parsed = parsed.astimezone(KST)
+    return parsed.strftime("%H:%M:%S KST")
 

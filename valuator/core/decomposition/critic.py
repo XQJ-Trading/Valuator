@@ -9,6 +9,9 @@ from ..task import Task
 from ..types import TaskDecision
 from .types import CriticVerdict
 
+_ROOT_CRITIC_CACHE_KEY = "critic:root-system:v1"
+_NON_ROOT_CRITIC_CACHE_KEY = "critic:non-root-system:v1"
+
 
 class _CriticPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,13 +37,23 @@ class DecompositionCritic:
         ctx: TaskContext,
     ) -> CriticVerdict:
         prompt = self._build_prompt(task, decision, ctx)
+        system_prompt = self._system_prompt(is_root=not ctx.ancestry)
+        cached_content = await self._llm.get_or_create_explicit_cache(
+            cache_key=(
+                _ROOT_CRITIC_CACHE_KEY if not ctx.ancestry else _NON_ROOT_CRITIC_CACHE_KEY
+            ),
+            system_prompt=system_prompt,
+            display_name="critic-root" if not ctx.ancestry else "critic-non-root",
+            trace_method="agent.gate.cache.critic",
+        )
         raw = await self._llm.generate_json(
             prompt=prompt,
-            system_prompt=self._system_prompt(is_root=not ctx.ancestry),
+            system_prompt="" if cached_content else system_prompt,
             response_json_schema=_CriticPayload.model_json_schema(),
             trace_method=f"agent.gate.critic.{task.id}",
             max_response_chars=20_000,
             max_output_tokens=self._max_output_tokens,
+            cached_content=cached_content,
         )
         payload = _CriticPayload.model_validate(raw)
         return self._to_verdict(payload)
@@ -57,8 +70,7 @@ class DecompositionCritic:
         ]
         if ctx.ancestry:
             ancestry_lines = [
-                f"{summary.id}: {summary.description}"
-                for summary in ctx.ancestry
+                f"{summary.id}: {summary.description}" for summary in ctx.ancestry
             ]
             sections.append("[ANCESTRY]\n" + "\n".join(ancestry_lines))
         else:
@@ -76,7 +88,8 @@ class DecompositionCritic:
                 sections.append("[INTENT_TAGS]\n" + ", ".join(qa.intent_tags))
 
         child_lines = [
-            f"{index}. description={child.description}; tool_hint={child.tool_hint or '-'}"
+            f"{index}. description={child.description}; tool_hint={child.tool_hint or '-'}; "
+            f"depends_on_siblings={list(child.depends_on_siblings)}"
             for index, child in enumerate(decision.children)
         ]
         sections.append("[PROPOSED_CHILDREN]\n" + "\n".join(child_lines))
@@ -87,12 +100,12 @@ class DecompositionCritic:
             ]
             sections.append("[CURRENT_CHILDREN]\n" + "\n".join(current_children_lines))
 
-        available_tools = "\n".join(ctx.available_tools) if ctx.available_tools else "(none)"
+        available_tools = (
+            "\n".join(ctx.available_tools) if ctx.available_tools else "(none)"
+        )
         sections.append(f"[AVAILABLE_TOOLS]\n{available_tools}")
         sections.append(
-            "[TASK_CONTEXT]\n"
-            f"query={ctx.query}\n"
-            f"step_count={ctx.step_count}"
+            "[TASK_CONTEXT]\n" f"query={ctx.query}\n" f"step_count={ctx.step_count}"
         )
         sections.append("Return valid JSON only.")
         return "\n\n".join(sections)
@@ -108,6 +121,8 @@ class DecompositionCritic:
                     "  Reject tracks that assume inapplicable characteristics (e.g., supply-chain analysis for a pure-services company).",
                     "- Are important analytical perspectives missing given the subject?",
                     "  Lower coverage_pct when the plan omits relevant areas or includes irrelevant ones.",
+                    "- Does the plan follow the two-phase pattern? Phase 1 = data collection by information type, Phase 2 = analysis by perspective with depends_on_siblings referencing Phase 1.",
+                    "- Reject if Phase 1 children overlap in data sources, or if Phase 2 children lack depends_on_siblings.",
                     "- Do any tracks overlap or could they be consolidated?",
                     "Set allow=false if the plan fundamentally mismatches the subject.",
                     "Return JSON only.",
@@ -117,11 +132,9 @@ class DecompositionCritic:
             [
                 "You are a decomposition gate critic.",
                 "Evaluate the proposed decomposition before expansion.",
-                "Judge whether one tool call could solve the parent task, whether children overlap,",
+                "Judge whether one tool call could solve the parent task,",
                 "how much the children cover the parent goal, the minimum children actually needed,",
                 "and whether this decomposition should be allowed.",
-                "Treat near-duplicate children as overlap even when wording is slightly different.",
-                "If a proposed child substantially overlaps an existing current child, reject it as redundant.",
                 "Return JSON only.",
             ]
         )
@@ -131,9 +144,7 @@ class DecompositionCritic:
             allow=payload.allow,
             single_tool_possible=payload.single_tool_possible,
             redundant_pairs=[
-                (pair[0], pair[1])
-                for pair in payload.redundant_pairs
-                if len(pair) >= 2
+                (pair[0], pair[1]) for pair in payload.redundant_pairs if len(pair) >= 2
             ],
             coverage_pct=payload.coverage_pct,
             min_children=payload.min_children,

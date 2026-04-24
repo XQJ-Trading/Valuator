@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from valuator.utils.time_utils import utc_isoformat
+from valuator.utils.time_utils import kst_isoformat
 
 from ..context import TaskContext, TaskSummary
 from ..task import Task
@@ -125,7 +125,7 @@ def log_task_result(
         status=status,
         action=action,
         summary=summary,
-        started_at=utc_isoformat(),
+        started_at=kst_isoformat(),
         duration_ms=0.0,
         input_payload=task_runtime_payload(task),
         result_payload={
@@ -147,8 +147,10 @@ def decision_input_payload(task: Task, ctx: TaskContext) -> dict[str, Any]:
             "child_outputs": dict(ctx.child_outputs),
             "ancestry": [task_summary_payload(item) for item in ctx.ancestry],
             "siblings": {
-                task_id: task_summary_payload(summary) for task_id, summary in ctx.siblings.items()
+                task_id: task_summary_payload(summary)
+                for task_id, summary in ctx.siblings.items()
             },
+            "evidence": [asdict(row) for row in ctx.evidence],
             "shared": {
                 "facts": {key: asdict(fact) for key, fact in ctx.shared.facts.items()},
                 "conflicts": [asdict(conflict) for conflict in ctx.shared.conflicts],
@@ -181,6 +183,7 @@ def task_runtime_payload(task: Task) -> dict[str, Any]:
             else None
         ),
         "last_tool_success": task.last_tool_success,
+        "failed_attempts": [asdict(item) for item in task.failed_attempts],
         "last_invalid_error": task.last_invalid_error,
         "child_output_ids": sorted(task.child_outputs),
         "tool_result_count": len(task.tool_results),

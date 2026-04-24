@@ -21,6 +21,8 @@ class _Writer:
         usage: TokenUsage,
         latency_seconds: float,
         started_at: str,
+        cache_source: str | None = None,
+        cache_storage_hours: float = 0.0,
     ) -> None:
         self.calls.append(
             {
@@ -29,6 +31,8 @@ class _Writer:
                 "usage": usage,
                 "latency_seconds": latency_seconds,
                 "started_at": started_at,
+                "cache_source": cache_source,
+                "cache_storage_hours": cache_storage_hours,
             }
         )
 

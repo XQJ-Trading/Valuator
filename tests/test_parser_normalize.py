@@ -140,20 +140,25 @@ def test_parse_decision_rejects_decompose_when_disallowed() -> None:
         raise AssertionError("expected ValueError")
 
 
-def test_parse_decision_keeps_execute_even_after_successful_tool() -> None:
+def test_parse_decision_rejects_execute_after_successful_tool() -> None:
     task = AtomicTask(id="root.0", description="x", tool_hint="")
     task.last_tool_success = True
-    decision = parse_decision(
-        task,
-        {
-            "tool_request": {
-                "tool_name": "unknown_tool",
-                "args": {},
+    try:
+        parse_decision(
+            task,
+            {
+                "tool_request": {
+                    "tool_name": "unknown_tool",
+                    "args": {},
+                },
+                "reason": "retry tool",
             },
-            "reason": "retry tool",
-        },
-    )
-    assert decision.action is Action.EXECUTE
+        )
+    except ValueError as exc:
+        assert "action is not allowed for this task" in str(exc)
+        assert "requested=execute" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_parse_decision_prefers_explicit_execute_over_stray_wait_for() -> None:

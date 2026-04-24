@@ -4,14 +4,15 @@ from copy import deepcopy
 from typing import Any
 
 from ..context import TaskContext
-from ..decomposition.gate import static_rejects_minimal_decomposition
-from ..decomposition.gate_config import GateConfig
 from ..task import Task
 from ..types import Action, TaskDecision
 from . import prompts
 from .parser import StepIntentPayload, parse_decision
 
 TASK_NAME_MAX_CHARS = 30
+_PLANNER_SYSTEM_CACHE_KEY = "planner:system-prefix:v1"
+# Gemini explicit cache forbids system_instruction on GenerateContent; fold per-call system into user text.
+_STEP_PLANNER_CACHED_CONTEXT_TAG = "[STEP_PLANNER_CONTEXT]"
 
 
 class StepPlanner:
@@ -25,9 +26,6 @@ class StepPlanner:
         self,
         llm_client: Any,
         repair_retries: int | None = None,
-        *,
-        gate_config: GateConfig | None = None,
-        max_steps_per_task: int | None = None,
     ) -> None:
         from ...utils.config import config
 
@@ -38,24 +36,16 @@ class StepPlanner:
             else repair_retries
         )
         self._repair_retries = max(int(configured_retries), 0)
-        self._gate_config = gate_config
-        self._max_steps_per_task = (
-            int(max_steps_per_task)
-            if max_steps_per_task is not None
-            else int(config.agent_max_steps_per_task)
-        )
 
     async def decide(self, task: Task, ctx: TaskContext) -> TaskDecision:
-        gate_cfg = self._gate_config or GateConfig()
         allow_decompose = True
-        if gate_cfg.enabled and static_rejects_minimal_decomposition(
-            task_depth=len(ctx.ancestry),
-            max_steps_per_task=self._max_steps_per_task,
-            config=gate_cfg,
-        ):
-            allow_decompose = False
-
         allowed = self._allowed_actions(task, allow_decompose=allow_decompose)
+        system_prompt, cached_content = await self._planner_prompt_config(
+            task=task,
+            ctx=ctx,
+            allow_decompose=allow_decompose,
+            allowed_actions=allowed,
+        )
         base_prompt = prompts.build_step_prompt(
             task=task,
             ctx=ctx,
@@ -67,13 +57,8 @@ class StepPlanner:
         return await self._generate_decision(
             task=task,
             base_prompt=base_prompt,
-            system_prompt=prompts.build_system_prompt(
-                task=task,
-                ctx=ctx,
-                allow_decompose=allow_decompose,
-                task_name_max_chars=TASK_NAME_MAX_CHARS,
-                allowed_actions=allowed,
-            ),
+            system_prompt=system_prompt,
+            cached_content=cached_content,
             schema=self._decision_schema(task, allow_decompose=allow_decompose),
             allow_decompose=allow_decompose,
         )
@@ -85,6 +70,12 @@ class StepPlanner:
         rejection_reason: str,
     ) -> TaskDecision:
         allowed = self._allowed_actions(task, allow_decompose=False)
+        system_prompt, cached_content = await self._planner_prompt_config(
+            task=task,
+            ctx=ctx,
+            allow_decompose=False,
+            allowed_actions=allowed,
+        )
         base_prompt = prompts.build_step_prompt(
             task=task,
             ctx=ctx,
@@ -98,13 +89,8 @@ class StepPlanner:
             base_prompt="\n\n".join(
                 [base_prompt, "[DECOMPOSITION_REJECTED]", rejection_reason]
             ),
-            system_prompt=prompts.build_system_prompt(
-                task=task,
-                ctx=ctx,
-                allow_decompose=False,
-                task_name_max_chars=TASK_NAME_MAX_CHARS,
-                allowed_actions=allowed,
-            ),
+            system_prompt=system_prompt,
+            cached_content=cached_content,
             schema=self._decision_schema(task, allow_decompose=False),
             allow_decompose=True,
         )
@@ -118,21 +104,33 @@ class StepPlanner:
         task: Task,
         base_prompt: str,
         system_prompt: str,
+        cached_content: str | None,
         schema: dict[str, Any],
         allow_decompose: bool = True,
     ) -> TaskDecision:
-        prompt = base_prompt
+        def llm_prompt(*, user_body: str) -> tuple[str, str]:
+            if cached_content:
+                sections = [
+                    _STEP_PLANNER_CACHED_CONTEXT_TAG,
+                    system_prompt.strip(),
+                    user_body,
+                ]
+                return "", "\n\n".join(section for section in sections if section)
+            return system_prompt, user_body
+
+        llm_system, prompt = llm_prompt(user_body=base_prompt)
         last_error: ValueError | None = None
 
         for attempt in range(self._repair_retries + 1):
             try:
                 invalid_payload = await self._llm.generate_json(
                     prompt=prompt,
-                    system_prompt=system_prompt,
+                    system_prompt=llm_system,
                     response_json_schema=schema,
                     trace_method=f"agent.step.{task.id}",
                     max_response_chars=self._decision_max_response_chars,
                     max_output_tokens=self._decision_max_output_tokens,
+                    cached_content=cached_content,
                 )
                 decision = parse_decision(
                     task, invalid_payload, allow_decompose=allow_decompose
@@ -143,7 +141,7 @@ class StepPlanner:
                 last_error = exc
                 if attempt >= self._repair_retries:
                     break
-                prompt = "\n\n".join(
+                repair_body = "\n\n".join(
                     [
                         base_prompt,
                         "[VALIDATION_ERROR]",
@@ -152,10 +150,45 @@ class StepPlanner:
                         "Return corrected JSON only.",
                     ]
                 )
+                llm_system, prompt = llm_prompt(user_body=repair_body)
 
         if last_error is None:
             raise ValueError("step planner produced no decision")
         raise last_error
+
+    async def _planner_prompt_config(
+        self,
+        *,
+        task: Task,
+        ctx: TaskContext,
+        allow_decompose: bool,
+        allowed_actions: list[Action],
+    ) -> tuple[str, str | None]:
+        dynamic_suffix = prompts.build_system_prompt_suffix(
+            task=task,
+            ctx=ctx,
+            allow_decompose=allow_decompose,
+            task_name_max_chars=TASK_NAME_MAX_CHARS,
+            allowed_actions=allowed_actions,
+        )
+        cached_content = await self._llm.get_or_create_explicit_cache(
+            cache_key=_PLANNER_SYSTEM_CACHE_KEY,
+            system_prompt=prompts.static_system_prefix(),
+            display_name="planner-system-prefix",
+            trace_method="agent.step.cache.planner",
+        )
+        if cached_content:
+            return dynamic_suffix, cached_content
+        return (
+            prompts.build_system_prompt(
+                task=task,
+                ctx=ctx,
+                allow_decompose=allow_decompose,
+                task_name_max_chars=TASK_NAME_MAX_CHARS,
+                allowed_actions=allowed_actions,
+            ),
+            None,
+        )
 
     def _validate_decision_contract(self, decision: TaskDecision) -> None:
         for child in decision.children:

@@ -148,6 +148,7 @@ def render_aggregation_report(
     return "\n".join(lines).strip() + "\n", facts
 
 
+
 def read_json_if_exists(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None

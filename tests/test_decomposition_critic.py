@@ -18,6 +18,29 @@ class ScriptedLLM:
     def __init__(self, responses: list[dict[str, Any]]) -> None:
         self._responses = list(responses)
         self.calls: list[dict[str, Any]] = []
+        self.cache_requests: list[dict[str, Any]] = []
+
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        self.cache_requests.append(
+            {
+                "cache_key": cache_key,
+                "contents": contents,
+                "system_prompt": system_prompt,
+                "ttl_seconds": ttl_seconds,
+                "display_name": display_name,
+                "trace_method": trace_method,
+            }
+        )
+        return f"cache::{cache_key}"
 
     async def generate_json(
         self,
@@ -30,13 +53,14 @@ class ScriptedLLM:
         max_output_tokens: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        del max_response_chars, max_output_tokens, kwargs
+        del max_response_chars, max_output_tokens
         self.calls.append(
             {
                 "prompt": prompt,
                 "system_prompt": system_prompt,
                 "schema": response_json_schema,
                 "trace_method": trace_method,
+                "cached_content": kwargs.get("cached_content"),
             }
         )
         if not self._responses:
@@ -234,7 +258,9 @@ async def test_root_prompt_includes_subject_context() -> None:
     assert "USA: AMZN" in prompt
     assert "[INTENT_TAGS]" in prompt
     assert "valuation" in prompt
-    assert "plan critic" in system
+    assert system == ""
+    assert llm.calls[0]["cached_content"] == "cache::critic:root-system:v1"
+    assert "plan critic" in llm.cache_requests[0]["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -264,4 +290,6 @@ async def test_non_root_prompt_excludes_subject_context() -> None:
     system = llm.calls[0]["system_prompt"]
     assert "[SUBJECTS]" not in prompt
     assert "[INTENT_TAGS]" not in prompt
-    assert "decomposition gate critic" in system
+    assert system == ""
+    assert llm.calls[0]["cached_content"] == "cache::critic:non-root-system:v1"
+    assert "decomposition gate critic" in llm.cache_requests[0]["system_prompt"]

@@ -10,6 +10,21 @@ from ..utils.logger import logger
 SearchIntent = Literal["general", "deep", "financial"]
 
 
+def _truncate_at_sources_markdown_heading(raw: str) -> str:
+    # APIs often append a duplicate "## sources" block; URLs are carried in WebSearchResult.sources.
+    current = raw.strip()
+    while True:
+        lines = current.splitlines()
+        cut: int | None = None
+        for i, line in enumerate(lines):
+            if line.strip().lower() in ("## sources", "### sources"):
+                cut = i
+                break
+        if cut is None:
+            return current
+        current = "\n".join(lines[:cut]).rstrip()
+
+
 @dataclass(frozen=True)
 class WebSearchResult:
     answer: str
@@ -23,7 +38,8 @@ class WebSearchProvider(Protocol):
     model_name: str
     available: bool
 
-    async def search(self, query: str, *, intent: SearchIntent) -> WebSearchResult: ...
+    async def search(self, query: str, *, intent: SearchIntent) -> WebSearchResult:
+        ...
 
 
 class _BaseProvider:
@@ -87,7 +103,9 @@ class PerplexityProvider(_BaseProvider):
                 "web_search_options": {"search_mode": self._INTENT_TO_MODE[intent]}
             },
         )
-        answer = response.content
+        raw_answer = response.content
+        if not isinstance(raw_answer, str):
+            raw_answer = "" if raw_answer is None else str(raw_answer)
         meta = getattr(response, "response_metadata", {}) or {}
         extra = getattr(response, "additional_kwargs", {}) or {}
         usage_meta = getattr(response, "usage_metadata", {}) or {}
@@ -102,9 +120,10 @@ class PerplexityProvider(_BaseProvider):
             or meta.get("sources")
             or extra.get("citations")
             or extra.get("sources")
-            or re.findall(r"https?://[^\s)]+", answer)
-            or [f"[{n}]" for n in sorted(set(re.findall(r"\[(\d+)\]", answer)))]
+            or re.findall(r"https?://[^\s)]+", raw_answer)
+            or [f"[{n}]" for n in sorted(set(re.findall(r"\[(\d+)\]", raw_answer)))]
         )
+        answer = _truncate_at_sources_markdown_heading(raw_answer)
         return WebSearchResult(answer=answer, sources=sources, usage_meta=usage)
 
 
@@ -115,7 +134,7 @@ class TavilyProvider(_BaseProvider):
     _INTENT_TO_REQUEST: dict[SearchIntent, dict[str, Any]] = {
         "general": {"topic": "general", "search_depth": "basic"},
         "deep": {"topic": "general", "search_depth": "advanced"},
-        "financial": {"topic": "finance", "search_depth": "advanced"},
+        "financial": {"topic": "general", "search_depth": "advanced"},
     }
     _max_results = 5
     _include_answer: str | bool = "advanced"
@@ -171,6 +190,8 @@ class TavilyProvider(_BaseProvider):
             answer = "\n\n".join(
                 row.get("content", "") for row in results if row.get("content")
             )
+        if not isinstance(answer, str):
+            answer = str(answer)
         sources = [row["url"] for row in results if row.get("url")]
         usage_meta: dict[str, Any] = {
             "provider": self.name,
@@ -179,6 +200,7 @@ class TavilyProvider(_BaseProvider):
         for key in ("response_time", "request_id", "usage", "query"):
             if key in response:
                 usage_meta[key] = response[key]
+        answer = _truncate_at_sources_markdown_heading(answer)
         return WebSearchResult(answer=answer, sources=sources, usage_meta=usage_meta)
 
     @staticmethod

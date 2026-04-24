@@ -14,6 +14,8 @@ ENV_FILE = ROOT_DIR / ".env"
 DEFAULT_SESSION_FILES_ROOT = "logs/local"
 DEFAULT_AGENT_MODEL = "gemini-3-flash-preview"
 DEFAULT_GEMINI_THINKING_LEVEL = "low"
+DEFAULT_GEMINI_EXPLICIT_CACHE_TTL_SECONDS = 3600
+DEFAULT_GEMINI_IMPLICIT_CACHE_COST_MODE = "observe_only"
 DEFAULT_LLM_BACKEND = "google_genai"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_AUTO_ALLOWED_MODELS = (
@@ -68,6 +70,8 @@ class Config:
     agent_model: str
     llm_backend: str
     gemini_thinking_level: str
+    gemini_explicit_cache_ttl_seconds: int
+    gemini_implicit_cache_cost_mode: str
     google_api_key: str | None
     openrouter_api_key: str | None
     openrouter_base_url: str
@@ -153,6 +157,27 @@ def load_config() -> Config:
     if web_search_provider not in WEB_SEARCH_PROVIDER_NAMES:
         allowed = ", ".join(WEB_SEARCH_PROVIDER_NAMES)
         raise ValueError(f"WEB_SEARCH_PROVIDER must be one of: {allowed}")
+    gemini_implicit_cache_cost_mode = (
+        read_env(
+            "GEMINI_IMPLICIT_CACHE_COST_MODE",
+            DEFAULT_GEMINI_IMPLICIT_CACHE_COST_MODE,
+        )
+        or DEFAULT_GEMINI_IMPLICIT_CACHE_COST_MODE
+    ).strip().lower()
+    if gemini_implicit_cache_cost_mode not in {
+        "observe_only",
+        "bill_uncached_only",
+    }:
+        raise ValueError(
+            "GEMINI_IMPLICIT_CACHE_COST_MODE must be one of: "
+            "observe_only, bill_uncached_only"
+        )
+    gemini_explicit_cache_ttl_seconds = _as_int(
+        read_env("GEMINI_EXPLICIT_CACHE_TTL_SECONDS"),
+        default=DEFAULT_GEMINI_EXPLICIT_CACHE_TTL_SECONDS,
+    )
+    if gemini_explicit_cache_ttl_seconds <= 0:
+        raise ValueError("GEMINI_EXPLICIT_CACHE_TTL_SECONDS must be > 0")
     openrouter_api_key = read_env("OPENROUTER_API_KEY")
     openrouter_enabled = llm_backend == "openrouter" and bool(openrouter_api_key)
 
@@ -191,6 +216,8 @@ def load_config() -> Config:
             read_env("GEMINI_THINKING_LEVEL", DEFAULT_GEMINI_THINKING_LEVEL)
             or DEFAULT_GEMINI_THINKING_LEVEL
         ).lower(),
+        gemini_explicit_cache_ttl_seconds=gemini_explicit_cache_ttl_seconds,
+        gemini_implicit_cache_cost_mode=gemini_implicit_cache_cost_mode,
         google_api_key=read_env("GOOGLE_API_KEY"),
         openrouter_api_key=openrouter_api_key,
         openrouter_base_url=(

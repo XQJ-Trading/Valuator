@@ -16,21 +16,21 @@ def _add_years(d: date, delta: int) -> date:
         return date(d.year + delta, d.month, 28)
 
 
-def as_of_date_from_utc(as_of_utc: str) -> date:
-    if len(as_of_utc) >= 10 and as_of_utc[4] == "-" and as_of_utc[7] == "-":
-        return date.fromisoformat(as_of_utc[:10])
-    raise ValueError(f"invalid as_of_utc: {as_of_utc!r}")
+def as_of_calendar_date(as_of_iso: str) -> date:
+    if len(as_of_iso) >= 10 and as_of_iso[4] == "-" and as_of_iso[7] == "-":
+        return date.fromisoformat(as_of_iso[:10])
+    raise ValueError(f"invalid as_of_iso: {as_of_iso!r}")
 
 
-def normalize_target_date_token(raw: str, *, as_of_utc: str | None) -> str:
+def normalize_target_date_token(raw: str, *, as_of_kst: str | None) -> str:
     s = raw.strip()
     if not s:
         return ""
     if _ISO_DATE.fullmatch(s):
         return s
-    if as_of_utc is None:
-        raise ValueError("as_of_utc context required for period tokens")
-    as_of = as_of_date_from_utc(as_of_utc)
+    if as_of_kst is None:
+        raise ValueError("as_of_kst context required for period tokens")
+    as_of = as_of_calendar_date(as_of_kst)
     if s.upper() == "CURRENT_DATE":
         return as_of.isoformat()
     m = _P_MINUS_YEARS.fullmatch(s)

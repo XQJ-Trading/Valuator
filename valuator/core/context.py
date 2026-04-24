@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from domain.query import QueryAnalysis, QueryUnit
+from valuator.evidence import EvidenceRow
 from valuator.tools.base import ToolResult
 
 from .shared_state import SharedStateView
@@ -16,7 +17,6 @@ class TaskSummary:
     description: str
     state: TaskState
     output: Any = None
-    artifacts: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class TaskContext:
     task_id: str
     description: str
     step_count: int
-    as_of_utc: str = ""
+    as_of_kst: str = ""
     tool_results: list[ToolResult] = field(default_factory=list)
     child_outputs: dict[str, Any] = field(default_factory=dict)
     current_children: list[TaskSummary] = field(default_factory=list)
@@ -35,3 +35,4 @@ class TaskContext:
     query_analysis: QueryAnalysis = field(default_factory=QueryAnalysis)
     query_units: list[QueryUnit] = field(default_factory=list)
     available_tools: list[str] = field(default_factory=list)
+    evidence: list[EvidenceRow] = field(default_factory=list)

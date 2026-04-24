@@ -165,6 +165,7 @@ def test_write_aggregation_report_preserves_facts_only_output(tmp_path: Path) ->
     assert ledger["facts"] == {"price_uplift": "could not verify"}
 
 
+
 def test_leaf_aggregation_report_preserves_execution_markdown(tmp_path: Path) -> None:
     store = ValuatorSessionStore(
         session_id="S-leaf-report",
@@ -373,6 +374,61 @@ def test_runtime_final_output_text_matches_store_render_without_root_report(
     }
 
     assert store.final_output_markdown(output) == final_output_text(output)
+
+
+def test_write_execution_moves_lenticular_refs_to_meta_not_result_md(
+    tmp_path: Path,
+) -> None:
+    store = ValuatorSessionStore(
+        session_id="S-bracket-ref",
+        query="bracket ref",
+        model="stub-model",
+        created_at="2026-04-20T00:00:00Z",
+        root_dir=tmp_path,
+    )
+    root = ComplexTask(id="root", description="root")
+    child = AtomicTask(id="root.0", description="leaf", task_name="leaf")
+    root.add_child(child)
+    root.state = TaskState.DONE
+    child.state = TaskState.DONE
+
+    store.sync_task_tree(root)
+    store.write_execution_result(
+        task_id="root.0",
+        tool_name="web_search_tool",
+        args={"query": "q"},
+        result=ToolResult(
+            success=True,
+            result={
+                "findings": '요약 텍스트【https://example.com/a】 끝【https://example.com/b】',
+            },
+            metadata={"search_type": "tavily_web"},
+        ),
+        started_at="2026-04-20T00:01:00Z",
+        duration_ms=1.0,
+    )
+
+    body = (
+        store.session_dir / "tasks" / "root" / "root.0" / "execution" / "result.md"
+    ).read_text(encoding="utf-8")
+    meta = json.loads(
+        (
+            store.session_dir
+            / "tasks"
+            / "root"
+            / "root.0"
+            / "execution"
+            / "result.md.meta.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert "【" not in body and "】" not in body
+    assert "example.com" not in body
+    assert "요약 텍스트" in body and "끝" in body
+    assert meta["retrieval"]["source_ref"] == [
+        "https://example.com/a",
+        "https://example.com/b",
+    ]
 
 
 def test_build_browse_tree_uses_execution_fallback_and_failure_stub(

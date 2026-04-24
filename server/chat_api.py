@@ -2,20 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import sys
 import uuid
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
+from valuator.models.naming import is_openrouter_model_name
 from valuator.tools.web_search_providers import available_web_search_providers
-from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES
+from valuator.utils.config import (
+    DEFAULT_OPENROUTER_BASE_URL,
+    WEB_SEARCH_PROVIDER_NAMES,
+)
+from valuator.utils.time_utils import kst_isoformat
 
 from .auth import register_session
 from .session_viewer_api import session_data_root
@@ -35,8 +40,8 @@ _agent_tasks: dict[str, asyncio.Task[None]] = {}
 _agent_lock = asyncio.Lock()
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _kst_now_iso() -> str:
+    return kst_isoformat()
 
 
 def _chat_file(session_id: str) -> Path:
@@ -113,7 +118,7 @@ async def _append_and_broadcast_message(*, session_id: str, role: str, text: str
         "id": str(uuid.uuid4()),
         "role": role,
         "text": text,
-        "ts": _utc_now_iso(),
+        "ts": _kst_now_iso(),
     }
     async with _lock:
         messages = _load_messages(session_id)
@@ -124,7 +129,7 @@ async def _append_and_broadcast_message(*, session_id: str, role: str, text: str
 
 
 async def _clear_and_broadcast_reset(session_id: str) -> dict:
-    event = {"type": "reset", "ts": _utc_now_iso()}
+    event = {"type": "reset", "ts": _kst_now_iso()}
     async with _lock:
         _save_messages(session_id, [])
     await _broadcast(session_id, event)
@@ -135,6 +140,10 @@ async def _run_agent_for_message(
     session_id: str,
     text: str,
     web_search_provider: str | None = None,
+    llm_backend: str | None = None,
+    model: str | None = None,
+    openrouter_api_key: str | None = None,
+    openrouter_base_url: str | None = None,
 ) -> None:
     process: asyncio.subprocess.Process | None = None
 
@@ -154,7 +163,7 @@ async def _run_agent_for_message(
         if stripped.startswith(_PROGRESS_PREFIXES):
             await _broadcast(session_id, {"type": "task_progress", "line": stripped})
 
-    await _broadcast(session_id, {"type": "agent_started", "ts": _utc_now_iso()})
+    await _broadcast(session_id, {"type": "agent_started", "ts": _kst_now_iso()})
     try:
         command = [
             sys.executable,
@@ -164,10 +173,28 @@ async def _run_agent_for_message(
         ]
         if web_search_provider:
             command.extend(["--web-search-provider", web_search_provider])
+        if model:
+            command.extend(["--model", model])
+        env = os.environ.copy()
+        if llm_backend == "openrouter":
+            key = (openrouter_api_key or "").strip() or os.environ.get(
+                "OPENROUTER_API_KEY", ""
+            ).strip()
+            env["LLM_BACKEND"] = "openrouter"
+            env["OPENROUTER_API_KEY"] = key
+            base = (openrouter_base_url or "").strip() or os.environ.get(
+                "OPENROUTER_BASE_URL", ""
+            ).strip()
+            env["OPENROUTER_BASE_URL"] = base or DEFAULT_OPENROUTER_BASE_URL
+        else:
+            env["LLM_BACKEND"] = "google_genai"
+            env.pop("OPENROUTER_API_KEY", None)
+            env.pop("OPENROUTER_BASE_URL", None)
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         async with _agent_lock:
             _agent_processes[session_id] = process
@@ -241,12 +268,16 @@ async def _run_agent_for_message(
                 _agent_processes.pop(session_id, None)
             if current_task is not None and _agent_tasks.get(session_id) is current_task:
                 _agent_tasks.pop(session_id, None)
-        await _broadcast(session_id, {"type": "agent_finished", "ts": _utc_now_iso()})
+        await _broadcast(session_id, {"type": "agent_finished", "ts": _kst_now_iso()})
 
 
 class PostChatMessageRequest(BaseModel):
     text: str
     web_search_provider: str | None = None
+    llm_backend: str | None = None
+    model: str | None = None
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str | None = None
 
     @field_validator("text")
     @classmethod
@@ -270,6 +301,52 @@ class PostChatMessageRequest(BaseModel):
             allowed = ", ".join(WEB_SEARCH_PROVIDER_NAMES)
             raise ValueError(f"web_search_provider must be one of: {allowed}")
         return selected
+
+    @field_validator("llm_backend")
+    @classmethod
+    def validate_llm_backend(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        selected = value.strip().lower()
+        if not selected:
+            return None
+        if selected not in {"google_genai", "openrouter"}:
+            raise ValueError("llm_backend must be one of: google_genai, openrouter")
+        return selected
+
+    @field_validator("model", "openrouter_api_key", "openrouter_base_url")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_openrouter_config(self) -> PostChatMessageRequest:
+        backend = self.llm_backend or "google_genai"
+        if backend == "openrouter":
+            key = (self.openrouter_api_key or "").strip() or os.environ.get(
+                "OPENROUTER_API_KEY", ""
+            ).strip()
+            if not key:
+                raise ValueError(
+                    "openrouter requires openrouter_api_key in the request or "
+                    "OPENROUTER_API_KEY in the server environment when llm_backend=openrouter"
+                )
+            if self.model and not is_openrouter_model_name(self.model):
+                raise ValueError(
+                    "openrouter model must use provider/model format such as openrouter/auto"
+                )
+        if backend == "google_genai" and self.model and is_openrouter_model_name(
+            self.model
+        ):
+            raise ValueError(
+                "google_genai backend does not accept provider/model format"
+            )
+        return self
 
 
 @router.get("/messages")
@@ -296,6 +373,10 @@ async def post_message(body: PostChatMessageRequest, session_id: uuid.UUID):
                 session_key,
                 body.text,
                 body.web_search_provider,
+                body.llm_backend,
+                body.model,
+                body.openrouter_api_key,
+                body.openrouter_base_url,
             )
         )
     return msg

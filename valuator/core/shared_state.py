@@ -1,91 +1,90 @@
+"""Shared state — stub retained for interface compatibility.
+
+The fact layer has been removed. Tasks communicate results through
+child_outputs (parent-child) and siblings (TaskSummary.output).
+This module provides empty types so that callers compile without
+breaking during the transition.
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
-
-@dataclass(frozen=True)
-class Fact:
-    key: str
-    value: Any
-    source_task_id: str
-    grounded: bool = False
-    as_of_utc: str = ""
-    time_scope: str = ""
-    target_start: str = ""
-    target_end: str = ""
-    source_urls: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class Conflict:
-    key: str
-    existing: Fact
-    incoming: Fact
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class SharedStateView:
-    facts: dict[str, Fact]
-    conflicts: list[Conflict]
+    """Read-only view — always empty after fact layer removal."""
 
-    def get(self, key: str) -> Any | None:
-        fact = self.facts.get(key)
-        return fact.value if fact else None
-
-    def has(self, key: str) -> bool:
-        return key in self.facts
+    facts: dict = field(default_factory=dict)
+    conflicts: list = field(default_factory=list)
+    resolved_conflicts: list = field(default_factory=list)
 
 
 class SharedState:
-    def __init__(self) -> None:
-        self._facts: dict[str, Fact] = {}
-        self._conflicts: list[Conflict] = []
+    """No-op shared state. Publish/view calls are retained but do nothing."""
 
-    def publish(
-        self,
-        key: str,
-        value: Any,
-        source_task_id: str,
-        *,
-        grounded: bool = False,
-        as_of_utc: str = "",
-        time_scope: str = "",
-        target_start: str = "",
-        target_end: str = "",
-        source_urls: tuple[str, ...] = (),
-    ) -> Conflict | None:
-        incoming = Fact(
-            key=key,
-            value=value,
-            source_task_id=source_task_id,
-            grounded=grounded,
-            as_of_utc=as_of_utc,
-            time_scope=time_scope,
-            target_start=target_start,
-            target_end=target_end,
-            source_urls=tuple(source_urls),
-        )
-        existing = self._facts.get(key)
-        if existing is not None and existing.value != value:
-            conflict = Conflict(key=key, existing=existing, incoming=incoming)
-            self._conflicts.append(conflict)
-            return conflict
-        self._facts[key] = incoming
+    def __init__(self) -> None:
+        pass
+
+    def publish(self, *_args, **_kwargs) -> None:
         return None
 
-    def get(self, key: str) -> Any | None:
-        fact = self._facts.get(key)
-        return fact.value if fact else None
+    def view(self) -> SharedStateView:
+        return SharedStateView()
 
-    def has(self, key: str) -> bool:
-        return key in self._facts
+    def view_for(self, **_kwargs) -> SharedStateView:
+        return SharedStateView()
+
+    def relevant_fact_keys_for(self, **_kwargs) -> frozenset[str]:
+        return frozenset()
+
+    @property
+    def exposures(self) -> list:
+        return []
+
+    @property
+    def resolved_conflicts(self) -> list:
+        return []
 
     def conflict_count(self) -> int:
-        return len(self._conflicts)
+        return 0
 
-    def view(self) -> SharedStateView:
-        return SharedStateView(
-            facts=dict(self._facts),
-            conflicts=list(self._conflicts),
-        )
+
+# Legacy type stubs for test compatibility
+@dataclass(frozen=True)
+class Fact:
+    address: object = None
+    value: object = None
+    source_task_id: str = ""
+    query_unit_ids: tuple = ()
+    grounded: bool = False
+    as_of_kst: str = ""
+    source_urls: tuple = ()
+    source_tier: int = -1
+
+    @property
+    def key(self) -> str:
+        return ""
+
+
+@dataclass(frozen=True)
+class Conflict:
+    key: str = ""
+    existing: object = None
+    incoming: object = None
+
+
+@dataclass(frozen=True)
+class ResolvedConflict:
+    key: str = ""
+    existing: object = None
+    incoming: object = None
+    selected: object = None
+    discarded: object = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class FactExposure:
+    task_id: str = ""
+    fact_keys: tuple = ()

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from .session.markdown import render_final_markdown
-from .utils.time_utils import utc_isoformat
+from .utils.time_utils import kst_isoformat
 
 
 def create_tool_registry(
@@ -60,7 +60,7 @@ def finalize_trace(
     trace_writer.append_total()
     trace_writer.update_session(
         status=status,
-        completed_at=utc_isoformat(completed_at),
+        completed_at=kst_isoformat(completed_at),
         error=error,
         final_answer=final_answer,
         duration=duration,

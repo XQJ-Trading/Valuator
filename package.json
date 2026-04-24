@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "tiptap": "^1.32.2"
+  }
+}

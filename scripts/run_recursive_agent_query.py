@@ -8,7 +8,7 @@ import asyncio
 import json
 import sys
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 import shutil
 
@@ -19,14 +19,15 @@ if str(ROOT) not in sys.path:
 from valuator.runtime import create_tool_registry, finalize_trace  # noqa: E402
 from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.session import SessionTraceWriter, ValuatorSessionStore  # noqa: E402
+from valuator.session.trace import json_ready  # noqa: E402
 from valuator.session.browse_tree import (  # noqa: E402
     task_description_from_effective_query,
-    to_slug,
 )
+from valuator.session.root_log_name import build_unique_root_session_id  # noqa: E402
 from valuator.utils.config import session_files_root  # noqa: E402
 from valuator.utils.config import WEB_SEARCH_PROVIDER_NAMES  # noqa: E402
 from valuator.utils.logger import close_session_log_file, session_log_file  # noqa: E402
-from valuator.utils.time_utils import Measurement  # noqa: E402
+from valuator.utils.time_utils import KST, Measurement, kst_as_of_format  # noqa: E402
 from valuator.core.types import EventType  # noqa: E402
 
 DEFAULT_QUERY_FILE = ROOT / "scripts" / "queries" / "amazon_analysis_ko.txt"
@@ -53,8 +54,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--thinking-level",
-        default="high",
-        help="Optional thinking level tag appended to the effective query.",
+        default="low",
+        help="Optional thinking level tag appended to the effective query. Omitted by default.",
     )
     parser.add_argument(
         "--max-steps",
@@ -122,7 +123,7 @@ async def build_query_analysis(
     query: str,
     model: str,
     *,
-    as_of_utc: str,
+    as_of_kst: str,
     usage_writer: object | None = None,
 ):
     from domain import DomainRouter, QueryAnalyzer, QueryIntent
@@ -140,7 +141,7 @@ async def build_query_analysis(
         router.bind_usage_writer(usage_writer)
         _, analysis = await router.analyze(
             QueryIntent(query=query),
-            as_of_utc=as_of_utc,
+            as_of_kst=as_of_kst,
         )
     except Exception as exc:
         write_diagnostic_record = getattr(usage_writer, "write_diagnostic_record", None)
@@ -153,7 +154,7 @@ async def build_query_analysis(
                 summary=str(exc),
                 started_at=measurement.started_at,
                 duration_ms=round(measurement.latency_seconds() * 1000.0, 3),
-                input_payload={"query": query, "model": model, "as_of_utc": as_of_utc},
+                input_payload={"query": query, "model": model, "as_of_kst": as_of_kst},
                 result_payload={"error": str(exc)},
                 error=str(exc),
             )
@@ -172,7 +173,7 @@ async def build_query_analysis(
             ),
             started_at=measurement.started_at,
             duration_ms=round(measurement.latency_seconds() * 1000.0, 3),
-            input_payload={"query": query, "model": model, "as_of_utc": as_of_utc},
+            input_payload={"query": query, "model": model, "as_of_kst": as_of_kst},
             result_payload=asdict(analysis),
         )
     return analysis
@@ -216,12 +217,12 @@ def _write_cli_trace_compat(trace_writer: SessionTraceWriter) -> None:
             )
     with (output_dir / "method_calls.jsonl").open("w", encoding="utf-8") as file_obj:
         for row in method_rows:
-            file_obj.write(json.dumps(row, ensure_ascii=False) + "\n")
+            file_obj.write(json.dumps(json_ready(row), ensure_ascii=False) + "\n")
 
 
 def render_event(event, *, jsonl: bool) -> str:
     if jsonl:
-        return json.dumps(asdict(event), ensure_ascii=False)
+        return json.dumps(json_ready(asdict(event)), ensure_ascii=False)
 
     event_type = event.type
     task_id = event.task_id
@@ -254,15 +255,15 @@ def render_event(event, *, jsonl: bool) -> str:
         name_part = f"{tn} " if tn else ""
         return (
             f"[tool] {task_id} {name_part}{tool}{duration_text} "
-            f"{json.dumps(detail.get('args') or {}, ensure_ascii=False)}"
+            f"{json.dumps(json_ready(detail.get('args') or {}), ensure_ascii=False)}"
         )
 
     if event_type == EventType.STEP_COMPLETED:
         if detail.get("kind") == "conflict":
             return (
                 f"[conflict] {task_id} {detail.get('key')}: "
-                f"{json.dumps(detail.get('existing'), ensure_ascii=False)} vs "
-                f"{json.dumps(detail.get('incoming'), ensure_ascii=False)}"
+                f"{json.dumps(json_ready(detail.get('existing')), ensure_ascii=False)} vs "
+                f"{json.dumps(json_ready(detail.get('incoming')), ensure_ascii=False)}"
             )
         action = detail.get("action")
         if action:
@@ -312,10 +313,20 @@ async def run(args: argparse.Namespace) -> int:
     concurrency = (
         args.concurrency if args.concurrency is not None else config.agent_concurrency
     )
-    created_at = datetime.now(timezone.utc)
-    timestamp = created_at.strftime("%Y%m%d-%H%M%S")
-    slug = to_slug(raw_query, max_length=40)
-    session_id = f"{timestamp}-{slug}" if slug else timestamp
+    created_at = datetime.now(KST)
+    as_of_kst = kst_as_of_format(created_at)
+    analysis = await build_query_analysis(
+        effective_query,
+        model,
+        as_of_kst=as_of_kst,
+        usage_writer=None,
+    )
+    session_id = build_unique_root_session_id(
+        created_at,
+        analysis,
+        raw_query,
+        session_files_root(),
+    )
     session_store = ValuatorSessionStore(
         session_id=session_id,
         query=raw_query,
@@ -343,12 +354,6 @@ async def run(args: argparse.Namespace) -> int:
             )
             await asyncio.to_thread(session_store.update_trace_query, effective_query)
             await asyncio.to_thread(session_store.sync_task_tree, root_task)
-            analysis = await build_query_analysis(
-                effective_query,
-                model,
-                as_of_utc=created_at.isoformat().replace("+00:00", "Z"),
-                usage_writer=trace_writer,
-            )
             root_task.query_unit_ids = list(range(len(analysis.units)))
             await asyncio.to_thread(
                 session_store.write_plan,
@@ -409,7 +414,7 @@ async def run(args: argparse.Namespace) -> int:
                 trace_writer.append_event,
                 {"type": "end", "content": "completed"},
             )
-            completed_at = datetime.now(timezone.utc)
+            completed_at = datetime.now(KST)
             await asyncio.to_thread(
                 finalize_trace,
                 trace_writer,
@@ -433,7 +438,7 @@ async def run(args: argparse.Namespace) -> int:
                 trace_writer.append_event,
                 {"type": "error", "message": error_text},
             )
-            completed_at = datetime.now(timezone.utc)
+            completed_at = datetime.now(KST)
             await asyncio.to_thread(
                 finalize_trace,
                 trace_writer,

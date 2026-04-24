@@ -7,17 +7,41 @@ import pytest
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
-from valuator.core.shared_state import Fact, SharedStateView
+from valuator.core.shared_state import SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, TaskState, ToolResult
+from valuator.core.types import Action, FailedAttempt, TaskState, TaskWorkPhase, ToolResult
 from valuator.core.task import AtomicTask, ComplexTask
+from valuator.evidence import EvidenceRow
 
 
 class ScriptedLLM:
     def __init__(self, responses: list[Any]) -> None:
         self._responses = list(responses)
         self.calls: list[dict[str, Any]] = []
+        self.cache_requests: list[dict[str, Any]] = []
+
+    async def get_or_create_explicit_cache(
+        self,
+        *,
+        cache_key: str,
+        contents: Any | None = None,
+        system_prompt: str = "",
+        ttl_seconds: int | None = None,
+        display_name: str | None = None,
+        trace_method: str = "llm.cache.create",
+    ) -> str | None:
+        self.cache_requests.append(
+            {
+                "cache_key": cache_key,
+                "contents": contents,
+                "system_prompt": system_prompt,
+                "ttl_seconds": ttl_seconds,
+                "display_name": display_name,
+                "trace_method": trace_method,
+            }
+        )
+        return f"cache::{cache_key}"
 
     async def generate_json(
         self,
@@ -28,6 +52,7 @@ class ScriptedLLM:
         trace_method: str,
         max_response_chars: int | None = None,
         max_output_tokens: int | None = None,
+        cached_content: str | None = None,
     ) -> dict[str, Any]:
         del trace_method, max_response_chars
         self.calls.append(
@@ -36,6 +61,7 @@ class ScriptedLLM:
                 "system_prompt": system_prompt,
                 "response_json_schema": response_json_schema,
                 "max_output_tokens": max_output_tokens,
+                "cached_content": cached_content,
             }
         )
         if not self._responses:
@@ -51,7 +77,7 @@ def _context(*, available_tools: list[str]) -> TaskContext:
         task_id="task",
         description="collect current facts",
         step_count=0,
-        as_of_utc="2026-03-30T00:00:00Z",
+        as_of_kst="2026-03-30 09:00:00",
         shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
@@ -282,9 +308,7 @@ async def test_step_planner_requery_without_decompose_adds_rejection_context() -
     assert decision.action.value == "aggregate"
     assert "[DECOMPOSITION_REJECTED]" in llm.calls[0]["prompt"]
     assert "children overlap too much" in llm.calls[0]["prompt"]
-    assert "DECOMPOSE: break the task into smaller children." not in llm.calls[0][
-        "system_prompt"
-    ]
+    assert "Do not return DECOMPOSE on this retry." in llm.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -438,8 +462,7 @@ async def test_step_planner_prompt_includes_current_children_and_done_sibling_ou
     prompt = llm.calls[0]["prompt"]
     assert "[CURRENT_CHILDREN]" in prompt
     assert "root.0: waiting - existing child" in prompt
-    assert "[SIBLINGS]" in prompt
-    assert "- **summary**: finished" in prompt
+    assert "[SIBLINGS]" not in prompt
     assert "[THINKING_LEVEL]" not in llm.calls[0]["system_prompt"]
 
 
@@ -459,7 +482,7 @@ async def test_step_planner_finalize_prompt_preserves_unverified_gaps() -> None:
         task_id="root",
         description="root task",
         step_count=0,
-        as_of_utc="2026-03-30T00:00:00Z",
+        as_of_kst="2026-03-30 09:00:00",
         child_outputs={
             "root.0": {
                 "status": "facts_only",
@@ -510,10 +533,10 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
         "finalize",
         "fail",
     ]
-    assert "EXECUTE:" not in llm.calls[0]["system_prompt"]
-    assert "This task already has a successful tool result." in llm.calls[0][
-        "system_prompt"
-    ]
+    call = llm.calls[0]
+    assert call["system_prompt"] == ""
+    assert "This task already has a successful tool result." in call["prompt"]
+    assert "You must not return EXECUTE." in call["prompt"]
 
 
 @pytest.mark.asyncio
@@ -545,9 +568,9 @@ async def test_step_planner_keeps_execute_after_failed_tool_result() -> None:
         "finalize",
         "fail",
     ]
-    assert "EXECUTE:" in llm.calls[0]["system_prompt"]
-    assert "The previous tool call failed." in llm.calls[0]["system_prompt"]
-    assert "Return JSON" in llm.calls[0]["system_prompt"]
+    assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
+    assert llm.calls[0]["system_prompt"] == ""
+    assert "The previous tool call failed." in llm.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -589,7 +612,7 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
         task_id="root",
         description="Amazon valuation",
         step_count=1,
-        as_of_utc="2026-03-30T00:00:00Z",
+        as_of_kst="2026-03-30 09:00:00",
         child_outputs={"root.0": {"summary": "segment analysis complete"}},
         shared=SharedStateView({}, []),
         query="Amazon analysis",
@@ -599,10 +622,11 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
 
     await planner.decide(task, ctx)
 
-    system = llm.calls[0]["system_prompt"]
     prompt = llm.calls[0]["prompt"]
-    assert "FINALIZE" in system
-    assert "Original query:" not in system
+    assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
+    assert llm.calls[0]["system_prompt"] == ""
+    assert "FINALIZE" in prompt
+    assert "Original query:" not in prompt
     assert "BULL / BASE / BEAR" in prompt
     assert "gap" in prompt.lower()
     assert "INFORMATION GAPS" in prompt
@@ -649,26 +673,11 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
         task_id="root",
         description="root task",
         step_count=1,
-        as_of_utc="2026-03-30T00:00:00Z",
-        shared=SharedStateView(
-            {
-                "iran_enrichment_level@2024-01-01:2024-12-31": Fact(
-                    key="iran_enrichment_level@2024-01-01:2024-12-31",
-                    value={"percent": 60},
-                    source_task_id="root.0",
-                    grounded=True,
-                    as_of_utc="2026-03-30T00:00:00Z",
-                    time_scope="historical",
-                    target_start="2024-01-01",
-                    target_end="2024-12-31",
-                    source_urls=("https://example.com/source",),
-                )
-            },
-            [],
-        ),
+        as_of_kst="2026-03-30 09:00:00",
+        shared=SharedStateView({}, []),
         query="2026-03-30 기준으로 2024년 이란 상황 분석",
         query_analysis=QueryAnalysis(
-            as_of_utc="2026-03-30T00:00:00Z",
+            as_of_kst="2026-03-30 09:00:00",
             units=[
                 QueryUnit(
                     id="U-001",
@@ -704,13 +713,14 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
     await planner.decide(task, ctx)
 
     prompt = llm.calls[0]["prompt"]
-    system_prompt = llm.calls[0]["system_prompt"]
+    assert llm.calls[0]["system_prompt"] == ""
     assert "[QUERY_UNITS]" in prompt
+    assert "2024년 이란 상황 조사" in prompt
+    assert "[TEMPORAL_CONTRACT]" in prompt
     assert "time_scope=historical" in prompt
     assert "target_period=2024-01-01..2024-12-31" in prompt
-    assert "grounded=True" in prompt
-    assert "sources=1" in prompt
-    assert "As-of UTC timestamp: 2026-03-30T00:00:00Z" in system_prompt
+    assert "[SHARED_FACTS]" not in prompt  # fact layer removed
+    assert "As-of KST timestamp: 2026-03-30 09:00:00" in prompt
 
 
 @pytest.mark.asyncio
@@ -757,7 +767,7 @@ async def test_step_planner_drops_low_priority_sections_before_child_outputs() -
 
 
 @pytest.mark.asyncio
-async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval() -> None:
+async def test_step_planner_prompt_excludes_artifact_refs_and_keeps_results() -> None:
     llm = ScriptedLLM(
         [
             {
@@ -790,10 +800,6 @@ async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval()
                 description="existing child",
                 state=TaskState.DONE,
                 output={"summary": "finished"},
-                artifacts={
-                    "aggregation_report_path": "aggregation/report.md",
-                    "aggregation_raw_results_path": "aggregation/raw_results.json",
-                },
             )
         ],
         shared=SharedStateView({}, []),
@@ -805,10 +811,11 @@ async def test_step_planner_prompt_includes_artifact_refs_for_future_retrieval()
     await planner.decide(task, ctx)
 
     prompt = llm.calls[0]["prompt"]
-    assert "[LAST_TOOL_RESULT_ARTIFACTS]" in prompt
-    assert "execution_result_path=execution/result.md" in prompt
-    assert "[OUTPUT_ARTIFACTS]" in prompt
-    assert "aggregation_report_path=aggregation/report.md" in prompt
+    assert "[LAST_TOOL_RESULT]" in prompt
+    assert "| A | B |" in prompt
+    assert "root.0: done - existing child" in prompt
+    assert "execution/result.md" not in prompt
+    assert "aggregation/report.md" not in prompt
 
 
 @pytest.mark.asyncio
@@ -847,7 +854,7 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
         task_id="root",
         description="mixed market identifier task",
         step_count=0,
-        as_of_utc="2026-03-30T00:00:00Z",
+        as_of_kst="2026-03-30 09:00:00",
         shared=SharedStateView({}, []),
         query="삼성전자와 Amazon 재무 조회",
         query_analysis=QueryAnalysis(
@@ -866,9 +873,114 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
     await planner.decide(task, ctx)
 
     prompt = llm.calls[0]["prompt"]
-    system_prompt = llm.calls[0]["system_prompt"]
     assert "[SUBJECTS]" in prompt
     assert "company_name=삼성전자; exchange=KOSPI; corp=삼성전자; stock_code=005930; yahoo_symbol=005930.KS" in prompt
     assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
     assert "opendart_financial_tool: args=corp, year, fs_div?" in prompt
     assert "Korean issuer only." in prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    task.failed_attempts = [
+        FailedAttempt(
+            tool_name="web_search_tool",
+            args={"query": "LS전선 경쟁사"},
+            error="Search failed",
+            kind="tool_error",
+        )
+    ]
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=0,
+        shared=SharedStateView({}, []),
+        query="LS전선 분석",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool", "opendart_financial_tool"],
+        evidence=[
+            EvidenceRow(
+                session_id="session-1",
+                tool_name="opendart_financial_tool",
+                stable_args_hash="opendart_financial_tool:{}",
+                status="satisfied",
+                value_summary="연결 재무제표 확보",
+                value_ref="tasks/root.0/execution/result.md",
+                task_id="root.0",
+                unit_objective="2024 재무제표 수집",
+                created_at="2026-04-16T10:00:00+09:00",
+                updated_at="2026-04-16T10:00:00+09:00",
+                stable_args={"corp": "LS전선", "year": 2024, "fs_div": "CFS"},
+            ),
+            EvidenceRow(
+                session_id="session-1",
+                tool_name="web_search_tool",
+                stable_args_hash='web_search_tool:{"query":"LS전선 경쟁사"}',
+                status="failed",
+                value_summary="Search failed",
+                value_ref="",
+                task_id="root.1",
+                unit_objective="경쟁사 확인",
+                created_at="2026-04-16T10:01:00+09:00",
+                updated_at="2026-04-16T10:01:00+09:00",
+                stable_args={"query": "LS전선 경쟁사"},
+            ),
+        ],
+    )
+
+    decision = await planner.decide(task, ctx)
+
+    assert decision.action is Action.AGGREGATE
+    prompt = llm.calls[0]["prompt"]
+    assert llm.calls[0]["system_prompt"] == ""
+    assert "[EVIDENCE]" in prompt
+    assert "opendart_financial_tool(corp=\"LS전선\", fs_div=\"CFS\", year=2024): satisfied" in prompt
+    assert "[FAILED_ATTEMPTS]" in prompt
+    assert "web_search_tool(query=\"LS전선 경쟁사\"): tool_error - Search failed" in prompt
+    assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"
+    assert "Do not create children that re-collect satisfied evidence" in llm.cache_requests[0][
+        "system_prompt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_step_planner_no_shared_facts_or_conflicts_in_prompt() -> None:
+    """After fact layer removal, [SHARED_FACTS] and [CONFLICTS] never appear."""
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "aggregate",
+                "output": "done",
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = ComplexTask(id="root", description="root task")
+    task.work_phase = TaskWorkPhase.SYNTHESIZE
+    ctx = TaskContext(
+        task_id="root",
+        description="root task",
+        step_count=0,
+        child_outputs={"root.0": {"summary": "done"}},
+        shared=SharedStateView({}, []),
+        query="분석",
+        query_analysis=QueryAnalysis(),
+        available_tools=["web_search_tool"],
+    )
+
+    await planner.decide(task, ctx)
+
+    prompt = llm.calls[0]["prompt"]
+    assert "[CHILD_OUTPUTS]" in prompt
+    assert "[SHARED_FACTS]" not in prompt
+    assert "[CONFLICTS]" not in prompt

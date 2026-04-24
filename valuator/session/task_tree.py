@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from valuator.core.task import Task
-from valuator.utils.time_utils import utc_isoformat
+from valuator.utils.time_utils import kst_isoformat
 
 from .trace import task_rel_path
 
@@ -32,7 +32,7 @@ def build_task_tree_snapshot(
     task_payloads: dict[str, dict[str, Any]] = {}
 
     def build(task: Task) -> dict[str, Any]:
-        created_at = task_created_at.setdefault(task.id, utc_isoformat())
+        created_at = task_created_at.setdefault(task.id, kst_isoformat())
         task_dir = tasks_dir / task_rel_path(task.id)
         children = task.children()
         task_type = "merge" if task.id == root_task_id or children else "leaf"
@@ -80,10 +80,11 @@ def build_task_tree_snapshot(
             "parent_id": task.parent_id,
             "description": task.description,
             "task_name": task.task_name,
+            "work_phase": task.work_phase.value,
             "state": task.state.value,
             "error": task.error,
             "created_at": created_at,
-            "updated_at": utc_isoformat(),
+            "updated_at": kst_isoformat(),
             "task_type": task_type,
             "query_unit_ids": query_unit_ids,
             "deps": list(plan_tasks[task.id]["deps"]),

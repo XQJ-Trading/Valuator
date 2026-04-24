@@ -10,6 +10,7 @@ from .boundary.query_analysis_payload import (
     _build_query_analysis,
     _response_schema,
 )
+from .boundary import enrich_krx_subjects
 from .company import ListingSeed
 from .query import QueryAnalysis
 
@@ -37,7 +38,7 @@ _QUERY_ANALYSIS_RULES = (
     "- units must be semantic retrieval units, not formatting instructions.",
     "- Every unit must include id, objective, retrieval_query, entity_ids, time_scope.",
     "- Every requirement must include acceptance, unit_ids, entity_ids, provenance. Requirements are for analytical content only, not formatting preferences or table styles.",
-    "- requirement unit_ids may refer to units by zero-based position, one-based position, or unit id string.",
+    "- requirement unit_ids may refer to units by zero-based position, one-based position, or each unit's id string (must match exactly; prefer copying ids from the units list).",
     "- Preserve the user's response intent and constraints, such as recommendation, screening, comparison, requested market, count, style lens, and actionability, instead of rewriting the query into a generic valuation essay.",
     "- If the query does not name a concrete company/security, do not invent placeholder company entities such as 'investment candidates'.",
     "- If the query is valuation/investment-related, prefer comprehensive analysis rather than omitting needed aspects.",
@@ -87,7 +88,7 @@ class QueryAnalyzer:
         self,
         *,
         query: str,
-        as_of_utc: str = "",
+        as_of_kst: str = "",
     ) -> QueryAnalysis:
         payload = await self.client.generate_json(
             prompt=_analysis_prompt(query=query),
@@ -95,9 +96,13 @@ class QueryAnalyzer:
             response_json_schema=_response_schema(),
             trace_method="query_analysis.analyze",
         )
-        return _build_query_analysis(
+        analysis = _build_query_analysis(
             payload,
             query=query,
             on_miss=self._on_miss,
-            as_of_utc=as_of_utc,
+            as_of_kst=as_of_kst,
         )
+        analysis.query_intent.subjects = enrich_krx_subjects(
+            analysis.query_intent.subjects,
+        )
+        return analysis

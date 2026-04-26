@@ -1,5 +1,6 @@
 import styles from "./DeveloperView.module.css";
 import UploadSessionCard from "./UploadSessionCard";
+import StepAnalysisCard from "./StepAnalysisCard";
 
 export default function DeveloperView() {
   return (
@@ -7,6 +8,7 @@ export default function DeveloperView() {
       <div className={styles.header}>Developer Tools</div>
       <div className={styles.scroll}>
         <UploadSessionCard />
+        <StepAnalysisCard />
       </div>
     </div>
   );

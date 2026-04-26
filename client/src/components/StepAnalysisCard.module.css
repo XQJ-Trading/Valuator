@@ -56,6 +56,25 @@
   border-color: var(--text-accent);
 }
 
+.searchInput {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  flex: 1;
+}
+
+.searchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.searchInput:focus {
+  border-color: var(--text-accent);
+}
+
 .row {
   display: flex;
   gap: 8px;

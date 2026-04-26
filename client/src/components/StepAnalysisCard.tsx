@@ -43,6 +43,7 @@ export default function StepAnalysisCard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     void loadSessions();
@@ -76,6 +77,7 @@ export default function StepAnalysisCard() {
     setError(null);
     setSteps([]);
     setExpandedRows(new Set());
+    setSearchQuery("");
 
     try {
       // Try to fetch the debug/steps directory
@@ -193,6 +195,15 @@ export default function StepAnalysisCard() {
     return taskId || "—";
   }
 
+  const query = searchQuery.trim().toLowerCase();
+  const filteredSteps = query
+    ? steps.filter(
+        (step) =>
+          step.prompt.toLowerCase().includes(query) ||
+          (step.response_text ?? "").toLowerCase().includes(query)
+      )
+    : steps;
+
   return (
     <div className={styles.card}>
       <div className={styles.cardHeader}>
@@ -228,6 +239,28 @@ export default function StepAnalysisCard() {
         </div>
       </div>
 
+      <div className={styles.section}>
+        <label className={styles.sectionLabel}>Search</label>
+        <div className={styles.row}>
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Filter by prompt or output..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={() => setSearchQuery("")}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       {loading && (
         <div className={styles.loading}>
           <span className={styles.spinner} />
@@ -241,7 +274,11 @@ export default function StepAnalysisCard() {
         <div className={styles.emptyState}>No debug data available</div>
       )}
 
-      {!loading && steps.length > 0 && (
+      {!loading && steps.length > 0 && filteredSteps.length === 0 && (
+        <div className={styles.emptyState}>No steps match "{searchQuery}"</div>
+      )}
+
+      {!loading && filteredSteps.length > 0 && (
         <div className={styles.tableWrapper}>
           <table className={styles.table}>
             <colgroup>
@@ -263,7 +300,7 @@ export default function StepAnalysisCard() {
               </tr>
             </thead>
             <tbody>
-              {steps.map((step) => {
+              {filteredSteps.map((step) => {
                 const isExpanded = expandedRows.has(step.llm_call_index);
                 const hasError = step.error !== null;
 

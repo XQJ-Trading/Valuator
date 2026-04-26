@@ -154,33 +154,28 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "yfinance_balance_sheet": ToolSpec(
         name="yfinance_balance_sheet",
         required=("ticker",),
-        optional=("year", "min_year"),
         capability=(
-            "Single-year financial statements plus valuation/pricing. "
-            "Call once per year for multi-year trend analysis. "
-            "Returns: balance sheet, income, cashflow, derived ratios, market data."
+            "Multi-year financial statements plus valuation/pricing for the temporal "
+            "contract's year range. Returns per-year rows: balance sheet, income, "
+            "cashflow, derived ratios, market data."
         ),
         param_descriptions={
             "ticker": "Market ticker for the target listing. Use US tickers like 'AAPL' for US listings. For Korean listings use the market/vendor ticker understood by yfinance, not the OpenDART corp field.",
-            "year": "Year (e.g., '2025') or 'latest' for the most recent available",
-            "min_year": "Minimum acceptable year when using 'latest'",
-        },
-        param_properties={
-            "min_year": {"type": "integer"},
         },
     ),
     "opendart_financial_tool": ToolSpec(
         name="opendart_financial_tool",
-        required=("corp", "year"),
+        required=("corp",),
         optional=("fs_div",),
-        capability="Korean company financial statements (BS/IS/CF) from DART filings",
+        capability=(
+            "Korean company financial statements (BS/IS/CF) from DART filings, "
+            "fetched for every year in the temporal contract's year range."
+        ),
         param_descriptions={
             "corp": "Korean issuer only. Pass the Korean company name or the 6-digit KRX stock_code (e.g., '삼성전자', '005930'). Never pass a US ticker here.",
-            "year": "Target year (e.g., 2024)",
             "fs_div": "'CFS' (consolidated, default) or 'OFS' (separate)",
         },
         param_properties={
-            "year": {"type": "integer"},
             "fs_div": {"type": "string", "enum": ["CFS", "OFS"]},
         },
     ),

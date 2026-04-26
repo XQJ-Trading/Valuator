@@ -6,6 +6,7 @@ from domain.boundary.opendart_financial import (
     clear_opendart_financial_cache,
     fetch_opendart_financial,
 )
+from domain.time import YearRange
 from valuator.tools.opendart_financial_tool import OpenDartFinancialTool
 
 
@@ -91,20 +92,15 @@ def test_fetch_opendart_financial_surfaces_dart_message(
 async def test_opendart_tool_falls_back_from_cfs_to_ofs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
+    calls: list[tuple[int, str]] = []
 
     monkeypatch.setattr(
         "valuator.tools.opendart_financial_tool.resolve_krx_corp_record",
         lambda corp: {"corp_code": "00126380"},
     )
 
-    def fake_fetch_with_error(
-        corp_code: str,
-        year: int,
-        reprt_code: str = "11011",
-        fs_div: str = "CFS",
-    ):
-        calls.append(fs_div)
+    def fake_fetch_with_error(*, corp_code: str, year: int, fs_div: str = "CFS"):
+        calls.append((year, fs_div))
         if fs_div == "CFS":
             return None, "no CFS rows"
         return {
@@ -128,17 +124,60 @@ async def test_opendart_tool_falls_back_from_cfs_to_ofs(
     )
 
     tool = OpenDartFinancialTool()
-    result = await tool.execute(corp="005930", year=2024)
+    result = await tool.execute(
+        corp="005930", year_range=YearRange(start=2024, end=2024)
+    )
 
     assert result.success is True
-    assert calls == ["CFS", "OFS"]
+    assert calls == [(2024, "CFS"), (2024, "OFS")]
     assert result.metadata["source"] == "opendart"
     assert result.metadata["corp_code"] == "00126380"
-    assert result.metadata["fs_div"] == "OFS"
-    assert result.result["free_cash_flow"] == 90.0
-    assert result.result["debt_to_equity"] == pytest.approx(400.0 / 600.0)
-    assert result.result["current_ratio"] == 2.0
-    assert result.result["interest_coverage"] == 4.0
+    assert result.metadata["fs_divs"] == ["OFS"]
+    assert result.result["year_range"] == "2024"
+    rows = result.result["results"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["year"] == 2024
+    assert row["free_cash_flow"] == 90.0
+    assert row["debt_to_equity"] == pytest.approx(400.0 / 600.0)
+    assert row["current_ratio"] == 2.0
+    assert row["interest_coverage"] == 4.0
+
+
+@pytest.mark.asyncio
+async def test_opendart_tool_aggregates_multi_year_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "valuator.tools.opendart_financial_tool.resolve_krx_corp_record",
+        lambda corp: {"corp_code": "00126380"},
+    )
+
+    def fake_fetch(*, corp_code: str, year: int, fs_div: str = "CFS"):
+        return {
+            "total_assets": 1000.0 + year,
+            "total_equity": 600.0,
+            "operating_income": 100.0,
+            "total_revenue": 500.0,
+            "net_income": 80.0,
+        }, None
+
+    monkeypatch.setattr(
+        "valuator.tools.opendart_financial_tool.fetch_opendart_financial",
+        fake_fetch,
+    )
+
+    tool = OpenDartFinancialTool()
+    result = await tool.execute(
+        corp="삼성전자", year_range=YearRange(start=2022, end=2024)
+    )
+
+    assert result.success is True
+    assert result.result["year_range"] == "2022-2024"
+    rows = result.result["results"]
+    assert [row["year"] for row in rows] == [2022, 2023, 2024]
+    assert rows[0]["total_assets"] == 3022.0
+    assert result.result["missing_years"] == []
 
 
 @pytest.mark.asyncio
@@ -151,7 +190,9 @@ async def test_opendart_tool_returns_web_fallback_when_corp_code_missing(
     )
 
     tool = OpenDartFinancialTool()
-    result = await tool.execute(corp="없는회사", year=2024)
+    result = await tool.execute(
+        corp="없는회사", year_range=YearRange(start=2024, end=2024)
+    )
 
     assert result.success is False
     assert result.error == "Corp code not found: 없는회사"
@@ -159,10 +200,22 @@ async def test_opendart_tool_returns_web_fallback_when_corp_code_missing(
 
 
 @pytest.mark.asyncio
-async def test_opendart_tool_rejects_ticker_arg_without_corp() -> None:
+async def test_opendart_tool_requires_corp() -> None:
     tool = OpenDartFinancialTool()
 
-    result = await tool.execute(ticker="005930", year=2024)
+    result = await tool.execute(
+        ticker="005930", year_range=YearRange(start=2024, end=2024)
+    )
 
     assert result.success is False
     assert result.error == "'corp' is required"
+
+
+@pytest.mark.asyncio
+async def test_opendart_tool_requires_year_range() -> None:
+    tool = OpenDartFinancialTool()
+
+    result = await tool.execute(corp="005930")
+
+    assert result.success is False
+    assert "year_range" in result.error

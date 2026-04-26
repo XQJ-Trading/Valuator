@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.query import QueryAnalysis, QueryUnit, summarize_temporal_contract
+from domain.query import (
+    QueryAnalysis,
+    QueryUnit,
+    TemporalContract,
+    summarize_temporal_contract,
+)
 from valuator.evidence import SqliteEvidenceStore
 from valuator.tools.base import ToolRegistry
 
@@ -174,20 +179,38 @@ def query_units_for_task(*, task: Task, analysis: QueryAnalysis) -> list[QueryUn
     return []
 
 
-# Tools whose args receive temporal fields here must match evidence lookup/record keys
-# (same dict passed to stable_args_hash after this enrichment).
-_TEMPORAL_ENRICH_TOOLS = frozenset({"web_search_tool"})
+# Per-tool temporal enrichment. The values returned here become part of the
+# tool's args (and thus its evidence stable_args), so the keys must match
+# what each tool's boundary expects.
+def _web_search_temporal(temporal: TemporalContract) -> dict[str, Any]:
+    return {
+        "as_of_kst": temporal.as_of_kst,
+        "time_scope": temporal.time_scope,
+        "target_start": temporal.target_start,
+        "target_end": temporal.target_end,
+    }
+
+
+def _financial_temporal(temporal: TemporalContract) -> dict[str, Any]:
+    return {"year_range": temporal.year_range}
+
+
+_TEMPORAL_ENRICHERS: dict[str, Any] = {
+    "web_search_tool": _web_search_temporal,
+    "yfinance_balance_sheet": _financial_temporal,
+    "opendart_financial_tool": _financial_temporal,
+}
 
 
 def enrich_tool_request(*, tool_request: Any, ctx: TaskContext) -> ToolRequest:
     args = dict(tool_request.args)
-    temporal = summarize_temporal_contract(
-        as_of_kst=ctx.as_of_kst,
-        units=ctx.query_units,
-    )
-    if tool_request.tool_name in _TEMPORAL_ENRICH_TOOLS:
-        for key in ("as_of_kst", "time_scope", "target_start", "target_end"):
-            value = getattr(temporal, key)
+    enricher = _TEMPORAL_ENRICHERS.get(tool_request.tool_name)
+    if enricher is not None:
+        temporal = summarize_temporal_contract(
+            as_of_kst=ctx.as_of_kst,
+            units=ctx.query_units,
+        )
+        for key, value in enricher(temporal).items():
             if value:
                 args.setdefault(key, value)
 

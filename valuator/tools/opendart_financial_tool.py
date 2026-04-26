@@ -2,18 +2,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from domain.boundary.krx_stock_price_collector import fetch_krx_daily_price_bar
 from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
 from domain.boundary.opendart_financial import fetch_opendart_financial
 from domain.knowledge.financial import DERIVED_DIFFERENCES, DERIVED_RATIOS
+from domain.time import YearRange
 from .base import BaseTool, ToolResult
 
 
 class OpenDartFinancialRequest(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     corp: str
-    year: int
+    year_range: YearRange
     fs_div: str = "CFS"
 
     @classmethod
@@ -21,19 +24,13 @@ class OpenDartFinancialRequest(BaseModel):
         corp = str(kwargs.get("corp") or "").strip()
         if not corp:
             raise ValueError("'corp' is required")
-        year = str(kwargs.get("year") or "").strip()
-        if not year:
-            raise ValueError("'year' is required")
-        try:
-            year_value = int(year)
-        except ValueError as exc:
-            raise ValueError("'year' must be an integer") from exc
+        year_range = kwargs.get("year_range")
+        if not isinstance(year_range, YearRange):
+            raise ValueError("'year_range' is required (injected from temporal contract)")
         fs_div = str(kwargs.get("fs_div") or "CFS").strip().upper()
         if fs_div not in {"CFS", "OFS"}:
             raise ValueError("'fs_div' must be 'CFS' or 'OFS'")
-        return cls.model_validate(
-            {"corp": corp, "year": year_value, "fs_div": fs_div}
-        )
+        return cls(corp=corp, year_range=year_range, fs_div=fs_div)
 
 
 class OpenDartFinancialTool(BaseTool):
@@ -60,73 +57,109 @@ class OpenDartFinancialTool(BaseTool):
                     "fallback": {
                         "tool_name": "web_search_tool",
                         "tool_args": {
-                            "query": f"{request.corp} financial statements {request.year}",
+                            "query": (
+                                f"{request.corp} financial statements "
+                                f"{request.year_range}"
+                            ),
                         },
                     },
                 },
             )
 
-        result, primary_err = fetch_opendart_financial(
-            corp_code=corp_code,
-            year=request.year,
-            fs_div=request.fs_div,
-        )
-        used_fs_div = request.fs_div
-        detail_err = primary_err
-        if result is None and request.fs_div == "CFS":
-            result, ofs_err = fetch_opendart_financial(
-                corp_code=corp_code,
-                year=request.year,
-                fs_div="OFS",
-            )
-            if result is not None:
-                used_fs_div = "OFS"
-            elif ofs_err:
-                if primary_err and primary_err != ofs_err:
-                    detail_err = f"CFS: {primary_err}; OFS: {ofs_err}"
-                else:
-                    detail_err = ofs_err or primary_err
+        current_price = _resolve_current_price(record)
 
-        if not result:
-            reason = detail_err or "unknown error"
+        per_year: list[dict[str, Any]] = []
+        missing: list[dict[str, Any]] = []
+        used_fs_divs: set[str] = set()
+
+        for year in request.year_range.years():
+            data, used_fs_div, error = _fetch_year(
+                corp_code=corp_code,
+                year=year,
+                preferred_fs_div=request.fs_div,
+            )
+            if data is None:
+                missing.append({"year": year, "error": error or "unknown error"})
+                continue
+            data["corp"] = request.corp
+            data["year"] = year
+            if current_price is not None:
+                data["current_price"] = current_price
+            _apply_derived_metrics(data)
+            data["findings"] = _build_findings(data)
+            per_year.append(data)
+            used_fs_divs.add(used_fs_div)
+
+        if not per_year:
+            reasons = "; ".join(f"{m['year']}: {m['error']}" for m in missing)
             return ToolResult(
                 success=False,
                 result=None,
                 error=(
-                    f"No financial data: corp={request.corp}, year={request.year} — {reason}"
+                    f"No financial data: corp={request.corp}, "
+                    f"year_range={request.year_range} — {reasons}"
                 ),
                 metadata={
-                    "dart_error": reason,
+                    "dart_errors": missing,
                     "fallback": {
                         "tool_name": "yfinance_balance_sheet",
-                        "tool_args": {"ticker": request.corp, "year": str(request.year)},
+                        "tool_args": {"ticker": request.corp},
                     },
                 },
             )
 
-        result["corp"] = request.corp
-        result["year"] = request.year
-
-        stock_code = record.get("stock_code", "")
-        if stock_code:
-            try:
-                bar = fetch_krx_daily_price_bar(f"KRX:{stock_code}")
-                result["current_price"] = bar.close_krw
-            except Exception:
-                pass
-
-        _apply_derived_metrics(result)
-        result["findings"] = _build_findings(result)
-
         return ToolResult(
             success=True,
-            result=result,
+            result={
+                "corp": request.corp,
+                "year_range": str(request.year_range),
+                "results": per_year,
+                "missing_years": missing,
+                "findings": "\n".join(item["findings"] for item in per_year),
+            },
             metadata={
                 "source": "opendart",
                 "corp_code": corp_code,
-                "fs_div": used_fs_div,
+                "fs_divs": sorted(used_fs_divs),
             },
         )
+
+
+def _fetch_year(
+    *,
+    corp_code: str,
+    year: int,
+    preferred_fs_div: str,
+) -> tuple[dict[str, float | None] | None, str, str | None]:
+    """Fetch one year, falling back from CFS to OFS when consolidated is empty."""
+    data, primary_err = fetch_opendart_financial(
+        corp_code=corp_code, year=year, fs_div=preferred_fs_div
+    )
+    if data is not None:
+        return data, preferred_fs_div, None
+
+    if preferred_fs_div != "CFS":
+        return None, preferred_fs_div, primary_err
+
+    data, ofs_err = fetch_opendart_financial(
+        corp_code=corp_code, year=year, fs_div="OFS"
+    )
+    if data is not None:
+        return data, "OFS", None
+
+    if primary_err and ofs_err and primary_err != ofs_err:
+        return None, preferred_fs_div, f"CFS: {primary_err}; OFS: {ofs_err}"
+    return None, preferred_fs_div, ofs_err or primary_err
+
+
+def _resolve_current_price(record: dict[str, Any]) -> float | None:
+    stock_code = record.get("stock_code", "")
+    if not stock_code:
+        return None
+    try:
+        return fetch_krx_daily_price_bar(f"KRX:{stock_code}").close_krw
+    except Exception:
+        return None
 
 
 def _apply_derived_metrics(result: dict[str, Any]) -> None:

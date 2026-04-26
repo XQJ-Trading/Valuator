@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from domain.knowledge.financial import (
     DERIVED_DIFFERENCES,
@@ -12,6 +11,7 @@ from domain.knowledge.financial import (
     STATEMENT_FIELDS,
     VALUATION_INFO_KEYS,
 )
+from domain.time import YearRange
 from .base import BaseTool, ToolResult
 
 FIELD_MAP = {field.canonical: field for field in STATEMENT_FIELDS}
@@ -37,35 +37,25 @@ CASHFLOW_FIELDS = (
 
 
 class YFinanceRequest(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     ticker: str
-    year: str = "latest"
-    min_year: int | None = None
+    year_range: YearRange
 
     @classmethod
     def from_kwargs(cls, kwargs: dict[str, Any]) -> "YFinanceRequest":
         ticker = str(kwargs.get("ticker") or kwargs.get("corp") or "").strip()
         if not ticker:
             raise ValueError("'ticker' is required")
-
-        year = str(kwargs.get("year") or kwargs.get("years") or "latest").strip()
-        raw_min_year = kwargs.get("min_year")
-        min_year = None if raw_min_year in (None, "") else int(raw_min_year)
-
-        return cls.model_validate(
-            {
-                "ticker": ticker,
-                "year": year or "latest",
-                "min_year": min_year,
-            }
-        )
-
-    def requested_year_label(self) -> str:
-        return self.year or "latest"
+        year_range = kwargs.get("year_range")
+        if not isinstance(year_range, YearRange):
+            raise ValueError("'year_range' is required (injected from temporal contract)")
+        return cls(ticker=ticker, year_range=year_range)
 
     def fallback_query(self) -> str:
         return (
             f"{self.ticker} balance sheet total assets total liabilities total equity "
-            f"market cap current price trailing pe price to book {self.requested_year_label()}"
+            f"market cap current price trailing pe price to book {self.year_range}"
         )
 
 
@@ -78,19 +68,13 @@ class LoadedStatements:
     info: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class YearSelection:
-    requested_year: str
-    chosen_year: str
-    tried_years: tuple[str, ...]
-
-
 class YFinanceBalanceSheetTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="yfinance_balance_sheet",
             description=(
-                "Fetch balance sheet metrics and core ratios for a given ticker and year using yfinance."
+                "Fetch balance sheet metrics and core ratios for a given ticker over a "
+                "year range using yfinance."
             ),
         )
 
@@ -126,66 +110,57 @@ class YFinanceBalanceSheetTool(BaseTool):
             )
 
         available_years = list(statements.balance_sheet.columns)
-        if not available_years:
-            return ToolResult(
-                success=False,
-                result=None,
-                error="No usable year found in balance sheet columns",
-                metadata={"available_years": available_years},
-            )
+        per_year: list[dict[str, Any]] = []
+        missing: list[int] = []
 
-        try:
-            year_selection = _resolve_year(
-                requested_year=request.requested_year_label(),
-                min_year=request.min_year,
-                available_years=available_years,
+        for year in request.year_range.years():
+            column = _match_year_column(year, available_years)
+            if column is None:
+                missing.append(year)
+                continue
+            row = _extract_year(
+                statements=statements,
+                year=year,
+                column=column,
             )
-        except ValueError as exc:
-            return ToolResult(
-                success=False,
-                result=None,
-                error=str(exc),
-                metadata={"available_years": available_years},
-            )
+            if _is_empty_row(row):
+                missing.append(year)
+                continue
+            _apply_valuation_info(row, statements.info)
+            _apply_derived_metrics(row)
+            row["findings"] = _build_findings(row)
+            per_year.append(row)
 
-        result, row_usage = _extract_result(
-            statements=statements,
-            year=year_selection.chosen_year,
-            requested_year=year_selection.requested_year,
-        )
-        if (
-            result["total_assets"] is None
-            and result["total_liabilities"] is None
-            and result["total_equity"] is None
-        ):
+        if not per_year:
             return ToolResult(
                 success=False,
                 result=None,
-                error="No balance sheet data found for given year/ticker",
+                error=(
+                    f"No balance sheet data found for {request.ticker} "
+                    f"in {request.year_range}"
+                ),
                 metadata={
                     "ticker": statements.ticker,
-                    "requested_year": year_selection.requested_year,
-                    "used_year": year_selection.chosen_year,
                     "available_years": available_years,
+                    "missing_years": missing,
                 },
             )
 
-        _apply_valuation_info(result, statements.info)
-        _apply_derived_metrics(result)
-        result["findings"] = _build_findings(result)
-
         return ToolResult(
             success=True,
-            result=result,
+            result={
+                "ticker": statements.ticker,
+                "year_range": str(request.year_range),
+                "results": per_year,
+                "missing_years": missing,
+                "findings": "\n".join(item["findings"] for item in per_year),
+            },
             metadata={
                 "source": "yfinance",
-                "assets_row": row_usage["total_assets"],
-                "liabilities_row": row_usage["total_liabilities"],
-                "equity_row": row_usage["total_equity"],
                 "available_years": available_years,
-                "year_selection": list(year_selection.tried_years),
             },
         )
+
 
 def _load_statements(yf_module: Any, ticker: str) -> LoadedStatements | None:
     ticker_client = yf_module.Ticker(ticker)
@@ -225,110 +200,55 @@ def _normalize_statement(statement: Any) -> Any | None:
     return statement
 
 
-def _resolve_year(
-    *,
-    requested_year: str,
-    min_year: int | None,
-    available_years: list[str],
-) -> YearSelection:
-    numeric_cols = [(column, int(column[:4])) for column in available_years if column[:4].isdigit()]
-    if requested_year.lower() == "latest":
-        current_year = datetime.now().year
-        year_candidates = [
-            column
-            for column, year in numeric_cols
-            if year <= current_year and (min_year is None or year >= min_year)
-        ]
-        if not year_candidates and min_year is not None:
-            year_candidates = [
-                column
-                for column, year in numeric_cols
-                if year <= current_year
-            ]
-        if not year_candidates:
-            raise ValueError("No usable year found in balance sheet columns")
-        chosen_year = max(year_candidates, key=lambda column: int(column[:4]))
-        return YearSelection(
-            requested_year=requested_year,
-            chosen_year=chosen_year,
-            tried_years=(requested_year, chosen_year),
-        )
-
-    if requested_year in available_years:
-        return YearSelection(
-            requested_year=requested_year,
-            chosen_year=requested_year,
-            tried_years=(requested_year,),
-        )
-
-    if requested_year[:4].isdigit() and numeric_cols:
-        target_year = int(requested_year[:4])
-        previous_years = [column for column, year in numeric_cols if year <= target_year]
-        chosen_year = (
-            max(previous_years, key=lambda column: int(column[:4]))
-            if previous_years
-            else min(numeric_cols, key=lambda item: abs(item[1] - target_year))[0]
-        )
-        return YearSelection(
-            requested_year=requested_year,
-            chosen_year=chosen_year,
-            tried_years=(requested_year, chosen_year),
-        )
-
-    return YearSelection(
-        requested_year=requested_year,
-        chosen_year=available_years[0],
-        tried_years=(requested_year, available_years[0]),
-    )
+def _match_year_column(year: int, available_years: list[str]) -> str | None:
+    """Pick the column whose leading 'YYYY' matches the requested year."""
+    target = str(year)
+    for column in available_years:
+        if column[:4] == target:
+            return column
+    return None
 
 
-def _extract_result(
+def _extract_year(
     *,
     statements: LoadedStatements,
-    year: str,
-    requested_year: str,
-) -> tuple[dict[str, Any], dict[str, str | None]]:
-    result = {
+    year: int,
+    column: str,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
         "ticker": statements.ticker,
-        "requested_year": requested_year,
         "year": year,
     }
-    row_usage: dict[str, str | None] = {
-        "total_assets": None,
-        "total_liabilities": None,
-        "total_equity": None,
-    }
-
     for canonical in BALANCE_SHEET_FIELDS:
-        value, row_name = _pick_field(statements.balance_sheet, canonical, year)
-        result[canonical] = value
-        if canonical in row_usage:
-            row_usage[canonical] = row_name
-
+        row[canonical], _ = _pick_field(statements.balance_sheet, canonical, column)
     for canonical in INCOME_FIELDS:
-        value, _ = _pick_field(statements.income_statement, canonical, year)
-        result[canonical] = value
-
+        row[canonical], _ = _pick_field(statements.income_statement, canonical, column)
     for canonical in CASHFLOW_FIELDS:
-        value, _ = _pick_field(statements.cashflow, canonical, year)
-        result[canonical] = value
+        row[canonical], _ = _pick_field(statements.cashflow, canonical, column)
+    return row
 
-    return result, row_usage
+
+def _is_empty_row(row: dict[str, Any]) -> bool:
+    return (
+        row.get("total_assets") is None
+        and row.get("total_liabilities") is None
+        and row.get("total_equity") is None
+    )
 
 
 def _pick_field(
     statement: Any | None,
     canonical: str,
-    year: str,
+    column: str,
 ) -> tuple[float | None, str | None]:
-    if statement is None or year not in statement.columns:
+    if statement is None or column not in statement.columns:
         return None, None
 
     field = FIELD_MAP[canonical]
     for row_name in field.aliases:
         if row_name not in statement.index:
             continue
-        value = statement.loc[row_name, year]
+        value = statement.loc[row_name, column]
         if hasattr(value, "iloc"):
             value = value.iloc[0]
         return float(value), row_name

@@ -32,7 +32,11 @@ interface StepData {
   error: string | null;
 }
 
-export default function StepAnalysisCard() {
+export default function StepAnalysisCard({
+  onSessionChange,
+}: {
+  onSessionChange?: (session: string) => void;
+}) {
   const pushToast = useToast();
 
   const [sessions, setSessions] = useState<string[]>([]);
@@ -51,6 +55,7 @@ export default function StepAnalysisCard() {
 
   useEffect(() => {
     if (selectedSession) {
+      onSessionChange?.(selectedSession);
       void loadSteps(selectedSession);
     }
   }, [selectedSession]);
@@ -64,7 +69,11 @@ export default function StepAnalysisCard() {
         .map((e) => e.name)
         .reverse();
       setSessions(dirs);
-      setSelectedSession((prev) => prev || dirs[0] || "");
+      const newSession = dirs[0] || "";
+      setSelectedSession(newSession);
+      if (newSession) {
+        onSessionChange?.(newSession);
+      }
     } catch (err) {
       pushToast({ type: "error", title: "세션 목록 로드 실패", message: String(err) });
     } finally {

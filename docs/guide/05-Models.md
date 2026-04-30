@@ -12,7 +12,6 @@
 
 | 제공자 | 주요 모델 (기본값) | 구현 파일 | 특징 |
 | :--- | :--- | :--- | :--- |
-| **Anthropic** | Claude 3.5 Sonnet / 3 Opus | `anthropic_client.py` | 정교한 추론 및 도구 사용 능력 |
 | **Google** | Gemini 2.0 Flash / Pro | `gemini_direct.py` | 빠른 속도와 긴 컨텍스트 윈도우 |
 | **OpenRouter** | Llama 3, Qwen 등 다양함 | `openrouter.py` | 오픈소스 모델 및 저비용 모델 접근 |
 
@@ -26,7 +25,7 @@
 from typing import Protocol, Any, dict
 
 class LLMClient(Protocol):
-    async def message(
+    async def generate(
         self,
         system: str,
         user: str,
@@ -34,7 +33,7 @@ class LLMClient(Protocol):
     ) -> str:
         """일반 텍스트 메시지 응답 반환"""
     
-    async def parse_json(
+    async def generate_json(
         self,
         system: str,
         user: str,
@@ -48,13 +47,13 @@ class LLMClient(Protocol):
 ## 3. 주요 구성 요소에서의 활용
 
 ### StepPlanner (의사 결정)
-LLM의 `parse_json` 기능을 사용하여 에이전트의 다음 행동(`TaskDecision`)을 결정합니다.
+LLM의 `generate_json` 기능을 사용하여 에이전트의 다음 행동(`TaskDecision`)을 결정합니다.
 
 ```python
 class StepPlanner:
     async def decide(self, task: Task, ctx: TaskContext) -> TaskDecision:
         # 프롬프트 생성 및 LLM 호출
-        response = await self._llm.parse_json(
+        response = await self._llm.generate_json(
             system=prompts.build_system_prompt(ctx),
             user=prompts.build_step_prompt(task, ctx),
             max_tokens=8192,
@@ -70,17 +69,18 @@ class StepPlanner:
 
 ## 4. 모델 선택 및 팩토리 패턴
 
-`get_llm_client` 함수를 통해 환경 변수나 요청 파라미터에 따라 적절한 클라이언트를 동적으로 생성합니다.
+`create_llm_client` 함수를 통해 환경 변수나 요청 파라미터에 따라 적절한 클라이언트를 동적으로 생성합니다.
 
 ```python
-def get_llm_client(model_type: str) -> LLMClient:
-    if model_type == "claude":
-        return AnthropicClient(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    elif model_type == "gemini":
-        return GeminiDirectClient(api_key=os.getenv("GOOGLE_API_KEY"))
-    elif model_type == "openrouter":
-        return OpenRouterClient(api_key=os.getenv("OPENROUTER_API_KEY"), model="meta-llama/llama-3-70b-instruct")
-    raise ValueError(f"지원하지 않는 모델 타입입니다: {model_type}")
+def create_llm_client(llm_backend: str = "google_genai", **kwargs) -> LLMClient:
+    if llm_backend == "google_genai":
+        return GeminiClient(api_key=os.getenv("GOOGLE_API_KEY"))
+    elif llm_backend == "openrouter":
+        return OpenRouterClient(
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            model=kwargs.get("model", "meta-llama/llama-3-70b-instruct")
+        )
+    raise ValueError(f"지원하지 않는 백엔드: {llm_backend}")
 ```
 
 ---

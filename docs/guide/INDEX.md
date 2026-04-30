@@ -18,9 +18,9 @@ LLM 기반 기업 가치 분석 플랫폼. 도메인 질의를 분해하여 다�
   - [공유 상태 (SharedState)](03-Core-Pipeline/06-Shared-State.md)
 
 ### 보조 시스템
-- [도구 시스템 (Tools)](04-Tools.md)
-- [LLM 모델 (Models)](05-Models.md)
-- [서버 API](06-Server-API.md)
+- [도구 시스템 (Tools)](04-Tools.md) — 도구 추가 및 도구 레지스트리
+- [LLM 모델 (Models)](05-Models.md) — 다중 LLM 제공자 지원 (Google Gemini, OpenRouter)
+- [서버 API](06-Server-API.md) — REST + SSE 통신, 세션 및 파일 시스템 관리
 
 ### 클라이언트
 - [클라이언트 상세](07-Client/index.md)

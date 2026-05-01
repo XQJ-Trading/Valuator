@@ -67,6 +67,7 @@ def fetch_opendart_financial(
         return None, "DART returned no line items for this corp/year/report/fs_div"
 
     result = _parse_items(items)
+    _backfill_operating_income(result)
     _fs_cache[cache_key] = result
     return result, None
 
@@ -83,3 +84,13 @@ def _parse_items(items: list[dict[str, Any]]) -> dict[str, float | None]:
             continue
         result[canonical] = float(raw_amount.replace(",", ""))
     return result
+
+
+def _backfill_operating_income(result: dict[str, float | None]) -> None:
+    # 일부 보고서는 영업이익을 별도 라인으로 제공하지 않아 매출총이익-판관비로 보정한다.
+    if result.get("operating_income") is not None:
+        return
+    gross_profit = result.get("gross_profit")
+    sga_expense = result.get("sga_expense")
+    if gross_profit is not None and sga_expense is not None:
+        result["operating_income"] = gross_profit - sga_expense

@@ -61,6 +61,36 @@ def test_fetch_opendart_financial_maps_response_and_caches(
     assert len(calls) == 1
 
 
+def test_fetch_opendart_financial_maps_operating_income_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "status": "000",
+                "list": [
+                    {"account_nm": "영업이익(손실)", "thstrm_amount": "120"},
+                ],
+            }
+
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.get_opendart_api_key",
+        lambda: "test-key",
+    )
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.requests.get",
+        lambda *_, **__: FakeResponse(),
+    )
+
+    data, err = fetch_opendart_financial("00126380", 2024)
+
+    assert data == {"operating_income": 120.0}
+    assert err is None
+
+
 def test_fetch_opendart_financial_surfaces_dart_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -173,6 +203,72 @@ async def test_opendart_tool_aggregates_multi_year_range(
     assert [row["year"] for row in rows] == [2022, 2023, 2024]
     assert rows[0]["total_assets"] == 3022.0
     assert result.result["missing_years"] == []
+
+
+def test_fetch_opendart_financial_backfills_operating_income_from_gross_profit_and_sga(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "status": "000",
+                "list": [
+                    {"account_nm": "매출총이익", "thstrm_amount": "346,792,172,979"},
+                    {"account_nm": "판매비와관리비", "thstrm_amount": "160,413,734,039"},
+                    {"account_nm": "매출액", "thstrm_amount": "2,308,571,092,877"},
+                ],
+            }
+
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.get_opendart_api_key",
+        lambda: "test-key",
+    )
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.requests.get",
+        lambda *_, **__: FakeResponse(),
+    )
+
+    data, err = fetch_opendart_financial("00126380", 2023)
+
+    assert err is None
+    assert data is not None
+    assert data["operating_income"] == 186_378_438_940.0
+
+
+def test_fetch_opendart_financial_keeps_explicit_operating_income(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "status": "000",
+                "list": [
+                    {"account_nm": "영업이익", "thstrm_amount": "100"},
+                    {"account_nm": "매출총이익", "thstrm_amount": "300"},
+                    {"account_nm": "판매비와관리비", "thstrm_amount": "150"},
+                ],
+            }
+
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.get_opendart_api_key",
+        lambda: "test-key",
+    )
+    monkeypatch.setattr(
+        "domain.boundary.opendart_financial.requests.get",
+        lambda *_, **__: FakeResponse(),
+    )
+
+    data, err = fetch_opendart_financial("00126380", 2023)
+
+    assert err is None
+    assert data is not None
+    assert data["operating_income"] == 100.0
 
 
 @pytest.mark.asyncio

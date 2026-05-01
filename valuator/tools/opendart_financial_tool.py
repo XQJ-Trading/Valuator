@@ -168,11 +168,16 @@ def _resolve_current_price(record: dict[str, Any]) -> float | None:
         return None
 
 
+# 정책: raw가 우선이다. 파생 계산은 raw가 결측일 때만 채워넣는다(backfill).
+# 회사가 비표준 방식으로 ebitda/margin/per 등을 보고해도 그 값을 신뢰하고,
+# 표준 공식 재계산으로 덮어씌우지 않는다.
 def _apply_derived_metrics(result: dict[str, Any]) -> None:
     for metric in DERIVED_RATIOS:
+        if result.get(metric.name) is not None:
+            continue
         numerator = result.get(metric.numerator)
         denominator = result.get(metric.denominator)
-        if numerator is None or denominator in (None, 0):
+        if numerator is None or denominator is None:
             continue
         denominator_value = abs(denominator) if metric.abs_denominator else denominator
         if not denominator_value:
@@ -180,6 +185,8 @@ def _apply_derived_metrics(result: dict[str, Any]) -> None:
         result[metric.name] = numerator / denominator_value
 
     for metric in DERIVED_DIFFERENCES:
+        if result.get(metric.name) is not None:
+            continue
         minuend = result.get(metric.minuend)
         subtrahend = result.get(metric.subtrahend)
         if minuend is None or subtrahend is None:
@@ -197,100 +204,147 @@ def _apply_derived_metrics(result: dict[str, Any]) -> None:
 
 
 def _calc_ebitda(result: dict[str, Any]) -> None:
+    if result.get("ebitda") is not None:
+        return
     operating_income = result.get("operating_income")
-    depreciation = result.get("depreciation", 0) or 0
-    amortization = result.get("amortization", 0) or 0
-    if operating_income is not None:
-        result["ebitda"] = operating_income + depreciation + amortization
+    depreciation = result.get("depreciation")
+    amortization = result.get("amortization")
+    if operating_income is None or depreciation is None or amortization is None:
+        return
+    result["ebitda"] = operating_income + depreciation + amortization
 
 
 def _calc_operating_margin(result: dict[str, Any]) -> None:
+    if result.get("operating_margin") is not None:
+        return
     operating_income = result.get("operating_income")
     total_revenue = result.get("total_revenue")
-    if operating_income is not None and total_revenue:
-        result["operating_margin"] = operating_income / total_revenue
+    if operating_income is None or not total_revenue:
+        return
+    result["operating_margin"] = operating_income / total_revenue
 
 
 def _calc_net_margin(result: dict[str, Any]) -> None:
+    if result.get("net_margin") is not None:
+        return
     net_income = result.get("net_income")
     total_revenue = result.get("total_revenue")
-    if net_income is not None and total_revenue:
-        result["net_margin"] = net_income / total_revenue
+    if net_income is None or not total_revenue:
+        return
+    result["net_margin"] = net_income / total_revenue
 
 
 def _calc_effective_tax_rate(result: dict[str, Any]) -> None:
+    if result.get("effective_tax_rate") is not None:
+        return
     tax_expense = result.get("tax_expense")
     net_income = result.get("net_income")
-    if net_income is None or tax_expense is None:
+    if tax_expense is None or net_income is None:
         return
     pretax_income = net_income + tax_expense
-    if pretax_income:
-        result["effective_tax_rate"] = tax_expense / pretax_income
+    if not pretax_income:
+        return
+    result["effective_tax_rate"] = tax_expense / pretax_income
 
 
 def _calc_working_capital(result: dict[str, Any]) -> None:
+    if result.get("working_capital") is not None:
+        return
     current_assets = result.get("current_assets")
     current_liabilities = result.get("current_liabilities")
-    if current_assets is not None and current_liabilities is not None:
-        result["working_capital"] = current_assets - current_liabilities
+    if current_assets is None or current_liabilities is None:
+        return
+    result["working_capital"] = current_assets - current_liabilities
 
 
 def _calc_net_debt(result: dict[str, Any]) -> None:
-    short_term_debt = result.get("short_term_debt", 0) or 0
-    long_term_debt = result.get("long_term_debt", 0) or 0
-    cash_and_equivalents = result.get("cash_and_equivalents", 0) or 0
-    total_debt = short_term_debt + long_term_debt
-    if total_debt:
-        result["total_debt"] = total_debt
-        result["net_debt"] = total_debt - cash_and_equivalents
+    short_term_debt = result.get("short_term_debt")
+    long_term_debt = result.get("long_term_debt")
+    cash_and_equivalents = result.get("cash_and_equivalents")
+    if (
+        short_term_debt is None
+        or long_term_debt is None
+        or cash_and_equivalents is None
+    ):
+        return
+    if result.get("total_debt") is None:
+        result["total_debt"] = short_term_debt + long_term_debt
+    if result.get("net_debt") is None:
+        result["net_debt"] = result["total_debt"] - cash_and_equivalents
 
 
 def _calc_shareholder_return(result: dict[str, Any]) -> None:
+    if result.get("total_shareholder_return") is not None:
+        return
     dividends_paid = result.get("dividends_paid")
     share_buyback = result.get("share_buyback")
-    if dividends_paid is None and share_buyback is None:
+    if dividends_paid is None or share_buyback is None:
         return
-    result["total_shareholder_return"] = abs(dividends_paid or 0) + abs(
-        share_buyback or 0
-    )
+    result["total_shareholder_return"] = abs(dividends_paid) + abs(share_buyback)
 
 
 def _calc_per_pbr(result: dict[str, Any]) -> None:
     current_price = result.get("current_price")
     if current_price is None:
         return
-    eps_basic = result.get("eps_basic")
-    if eps_basic and eps_basic > 0:
-        result["per"] = current_price / eps_basic
-    bps = result.get("bps")
-    if bps and bps > 0:
-        result["pbr"] = current_price / bps
+    if result.get("per") is None:
+        eps_basic = result.get("eps_basic")
+        if eps_basic is not None and eps_basic > 0:
+            result["per"] = current_price / eps_basic
+    if result.get("pbr") is None:
+        bps = result.get("bps")
+        if bps is not None and bps > 0:
+            result["pbr"] = current_price / bps
+
+
+_FINDINGS_KEYS: tuple[str, ...] = (
+    "corp",
+    "year",
+    # Balance Sheet
+    "total_assets",
+    "current_assets",
+    "total_liabilities",
+    "current_liabilities",
+    "short_term_debt",
+    "long_term_debt",
+    "cash_and_equivalents",
+    "total_equity",
+    "retained_earnings",
+    # Income Statement
+    "total_revenue",
+    "cost_of_revenue",
+    "gross_profit",
+    "sga_expense",
+    "operating_income",
+    "interest_expense",
+    "tax_expense",
+    "net_income",
+    "ebitda",
+    # Cash Flow
+    "operating_cash_flow",
+    "capex",
+    "free_cash_flow",
+    "dividends_paid",
+    # Derived
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "effective_tax_rate",
+    "debt_to_equity",
+    "current_ratio",
+    "interest_coverage",
+    "working_capital",
+    "total_debt",
+    "net_debt",
+    "total_shareholder_return",
+    "eps_basic",
+    "bps",
+    "per",
+    "pbr",
+)
 
 
 def _build_findings(result: dict[str, Any]) -> str:
-    keys = (
-        "corp",
-        "year",
-        "total_assets",
-        "total_equity",
-        "total_revenue",
-        "net_income",
-        "operating_income",
-        "ebitda",
-        "gross_margin",
-        "operating_margin",
-        "net_margin",
-        "debt_to_equity",
-        "current_ratio",
-        "net_debt",
-        "interest_coverage",
-        "operating_cash_flow",
-        "free_cash_flow",
-        "total_shareholder_return",
-        "eps_basic",
-        "eps_diluted",
-        "bps",
-        "per",
-        "pbr",
+    return ", ".join(
+        f"{key}={result[key]}" for key in _FINDINGS_KEYS if result.get(key) is not None
     )
-    return ", ".join(f"{key}={result.get(key)}" for key in keys if result.get(key) is not None)

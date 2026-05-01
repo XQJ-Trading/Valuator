@@ -135,39 +135,60 @@ VALUATION_INFO_KEYS: tuple[tuple[str, str], ...] = (
     ("currency", "currency"),
 )
 
-OPENDART_ACCOUNT_MAP: dict[str, str] = {
+# OpenDART 응답의 sj_div 코드. 같은 account_id가 BS/CIS/CF/SCE 여러 곳에 등장할 수
+# 있어(예: ifrs-full_ProfitLoss는 CIS·CF·SCE 모두에 출현), statement 필터 없이는
+# 마지막 값으로 덮어씌워져 0이 들어가는 회귀가 발생한다. 매핑은 항상 (코드, sj_div)로 한다.
+OPENDART_SJ_BS = "BS"
+OPENDART_SJ_CIS = "CIS"
+OPENDART_SJ_CF = "CF"
+
+# account_id(K-IFRS element id)를 1차 키로 사용한다.
+# `ifrs-full_*`는 IFRS 표준, `dart_*`는 한국 GAAP 확장.
+OPENDART_ACCOUNT_ID_MAP: dict[tuple[str, str], str] = {
     # Balance Sheet
-    "자산총계": "total_assets",
-    "유동자산": "current_assets",
-    "현금및현금성자산": "cash_and_equivalents",
-    "부채총계": "total_liabilities",
-    "유동부채": "current_liabilities",
-    "장기차입금": "long_term_debt",
-    "단기차입금": "short_term_debt",
-    "자본총계": "total_equity",
-    "이익잉여금": "retained_earnings",
+    ("ifrs-full_Assets", OPENDART_SJ_BS): "total_assets",
+    ("ifrs-full_CurrentAssets", OPENDART_SJ_BS): "current_assets",
+    ("ifrs-full_CashAndCashEquivalents", OPENDART_SJ_BS): "cash_and_equivalents",
+    ("ifrs-full_Liabilities", OPENDART_SJ_BS): "total_liabilities",
+    ("ifrs-full_CurrentLiabilities", OPENDART_SJ_BS): "current_liabilities",
+    ("dart_LongTermBorrowingsGross", OPENDART_SJ_BS): "long_term_debt",
+    ("ifrs-full_ShorttermBorrowings", OPENDART_SJ_BS): "short_term_debt",
+    ("ifrs-full_Equity", OPENDART_SJ_BS): "total_equity",
+    ("ifrs-full_RetainedEarnings", OPENDART_SJ_BS): "retained_earnings",
     # Income Statement
-    "매출액": "total_revenue",
-    "수익(매출액)": "total_revenue",
-    "매출원가": "cost_of_revenue",
-    "매출총이익": "gross_profit",
-    "판매비와관리비": "sga_expense",
-    "영업이익": "operating_income",
-    "영업이익(손실)": "operating_income",
-    "영업손익": "operating_income",
-    "영업손익(손실)": "operating_income",
-    "이자비용": "interest_expense",
-    "법인세비용": "tax_expense",
-    "당기순이익": "net_income",
-    "기본주당이익": "eps_basic",
-    "주당순자산": "bps",
+    ("ifrs-full_Revenue", OPENDART_SJ_CIS): "total_revenue",
+    ("ifrs-full_CostOfSales", OPENDART_SJ_CIS): "cost_of_revenue",
+    ("ifrs-full_GrossProfit", OPENDART_SJ_CIS): "gross_profit",
+    ("dart_TotalSellingGeneralAdministrativeExpenses", OPENDART_SJ_CIS): "sga_expense",
+    ("dart_OperatingIncomeLoss", OPENDART_SJ_CIS): "operating_income",
+    ("ifrs-full_FinanceCosts", OPENDART_SJ_CIS): "interest_expense",
+    ("ifrs-full_IncomeTaxExpenseContinuingOperations", OPENDART_SJ_CIS): "tax_expense",
+    ("ifrs-full_ProfitLoss", OPENDART_SJ_CIS): "net_income",
+    ("ifrs-full_BasicEarningsLossPerShare", OPENDART_SJ_CIS): "eps_basic",
     # Cash Flow
-    "영업활동현금흐름": "operating_cash_flow",
-    "영업활동으로인한현금흐름": "operating_cash_flow",
-    "유형자산의취득": "capex",
-    "배당금의지급": "dividends_paid",
-    "배당금지급": "dividends_paid",
-    "자기주식의취득": "share_buyback",
-    "감가상각비": "depreciation",
-    "무형자산상각비": "amortization",
+    (
+        "ifrs-full_CashFlowsFromUsedInOperatingActivities",
+        OPENDART_SJ_CF,
+    ): "operating_cash_flow",
+    (
+        "ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+        OPENDART_SJ_CF,
+    ): "capex",
+    (
+        "ifrs-full_DividendsPaidClassifiedAsFinancingActivities",
+        OPENDART_SJ_CF,
+    ): "dividends_paid",
+}
+
+# account_id가 비었거나 `-표준계정코드 미사용-` sentinel, 또는 회사 커스텀 코드인 경우
+# account_nm으로 fallback 매핑한다. K-IFRS Taxonomy로 표현되지 않는 한국 GAAP 특화
+# 항목에만 필요하다. nm도 statement에 따라 다른 의미일 수 있어 (nm, sj_div) 키를 쓴다.
+OPENDART_ACCOUNT_NM_MAP: dict[tuple[str, str], str] = {
+    ("매출액", OPENDART_SJ_CIS): "total_revenue",
+    ("주당순자산", OPENDART_SJ_CIS): "bps",
+    ("영업활동으로인한현금흐름", OPENDART_SJ_CF): "operating_cash_flow",
+    ("유형자산의취득", OPENDART_SJ_CF): "capex",
+    ("자기주식의취득", OPENDART_SJ_CF): "share_buyback",
+    ("감가상각비", OPENDART_SJ_CF): "depreciation",
+    ("무형자산상각비", OPENDART_SJ_CF): "amortization",
 }

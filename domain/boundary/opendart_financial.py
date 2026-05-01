@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from domain.knowledge.financial import OPENDART_ACCOUNT_MAP
+from domain.knowledge.financial import OPENDART_ACCOUNT_ID_MAP, OPENDART_ACCOUNT_NM_MAP
 from valuator.utils.config import get_opendart_api_key
 
 OPENDART_FINSTATE_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
@@ -73,11 +73,16 @@ def fetch_opendart_financial(
 
 
 def _parse_items(items: list[dict[str, Any]]) -> dict[str, float | None]:
-    """OpenDART response list -> canonical dict."""
+    """OpenDART response list -> canonical dict.
+
+    account_id(K-IFRS element id)를 1차 키로, account_nm을 fallback으로 매핑.
+    같은 canonical에 여러 row가 매칭되면 첫 row를 우선한다 — DART 응답은
+    재무제표 본문이 보통 앞쪽, 부속/주석 표가 뒤쪽에 와서 첫 매칭이 본문일 확률이 높다.
+    """
     result: dict[str, float | None] = {}
     for item in items:
-        canonical = OPENDART_ACCOUNT_MAP.get(str(item.get("account_nm") or ""))
-        if not canonical:
+        canonical = _resolve_canonical(item)
+        if not canonical or canonical in result:
             continue
         raw_amount = str(item.get("thstrm_amount") or "").strip()
         if not raw_amount or raw_amount == "-":
@@ -86,8 +91,18 @@ def _parse_items(items: list[dict[str, Any]]) -> dict[str, float | None]:
     return result
 
 
+def _resolve_canonical(item: dict[str, Any]) -> str | None:
+    sj_div = str(item.get("sj_div") or "")
+    if not sj_div:
+        return None
+    account_id = str(item.get("account_id") or "")
+    canonical = OPENDART_ACCOUNT_ID_MAP.get((account_id, sj_div))
+    if canonical:
+        return canonical
+    return OPENDART_ACCOUNT_NM_MAP.get((str(item.get("account_nm") or ""), sj_div))
+
+
 def _backfill_operating_income(result: dict[str, float | None]) -> None:
-    # 일부 보고서는 영업이익을 별도 라인으로 제공하지 않아 매출총이익-판관비로 보정한다.
     if result.get("operating_income") is not None:
         return
     gross_profit = result.get("gross_profit")

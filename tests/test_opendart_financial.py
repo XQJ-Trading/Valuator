@@ -310,7 +310,7 @@ async def test_opendart_tool_preserves_raw_values_against_derived_recompute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # 정책: raw가 우선이다. 응답에 ebitda/operating_margin/free_cash_flow 등이 이미
-    # 들어와 있으면 _calc_*나 DERIVED_RATIOS/DIFFERENCES가 덮어씌우면 안 된다.
+    # 들어와 있으면 compute_metrics가 표준 공식으로 덮어씌우면 안 된다.
     monkeypatch.setattr(
         "valuator.tools.opendart_financial_tool.resolve_krx_corp_record",
         lambda corp: {"corp_code": "00126380"},

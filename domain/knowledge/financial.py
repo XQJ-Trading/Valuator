@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable
 
 
 @dataclass(frozen=True, slots=True)
@@ -8,21 +9,6 @@ class StatementField:
     canonical: str
     aliases: tuple[str, ...]
     statement: str
-
-
-@dataclass(frozen=True, slots=True)
-class DerivedMetric:
-    name: str
-    numerator: str
-    denominator: str
-    abs_denominator: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class DerivedDifference:
-    name: str
-    minuend: str
-    subtrahend: str
 
 
 STATEMENT_FIELDS: tuple[StatementField, ...] = (
@@ -109,21 +95,48 @@ STATEMENT_FIELDS: tuple[StatementField, ...] = (
     ),
 )
 
-DERIVED_RATIOS: tuple[DerivedMetric, ...] = (
-    DerivedMetric("debt_to_equity", "total_liabilities", "total_equity"),
-    DerivedMetric("current_ratio", "current_assets", "current_liabilities"),
-    DerivedMetric("gross_margin", "gross_profit", "total_revenue"),
-    DerivedMetric(
-        "interest_coverage",
-        "operating_income",
-        "interest_expense",
-        abs_denominator=True,
+# 분석 지표. 각 항목은 (이름, 입력 키들, 공식). 공식은 입력값을 받아 결과를 반환.
+# raw 재무제표 라인을 조합해 만드는 분석용 지표이며, raw가 우선이다 — 응답에 이미
+# 같은 이름의 라인이 들어와 있으면 계산하지 않는다.
+Metric = tuple[str, tuple[str, ...], Callable[..., float]]
+
+METRICS: tuple[Metric, ...] = (
+    ("gross_margin", ("gross_profit", "total_revenue"), lambda g, r: g / r),
+    ("operating_margin", ("operating_income", "total_revenue"), lambda o, r: o / r),
+    ("net_margin", ("net_income", "total_revenue"), lambda n, r: n / r),
+    ("debt_to_equity", ("total_liabilities", "total_equity"), lambda li, eq: li / eq),
+    ("current_ratio", ("current_assets", "current_liabilities"), lambda ca, cl: ca / cl),
+    ("interest_coverage", ("operating_income", "interest_expense"), lambda op, ie: op / abs(ie)),
+    ("effective_tax_rate", ("tax_expense", "net_income"), lambda tx, ni: tx / (ni + tx)),
+    ("ebitda", ("operating_income", "depreciation", "amortization"), lambda op, dp, am: op + dp + am),
+    ("total_debt", ("short_term_debt", "long_term_debt"), lambda st, lt: st + lt),
+    ("net_debt", ("total_debt", "cash_and_equivalents"), lambda td, cs: td - cs),
+    ("working_capital", ("current_assets", "current_liabilities"), lambda ca, cl: ca - cl),
+    ("free_cash_flow", ("operating_cash_flow", "capex"), lambda o, c: o - c),
+    (
+        "total_shareholder_return",
+        ("dividends_paid", "share_buyback"),
+        lambda d, b: abs(d) + abs(b),
     ),
+    ("per", ("current_price", "eps_basic"), lambda p, e: p / e),
+    ("pbr", ("current_price", "bps"), lambda p, b: p / b),
 )
 
-DERIVED_DIFFERENCES: tuple[DerivedDifference, ...] = (
-    DerivedDifference("free_cash_flow", "operating_cash_flow", "capex"),
-)
+
+def compute_metrics(raw: dict[str, Any]) -> dict[str, Any]:
+    """raw 재무제표 라인에 분석 지표를 추가한 새 dict를 반환. raw가 우선."""
+    result = dict(raw)
+    for name, keys, formula in METRICS:
+        if result.get(name) is not None:
+            continue
+        values = [result.get(k) for k in keys]
+        if any(v is None for v in values):
+            continue
+        try:
+            result[name] = formula(*values)
+        except ZeroDivisionError:
+            continue
+    return result
 
 VALUATION_INFO_KEYS: tuple[tuple[str, str], ...] = (
     ("market_cap", "marketCap"),

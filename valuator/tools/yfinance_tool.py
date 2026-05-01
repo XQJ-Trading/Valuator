@@ -6,10 +6,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from domain.knowledge.financial import (
-    DERIVED_DIFFERENCES,
-    DERIVED_RATIOS,
     STATEMENT_FIELDS,
     VALUATION_INFO_KEYS,
+    compute_metrics,
 )
 from domain.time import YearRange
 from .base import BaseTool, ToolResult
@@ -128,7 +127,7 @@ class YFinanceBalanceSheetTool(BaseTool):
                 missing.append(year)
                 continue
             _apply_valuation_info(row, statements.info)
-            _apply_derived_metrics(row)
+            row = compute_metrics(row)
             row["findings"] = _build_findings(row)
             per_year.append(row)
 
@@ -259,25 +258,6 @@ def _pick_field(
 def _apply_valuation_info(result: dict[str, Any], info: dict[str, Any]) -> None:
     for result_key, info_key in VALUATION_INFO_KEYS:
         result[result_key] = info.get(info_key)
-
-
-def _apply_derived_metrics(result: dict[str, Any]) -> None:
-    for metric in DERIVED_RATIOS:
-        numerator = result.get(metric.numerator)
-        denominator = result.get(metric.denominator)
-        if numerator is None or denominator in (None, 0):
-            continue
-        denominator_value = abs(denominator) if metric.abs_denominator else denominator
-        if not denominator_value:
-            continue
-        result[metric.name] = numerator / denominator_value
-
-    for metric in DERIVED_DIFFERENCES:
-        minuend = result.get(metric.minuend)
-        subtrahend = result.get(metric.subtrahend)
-        if minuend is None or subtrahend is None:
-            continue
-        result[metric.name] = minuend - subtrahend
 
 
 def _build_findings(result: dict[str, Any]) -> str:

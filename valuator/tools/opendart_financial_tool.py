@@ -24,13 +24,19 @@ class OpenDartFinancialRequest(BaseModel):
         corp = str(kwargs.get("corp") or "").strip()
         if not corp:
             raise ValueError("'corp' is required")
-        year_range = kwargs.get("year_range")
-        if not isinstance(year_range, YearRange):
-            raise ValueError("'year_range' is required (injected from temporal contract)")
+        year_range = _year_range_from_kwargs(kwargs)
         fs_div = str(kwargs.get("fs_div") or "CFS").strip().upper()
         if fs_div not in {"CFS", "OFS"}:
             raise ValueError("'fs_div' must be 'CFS' or 'OFS'")
         return cls(corp=corp, year_range=year_range, fs_div=fs_div)
+
+
+def _year_range_from_kwargs(kwargs: dict[str, Any]) -> YearRange:
+    start = kwargs.get("start_year")
+    end = kwargs.get("end_year")
+    if start is None or end is None:
+        raise ValueError("'start_year' and 'end_year' are required")
+    return YearRange(start=int(start), end=int(end))
 
 
 class OpenDartFinancialTool(BaseTool):

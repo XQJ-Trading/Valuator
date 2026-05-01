@@ -6,7 +6,6 @@ from domain.boundary.opendart_financial import (
     clear_opendart_financial_cache,
     fetch_opendart_financial,
 )
-from domain.time import YearRange
 from valuator.tools.opendart_financial_tool import OpenDartFinancialTool
 
 
@@ -124,9 +123,7 @@ async def test_opendart_tool_falls_back_from_cfs_to_ofs(
     )
 
     tool = OpenDartFinancialTool()
-    result = await tool.execute(
-        corp="005930", year_range=YearRange(start=2024, end=2024)
-    )
+    result = await tool.execute(corp="005930", start_year=2024, end_year=2024)
 
     assert result.success is True
     assert calls == [(2024, "CFS"), (2024, "OFS")]
@@ -168,9 +165,7 @@ async def test_opendart_tool_aggregates_multi_year_range(
     )
 
     tool = OpenDartFinancialTool()
-    result = await tool.execute(
-        corp="삼성전자", year_range=YearRange(start=2022, end=2024)
-    )
+    result = await tool.execute(corp="삼성전자", start_year=2022, end_year=2024)
 
     assert result.success is True
     assert result.result["year_range"] == "2022-2024"
@@ -190,9 +185,7 @@ async def test_opendart_tool_returns_web_fallback_when_corp_code_missing(
     )
 
     tool = OpenDartFinancialTool()
-    result = await tool.execute(
-        corp="없는회사", year_range=YearRange(start=2024, end=2024)
-    )
+    result = await tool.execute(corp="없는회사", start_year=2024, end_year=2024)
 
     assert result.success is False
     assert result.error == "Corp code not found: 없는회사"
@@ -203,9 +196,7 @@ async def test_opendart_tool_returns_web_fallback_when_corp_code_missing(
 async def test_opendart_tool_requires_corp() -> None:
     tool = OpenDartFinancialTool()
 
-    result = await tool.execute(
-        ticker="005930", year_range=YearRange(start=2024, end=2024)
-    )
+    result = await tool.execute(ticker="005930", start_year=2024, end_year=2024)
 
     assert result.success is False
     assert result.error == "'corp' is required"
@@ -218,4 +209,4 @@ async def test_opendart_tool_requires_year_range() -> None:
     result = await tool.execute(corp="005930")
 
     assert result.success is False
-    assert "year_range" in result.error
+    assert "start_year" in result.error and "end_year" in result.error

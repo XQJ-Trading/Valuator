@@ -73,7 +73,7 @@ def test_build_task_context_includes_session_evidence(tmp_path) -> None:
             tool_name="opendart_financial_tool",
             stable_args_hash=stable_args_hash(
                 "opendart_financial_tool",
-                {"corp": "LS전선", "year_range": "2024", "fs_div": "CFS"},
+                {"corp": "LS전선", "start_year": 2024, "end_year": 2024, "fs_div": "CFS"},
             ),
             status="satisfied",
             value_summary="연결 재무제표 확보",
@@ -82,7 +82,7 @@ def test_build_task_context_includes_session_evidence(tmp_path) -> None:
             unit_objective="2024 재무제표 수집",
             created_at="2026-04-16T10:00:00+09:00",
             updated_at="2026-04-16T10:00:00+09:00",
-            stable_args={"corp": "LS전선", "year_range": "2024", "fs_div": "CFS"},
+            stable_args={"corp": "LS전선", "start_year": 2024, "end_year": 2024, "fs_div": "CFS"},
         )
     )
 

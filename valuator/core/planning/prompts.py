@@ -70,7 +70,7 @@ AGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확�
 미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.
 수집 불가한 requirement는 output에서 gap으로 명시하라.
 
-재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 한국 회사는 opendart_financial_tool, 그 외는 yfinance_balance_sheet를 한 번만 호출하라. 두 도구는 [TEMPORAL_CONTRACT]의 연도 범위를 자동으로 받아 다년치 결과를 반환한다. 단일 연도 데이터로 추세를 주장하지 마라.
+재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 한국 회사는 opendart_financial_tool, 그 외는 yfinance_balance_sheet를 한 번만 호출하라. 두 도구 모두 start_year, end_year(정수, inclusive)를 받아 한 번의 호출로 다년치 결과를 반환한다. [TEMPORAL_CONTRACT]의 target_period에서 연도를 읽어 그대로 넘겨라. 연도별로 호출을 쪼개지 마라. 단일 연도면 start_year=end_year로 설정하라. 단일 연도 데이터로 추세를 주장하지 마라.
 
 포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:
   - 비용 구조: SBC, CapEx, 영업 레버리지

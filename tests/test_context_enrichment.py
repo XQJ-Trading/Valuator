@@ -1,7 +1,6 @@
 """Tests for tool request enrichment (temporal contract)."""
 
 from domain.query import QueryUnit
-from domain.time import YearRange
 
 from valuator.core.agent.context_builder import enrich_tool_request
 from valuator.core.context import TaskContext
@@ -49,10 +48,10 @@ def test_enrich_web_search_injects_temporal_contract() -> None:
     assert req.args["time_scope"] == "historical"
     assert req.args["target_start"] == "2020-01-01"
     assert req.args["target_end"] == "2023-12-31"
-    assert "year_range" not in req.args
 
 
-def test_enrich_opendart_injects_year_range() -> None:
+def test_enrich_does_not_inject_year_range_for_financial_tools() -> None:
+    """Financial tools take start_year/end_year directly from the LLM."""
     ctx = _ctx_with_unit(
         QueryUnit(
             id="u0",
@@ -63,47 +62,15 @@ def test_enrich_opendart_injects_year_range() -> None:
             target_end="2023-12-31",
         )
     )
-    req = enrich_tool_request(
-        tool_request=ToolRequest(
-            tool_name="opendart_financial_tool",
-            args={"corp": "삼성전자"},
-        ),
-        ctx=ctx,
-    )
-    assert req.args["year_range"] == YearRange(start=2020, end=2023)
-    assert "target_start" not in req.args
-
-
-def test_enrich_yfinance_injects_year_range() -> None:
-    ctx = _ctx_with_unit(
-        QueryUnit(
-            id="u0",
-            objective="o",
-            retrieval_query="q",
-            time_scope="historical",
-            target_start="2024-01-01",
-            target_end="2024-12-31",
+    for tool_name, args in [
+        ("opendart_financial_tool", {"corp": "삼성전자"}),
+        ("yfinance_balance_sheet", {"ticker": "AMZN"}),
+    ]:
+        req = enrich_tool_request(
+            tool_request=ToolRequest(tool_name=tool_name, args=args),
+            ctx=ctx,
         )
-    )
-    req = enrich_tool_request(
-        tool_request=ToolRequest(
-            tool_name="yfinance_balance_sheet",
-            args={"ticker": "AMZN"},
-        ),
-        ctx=ctx,
-    )
-    assert req.args["year_range"] == YearRange(start=2024, end=2024)
-
-
-def test_enrich_skips_when_no_temporal_contract() -> None:
-    ctx = _ctx_with_unit(
-        QueryUnit(id="u0", objective="o", retrieval_query="q")
-    )
-    req = enrich_tool_request(
-        tool_request=ToolRequest(
-            tool_name="opendart_financial_tool",
-            args={"corp": "삼성전자"},
-        ),
-        ctx=ctx,
-    )
-    assert "year_range" not in req.args
+        assert "year_range" not in req.args
+        assert "start_year" not in req.args
+        assert "end_year" not in req.args
+        assert req.args == args

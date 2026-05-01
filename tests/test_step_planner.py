@@ -876,7 +876,7 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
     assert "[SUBJECTS]" in prompt
     assert "company_name=삼성전자; exchange=KOSPI; corp=삼성전자; stock_code=005930; yahoo_symbol=005930.KS" in prompt
     assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
-    assert "opendart_financial_tool: args=corp, fs_div?" in prompt
+    assert "opendart_financial_tool: args=corp, start_year, end_year, fs_div?" in prompt
     assert "Korean issuer only." in prompt
 
 
@@ -923,7 +923,8 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
                 stable_args={
                     "corp": "LS전선",
                     "fs_div": "CFS",
-                    "year_range": "2024",
+                    "start_year": 2024,
+                    "end_year": 2024,
                 },
             ),
             EvidenceRow(
@@ -949,7 +950,7 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
     assert llm.calls[0]["system_prompt"] == ""
     assert "[EVIDENCE]" in prompt
     assert (
-        "opendart_financial_tool(corp=\"LS전선\", fs_div=\"CFS\", year_range=\"2024\")"
+        "opendart_financial_tool(corp=\"LS전선\", end_year=2024, fs_div=\"CFS\", start_year=2024)"
         ": satisfied"
     ) in prompt
     assert "[FAILED_ATTEMPTS]" in prompt

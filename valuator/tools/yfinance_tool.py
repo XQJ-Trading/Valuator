@@ -47,10 +47,11 @@ class YFinanceRequest(BaseModel):
         ticker = str(kwargs.get("ticker") or kwargs.get("corp") or "").strip()
         if not ticker:
             raise ValueError("'ticker' is required")
-        year_range = kwargs.get("year_range")
-        if not isinstance(year_range, YearRange):
-            raise ValueError("'year_range' is required (injected from temporal contract)")
-        return cls(ticker=ticker, year_range=year_range)
+        start = kwargs.get("start_year")
+        end = kwargs.get("end_year")
+        if start is None or end is None:
+            raise ValueError("'start_year' and 'end_year' are required")
+        return cls(ticker=ticker, year_range=YearRange(start=int(start), end=int(end)))
 
     def fallback_query(self) -> str:
         return (

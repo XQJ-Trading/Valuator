@@ -182,6 +182,8 @@ def query_units_for_task(*, task: Task, analysis: QueryAnalysis) -> list[QueryUn
 # Per-tool temporal enrichment. The values returned here become part of the
 # tool's args (and thus its evidence stable_args), so the keys must match
 # what each tool's boundary expects.
+# Financial tools (yfinance/opendart) take start_year/end_year directly from
+# the LLM — no temporal injection — so the LLM owns the range explicitly.
 def _web_search_temporal(temporal: TemporalContract) -> dict[str, Any]:
     return {
         "as_of_kst": temporal.as_of_kst,
@@ -191,14 +193,8 @@ def _web_search_temporal(temporal: TemporalContract) -> dict[str, Any]:
     }
 
 
-def _financial_temporal(temporal: TemporalContract) -> dict[str, Any]:
-    return {"year_range": temporal.year_range}
-
-
 _TEMPORAL_ENRICHERS: dict[str, Any] = {
     "web_search_tool": _web_search_temporal,
-    "yfinance_balance_sheet": _financial_temporal,
-    "opendart_financial_tool": _financial_temporal,
 }
 
 

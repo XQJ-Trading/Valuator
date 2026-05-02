@@ -72,6 +72,7 @@ class TaskSpec:
     description: str
     task_name: str = ""
     tool_hint: str = ""
+    execution_tool: str = ""
     depends_on_siblings: list[int] = field(default_factory=list)
     query_unit_ids: list[int] = field(default_factory=list)
 

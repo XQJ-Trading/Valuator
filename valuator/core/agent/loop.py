@@ -24,6 +24,7 @@ from ..decomposition import (
     MCTSGateController,
     PassthroughGate,
 )
+from ..fact_extraction import augment_decision_with_official_facts
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
@@ -356,23 +357,19 @@ class Agent:
             invalid_error = "execute action missing tool_request"
         elif (
             decision.tool_request is not None
-            and ctx.available_tools
             and decision.tool_request.tool_name not in ctx.available_tools
         ):
-            error = f"tool not allowed: {decision.tool_request.tool_name}"
-            agent_trace.log_step_decision(
-                self._trace_writer,
-                task=task,
-                task_seq=task_seq,
-                ctx=ctx,
-                decision=decision,
-                status="failed",
-                started_at=started_at,
-                duration_ms=duration_ms,
-                error=error,
-            )
-            await self._fail_task(task, task_seq=task_seq, reason=error)
-            return False
+            if (
+                task.execution_tool
+                and decision.tool_request.tool_name != task.execution_tool
+            ):
+                invalid_error = (
+                    "execute action violates task execution_tool constraint: "
+                    f"required={task.execution_tool}, "
+                    f"received={decision.tool_request.tool_name}"
+                )
+            else:
+                invalid_error = f"tool not allowed: {decision.tool_request.tool_name}"
         elif decision.action is Action.EXECUTE and task.last_tool_success is True:
             invalid_error = (
                 "execute action is not allowed after a successful tool result; "
@@ -446,6 +443,38 @@ class Agent:
                     "execute action uses a tool blocked after repeated consecutive "
                     f"failures: {effective_request.tool_name}; "
                     "choose another tool or decompose"
+                ),
+            )
+            return None
+        if (
+            task.execution_tool
+            and effective_request.tool_name != task.execution_tool
+        ):
+            await self._reject_step(
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
+                error=(
+                    "execute action violates task execution_tool constraint: "
+                    f"required={task.execution_tool}, received={effective_request.tool_name}"
+                ),
+            )
+            return None
+        if effective_request.tool_name not in ctx.available_tools:
+            allowed = ", ".join(ctx.available_tools) or "(none)"
+            await self._reject_step(
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
+                error=(
+                    "execute action uses a tool outside this task's available tools: "
+                    f"{effective_request.tool_name}; available=[{allowed}]"
                 ),
             )
             return None
@@ -602,6 +631,11 @@ class Agent:
         ctx: TaskContext,
         decision: TaskDecision,
     ) -> None:
+        decision = augment_decision_with_official_facts(
+            task=task,
+            decision=decision,
+            ctx=ctx,
+        )
         self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
         if (
             self._session_store is not None

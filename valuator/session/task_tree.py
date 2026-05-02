@@ -51,6 +51,8 @@ def build_task_tree_snapshot(
                     "name": task.last_tool_request.tool_name,
                     "args": dict(task.last_tool_request.args),
                 }
+            elif task.execution_tool.strip():
+                tool = {"name": task.execution_tool.strip(), "args": {}}
             elif task.tool_hint.strip():
                 tool = {"name": task.tool_hint.strip(), "args": {}}
 
@@ -73,6 +75,7 @@ def build_task_tree_snapshot(
             "output": "execution/result.md" if task_type == "leaf" else "",
             "description": task.description,
             "task_name": task.task_name,
+            "execution_tool": task.execution_tool,
             "merge_instruction": "",
         }
         task_payloads[task.id] = {
@@ -80,6 +83,7 @@ def build_task_tree_snapshot(
             "parent_id": task.parent_id,
             "description": task.description,
             "task_name": task.task_name,
+            "execution_tool": task.execution_tool,
             "work_phase": task.work_phase.value,
             "state": task.state.value,
             "error": task.error,
@@ -114,7 +118,8 @@ def build_task_tree_snapshot(
 def render_tree_markdown(task: Task, depth: int = 0) -> str:
     indent = "  " * depth
     children = task.children()
-    kind = f"leaf: {task.tool_hint}" if not children and task.tool_hint.strip() else ""
+    leaf_tool = task.execution_tool.strip() or task.tool_hint.strip()
+    kind = f"leaf: {leaf_tool}" if not children and leaf_tool else ""
     suffix = f" ({kind})" if kind else ""
     name_snippet = (
         f" `{task.task_name.strip()}`" if str(task.task_name or "").strip() else ""

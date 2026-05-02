@@ -59,20 +59,10 @@ class OpenDartFinancialTool(BaseTool):
                 success=False,
                 result=None,
                 error=f"Corp code not found: {request.corp}",
-                metadata={
-                    "fallback": {
-                        "tool_name": "web_search_tool",
-                        "tool_args": {
-                            "query": (
-                                f"{request.corp} financial statements "
-                                f"{request.year_range}"
-                            ),
-                        },
-                    },
-                },
             )
 
         current_price = _resolve_current_price(record)
+        corp_name = str(record.get("corp_name") or "").strip()
 
         per_year: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
@@ -88,6 +78,8 @@ class OpenDartFinancialTool(BaseTool):
                 missing.append({"year": year, "error": error or "unknown error"})
                 continue
             data["corp"] = request.corp
+            if corp_name:
+                data["corp_name"] = corp_name
             data["year"] = year
             if current_price is not None:
                 data["current_price"] = current_price
@@ -208,7 +200,7 @@ _FINDINGS_KEYS: tuple[str, ...] = (
     "total_debt",
     "net_debt",
     "total_shareholder_return",
-    "eps_basic",
+    "eps",
     "bps",
     "per",
     "pbr",

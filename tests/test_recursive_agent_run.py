@@ -255,6 +255,65 @@ async def test_invalid_decision_does_not_increment_step_count() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_rejects_tool_outside_task_execution_tool() -> None:
+    registry = ToolRegistry()
+    registry.register(DummyTool())
+    events: list[AgentEvent] = []
+
+    async def on_event(event: AgentEvent) -> None:
+        events.append(event)
+
+    llm = ScriptedLLM(
+        {
+            "root": [
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "web_search_tool",
+                        "args": {"query": "alpha"},
+                    },
+                },
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "dummy_tool",
+                        "args": {"value": "ok"},
+                    },
+                },
+                {
+                    "action": "aggregate",
+                },
+            ]
+        }
+    )
+    agent = Agent(
+        scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
+        shared_state=SharedState(),
+        tool_registry=registry,
+        llm_client=llm,  # type: ignore[arg-type]
+        query_analysis=QueryAnalysis(allowed_tools=["dummy_tool", "web_search_tool"]),
+        on_event=on_event,
+        step_planner=StepPlanner(llm, repair_retries=0),
+    )
+
+    root = ComplexTask(
+        id="root",
+        description="root valuation task",
+        execution_tool="dummy_tool",
+    )
+    output = await agent.run("alpha query", root)
+
+    assert output == {"findings": "value=ok"}
+    assert root.invalid_decision_count == 1
+    assert registry.get_tool("dummy_tool").calls == [{"value": "ok"}]  # type: ignore[union-attr]
+    assert any(
+        event.type == "failed"
+        and "violates task execution_tool" in str(event.detail.get("error"))
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_preserves_facts_only_child_output() -> None:
     llm = ScriptedLLM(
         {

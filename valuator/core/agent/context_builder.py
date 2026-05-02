@@ -103,7 +103,11 @@ def build_task_context(
         query=query,
         query_analysis=analysis,
         query_units=query_units,
-        available_tools=analysis.allowed_tools or registered_tools(tools),
+        available_tools=available_tools_for_task(
+            task=task,
+            analysis=analysis,
+            tools=tools,
+        ),
         evidence=_task_scoped_evidence(
             task=task,
             scheduler=scheduler,
@@ -163,6 +167,21 @@ def registered_tools(tools: ToolRegistry) -> list[str]:
         for tool_info in tools.list_tools()
         if isinstance(tool_info, dict) and "name" in tool_info
     )
+
+
+def available_tools_for_task(
+    *,
+    task: Task,
+    analysis: QueryAnalysis,
+    tools: ToolRegistry,
+) -> list[str]:
+    base_tools = analysis.allowed_tools or registered_tools(tools)
+    execution_tool = task.execution_tool.strip()
+    if not execution_tool:
+        return base_tools
+    if execution_tool not in set(base_tools):
+        return []
+    return [execution_tool]
 
 
 def query_units_for_task(*, task: Task, analysis: QueryAnalysis) -> list[QueryUnit]:

@@ -17,7 +17,7 @@ _RAG_BROKER_EXCLUSION_TAIL = (
     f"\n\n{RAG_SOURCE_POLICY_MARKER} "
     "Exclude sell-side/broker equity research unless the user explicitly asks for it; "
 )
-_VALID_INTENTS = {"general", "deep", "financial"}
+_VALID_INTENTS = {"general", "deep"}
 
 
 def _effective_search_query_for_rag(raw: str) -> str:

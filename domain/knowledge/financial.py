@@ -118,7 +118,7 @@ METRICS: tuple[Metric, ...] = (
         ("dividends_paid", "share_buyback"),
         lambda d, b: abs(d) + abs(b),
     ),
-    ("per", ("current_price", "eps_basic"), lambda p, e: p / e),
+    ("per", ("current_price", "eps"), lambda p, e: p / e),
     ("pbr", ("current_price", "bps"), lambda p, b: p / b),
 )
 
@@ -141,9 +141,8 @@ def compute_metrics(raw: dict[str, Any]) -> dict[str, Any]:
 VALUATION_INFO_KEYS: tuple[tuple[str, str], ...] = (
     ("market_cap", "marketCap"),
     ("current_price", "currentPrice"),
-    ("trailing_pe", "trailingPE"),
-    ("forward_pe", "forwardPE"),
-    ("price_to_book", "priceToBook"),
+    ("per", "trailingPE"),
+    ("pbr", "priceToBook"),
     ("enterprise_value", "enterpriseValue"),
     ("currency", "currency"),
 )
@@ -177,7 +176,7 @@ OPENDART_ACCOUNT_ID_MAP: dict[tuple[str, str], str] = {
     ("ifrs-full_FinanceCosts", OPENDART_SJ_CIS): "interest_expense",
     ("ifrs-full_IncomeTaxExpenseContinuingOperations", OPENDART_SJ_CIS): "tax_expense",
     ("ifrs-full_ProfitLoss", OPENDART_SJ_CIS): "net_income",
-    ("ifrs-full_BasicEarningsLossPerShare", OPENDART_SJ_CIS): "eps_basic",
+    ("ifrs-full_BasicEarningsLossPerShare", OPENDART_SJ_CIS): "eps",
     # Cash Flow
     (
         "ifrs-full_CashFlowsFromUsedInOperatingActivities",

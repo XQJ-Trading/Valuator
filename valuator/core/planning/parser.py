@@ -45,6 +45,7 @@ class _TaskSpecPayload(BaseModel):
     description: str
     task_name: str
     tool_hint: str = ""
+    execution_tool: str = ""
     depends_on_siblings: list[int] = Field(default_factory=list)
     query_unit_ids: list[int] = Field(default_factory=list)
 
@@ -72,6 +73,11 @@ class _TaskSpecPayload(BaseModel):
             if item not in normalized:
                 normalized.append(item)
         return normalized
+
+    @field_validator("execution_tool")
+    @classmethod
+    def validate_execution_tool(cls, value: str) -> str:
+        return value.strip()
 
 
 class StepIntentPayload(BaseModel):
@@ -208,6 +214,7 @@ def map_intent_to_task_decision(
                 description=child.description,
                 task_name=child.task_name,
                 tool_hint=child.tool_hint,
+                execution_tool=child.execution_tool,
                 depends_on_siblings=list(child.depends_on_siblings),
                 query_unit_ids=list(child.query_unit_ids),
             )
@@ -316,6 +323,7 @@ def map_intent_to_task_decision(
                     description=child.description,
                     task_name=child.task_name,
                     tool_hint=child.tool_hint,
+                    execution_tool=child.execution_tool,
                     depends_on_siblings=list(child.depends_on_siblings),
                     query_unit_ids=list(child.query_unit_ids),
                 )

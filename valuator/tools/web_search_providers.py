@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from ..utils.logger import logger
 
-SearchIntent = Literal["general", "deep", "financial"]
+SearchIntent = Literal["general", "deep"]
 
 
 def _truncate_at_sources_markdown_heading(raw: str) -> str:
@@ -74,7 +74,6 @@ class PerplexityProvider(_BaseProvider):
     _INTENT_TO_MODE: dict[SearchIntent, str] = {
         "general": "web",
         "deep": "academic",
-        "financial": "sec",
     }
 
     def _init_client(self, api_key: str) -> Any:
@@ -134,7 +133,6 @@ class TavilyProvider(_BaseProvider):
     _INTENT_TO_REQUEST: dict[SearchIntent, dict[str, Any]] = {
         "general": {"topic": "general", "search_depth": "basic"},
         "deep": {"topic": "general", "search_depth": "advanced"},
-        "financial": {"topic": "general", "search_depth": "advanced"},
     }
     _max_results = 5
     _include_answer: str | bool = "advanced"

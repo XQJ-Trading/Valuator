@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..task import Task
+from ..task import AtomicTask, Task
 from ..types import Action
 
 
@@ -9,6 +9,12 @@ def allowed_actions_for_task(
 ) -> list[Action]:
     actions = list(Action)
     if not allow_decompose:
+        actions = [action for action in actions if action is not Action.DECOMPOSE]
+    if (
+        isinstance(task, AtomicTask)
+        and (task.tool_hint or task.execution_tool)
+        and task.last_tool_success is not False
+    ):
         actions = [action for action in actions if action is not Action.DECOMPOSE]
     if task.last_tool_success is True:
         actions = [action for action in actions if action is not Action.EXECUTE]

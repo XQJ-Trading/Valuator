@@ -154,40 +154,6 @@ async def test_step_planner_salvages_tool_request_embedded_in_reason() -> None:
 
 
 @pytest.mark.asyncio
-async def test_step_planner_falls_back_invalid_web_search_intent_to_general() -> None:
-    llm = ScriptedLLM(
-        [
-            {
-                "action": "execute",
-                "tool_request": {
-                    "tool_name": "web_search_tool",
-                    "args": {
-                        "query": "Amazon competitive strategy",
-                        "search_intent": "web",
-                    },
-                },
-            },
-        ]
-    )
-    planner = StepPlanner(llm, repair_retries=1)
-    task = AtomicTask(
-        id="root.0",
-        description="collect Amazon segment data",
-        tool_hint="web_search_tool",
-    )
-
-    decision = await planner.decide(task, _context(available_tools=["web_search_tool"]))
-
-    assert decision.action.value == "execute"
-    assert decision.tool_request is not None
-    assert decision.tool_request.args == {
-        "query": "Amazon competitive strategy",
-        "search_intent": "general",
-    }
-    assert len(llm.calls) == 1
-
-
-@pytest.mark.asyncio
 async def test_step_planner_salvages_embedded_decompose_payload_from_reason() -> None:
     llm = ScriptedLLM(
         [
@@ -527,7 +493,6 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
 
     assert decision.action.value == "aggregate"
     assert llm.calls[0]["response_json_schema"]["$defs"]["Action"]["enum"] == [
-        "decompose",
         "wait",
         "aggregate",
         "finalize",
@@ -537,6 +502,33 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
     assert call["system_prompt"] == ""
     assert "This task already has a successful tool result." in call["prompt"]
     assert "You must not return EXECUTE." in call["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_step_planner_excludes_decompose_for_fresh_tool_leaf() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "execute",
+                "tool_request": {
+                    "tool_name": "web_search_tool",
+                    "args": {"query": "latest data"},
+                },
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = AtomicTask(
+        id="root.0",
+        description="collect data",
+        tool_hint="web_search_tool",
+    )
+
+    decision = await planner.decide(task, _context(available_tools=["web_search_tool"]))
+
+    assert decision.action.value == "execute"
+    action_enum = llm.calls[0]["response_json_schema"]["$defs"]["Action"]["enum"]
+    assert "decompose" not in action_enum
 
 
 @pytest.mark.asyncio

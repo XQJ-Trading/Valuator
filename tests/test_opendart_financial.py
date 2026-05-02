@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from domain.boundary.opendart_financial import (
@@ -306,6 +308,44 @@ async def test_opendart_tool_aggregates_multi_year_range(
 
 
 @pytest.mark.asyncio
+async def test_opendart_tool_computes_per(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "valuator.tools.opendart_financial_tool.resolve_krx_corp_record",
+        lambda corp: {
+            "corp_code": "00126380",
+            "stock_code": "079550",
+            "corp_name": "LIG넥스원",
+        },
+    )
+    monkeypatch.setattr(
+        "valuator.tools.opendart_financial_tool.fetch_krx_daily_price_bar",
+        lambda listing_id: SimpleNamespace(close_krw=941000),
+    )
+
+    def fake_fetch(*, corp_code: str, year: int, fs_div: str = "CFS"):
+        return {
+            "total_revenue": 500.0,
+            "net_income": 80.0,
+            "eps": 11604.0,
+        }, None
+
+    monkeypatch.setattr(
+        "valuator.tools.opendart_financial_tool.fetch_opendart_financial",
+        fake_fetch,
+    )
+
+    tool = OpenDartFinancialTool()
+    result = await tool.execute(corp="079550", start_year=2025, end_year=2025)
+
+    row = result.result["results"][0]
+    assert row["per"] == pytest.approx(941000 / 11604)
+    assert "trailing_per" not in row
+    assert row["corp_name"] == "LIG넥스원"
+
+
+@pytest.mark.asyncio
 async def test_opendart_tool_preserves_raw_values_against_derived_recompute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -346,7 +386,7 @@ async def test_opendart_tool_preserves_raw_values_against_derived_recompute(
 
 
 @pytest.mark.asyncio
-async def test_opendart_tool_returns_web_fallback_when_corp_code_missing(
+async def test_opendart_tool_does_not_return_web_fallback_when_corp_code_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -359,7 +399,7 @@ async def test_opendart_tool_returns_web_fallback_when_corp_code_missing(
 
     assert result.success is False
     assert result.error == "Corp code not found: 없는회사"
-    assert result.metadata["fallback"]["tool_name"] == "web_search_tool"
+    assert "fallback" not in result.metadata
 
 
 @pytest.mark.asyncio

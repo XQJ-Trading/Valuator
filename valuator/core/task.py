@@ -24,6 +24,7 @@ class Task(ABC):
         description: str,
         task_name: str = "",
         tool_hint: str = "",
+        execution_tool: str = "",
         query_unit_ids: list[int] | None = None,
         decide: TaskStepDecider | None = None,
     ) -> None:
@@ -31,6 +32,7 @@ class Task(ABC):
         self.description = description
         self.task_name = task_name
         self.tool_hint = tool_hint
+        self.execution_tool = execution_tool
         self.query_unit_ids = list(query_unit_ids or [])
         self.state = TaskState.CREATED
         self.parent_id: str | None = None
@@ -66,6 +68,7 @@ class Task(ABC):
 
     def copy_runtime_to(self, target: "Task") -> "Task":
         target.task_name = self.task_name
+        target.execution_tool = self.execution_tool
         target.query_unit_ids = list(self.query_unit_ids)
         target.state = self.state
         target.parent_id = self.parent_id

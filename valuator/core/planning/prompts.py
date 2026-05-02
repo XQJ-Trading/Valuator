@@ -16,8 +16,8 @@ _TEMPORAL_ARG_KEYS = frozenset(
     {"as_of_kst", "time_scope", "target_start", "target_end"}
 )
 _LAST_TOOL_RESULT_MAX_CHARS = 4_000
-_CHILD_OUTPUT_MAX_CHARS = 2_500
-_CHILD_OUTPUT_SECTION_MAX_CHARS = 8_000
+_CHILD_OUTPUT_MAX_CHARS = 6_000
+_CHILD_OUTPUT_SECTION_MAX_CHARS = 18_000
 _CURRENT_CHILD_OUTPUT_MAX_CHARS = 800
 _EVIDENCE_SUMMARY_MAX_CHARS = 280
 
@@ -35,6 +35,7 @@ Treat [QUERY_UNITS] as the execution contract. Preserve as_of_kst and target per
 
 EXECUTE: a SINGLE tool call. MUST include tool_request with tool_name and args.
   - Use ONLY when you can name EXACTLY ONE tool and its args.
+  - If [AVAILABLE_TOOLS] is (none), do not EXECUTE.
 DECOMPOSE: break the task into smaller children. Requires at least one child.
   - Use when the task is too broad for a single tool call.
   - Check [EVIDENCE] before creating children.
@@ -42,6 +43,7 @@ DECOMPOSE: break the task into smaller children. Requires at least one child.
   - Do not repeat failed requests listed in [EVIDENCE] or [FAILED_ATTEMPTS].
   - Each child MUST include description.
   - If a likely execution tool is obvious, include tool_hint.
+  - If a child must use exactly one tool, include execution_tool. This is a hard runtime constraint, not a suggestion.
   - Never return children as an empty list. If you cannot name concrete children now, use EXECUTE, WAIT, AGGREGATE, or FAIL.
 WAIT: suspend until a sibling or dependency task is complete.
   - Requires wait_for (task ids).
@@ -57,10 +59,11 @@ AGGREGATE: collect child outputs and complete this task. Must include output or 
   - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.
   - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.
   - 상충하는 데이터가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.
+  - 공식 재무 도구(opendart_financial_tool, yfinance_balance_sheet)의 확정 재무제표와 현재가 기반 multiple은 web_search_tool 값으로 덮어쓰지 마라.
+  - PER는 단일 정의를 사용한다: PER = 현재가 ÷ 확정 EPS. 컨센서스·예상 EPS 기반의 forward PER을 만들지 마라. 자체 가정한 EPS·성장률로 PER을 합성하지 마라.
   - 동일 신뢰도에서 값이 다르면 정보 공백(information gap)으로 분류하라.
 FAIL: stop the task when it cannot continue with the available tools or facts.
 
-Use web_search_tool with search_intent='financial' for latest filing search, 10-Q, 8-K, DEF 14A, proxy, or EDGAR lookup tasks.
 Use sec_tool only for extracting data from a specific year's 10-K.
 For web_search_tool, pass query only; the runtime will inject as_of_kst/time_scope/target period.
 Prefer WAIT over inventing missing facts.
@@ -70,7 +73,9 @@ AGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확�
 미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.
 수집 불가한 requirement는 output에서 gap으로 명시하라.
 
-재무 추이 분석(성장률, CAGR, 마진 변동)이 필요하면 한국 회사는 opendart_financial_tool, 그 외는 yfinance_balance_sheet를 한 번만 호출하라. 두 도구 모두 start_year, end_year(정수, inclusive)를 받아 한 번의 호출로 다년치 결과를 반환한다. [TEMPORAL_CONTRACT]의 target_period에서 연도를 읽어 그대로 넘겨라. 연도별로 호출을 쪼개지 마라. 단일 연도면 start_year=end_year로 설정하라. 단일 연도 데이터로 추세를 주장하지 마라.
+재무 수치(보고 재무제표, 실적 EPS·EBITDA, 현재가 기반 trailing multiple, 성장률·CAGR·마진 등 확정 수치 기반 지표)는 한국 회사는 opendart_financial_tool, 그 외는 yfinance_balance_sheet로만 수집하라. 분석 대상 기업뿐 아니라 peer 그룹에도 동일하게 적용된다. 두 도구 모두 start_year, end_year(정수, inclusive)를 받아 한 번의 호출로 다년치 결과를 반환한다. [TEMPORAL_CONTRACT]의 target_period에서 연도를 읽어 그대로 넘겨라. 연도별로 호출을 쪼개지 마라. 단일 연도면 start_year=end_year로 설정하라. 단일 연도 데이터로 추세를 주장하지 마라.
+
+web_search_tool은 공식 재무 도구가 제공할 수 없는 정보에만 사용하라: peer 후보 식별, 뉴스·이벤트·정성 정보, 규제·정책·거버넌스 등 비수치 정보. 확정 재무 수치는 물론, 컨센서스·forward EPS·목표가·애널리스트 적용 멀티플 같은 시장 기대치 수치도 web_search_tool로 가져와 분석에 사용하지 마라. 멀티플(PER, EV/EBITDA 등)은 확정 재무·현재가에서 계산한 값만 사용한다.
 
 포괄적 밸류에이션을 위해, 분해 시 다음 차원을 커버하라:
   - 비용 구조: SBC, CapEx, 영업 레버리지
@@ -136,6 +141,7 @@ def build_system_prompt_suffix(
             [
                 "This task already has a successful tool result. You must not return EXECUTE.",
                 "Extract key numeric values from the tool result into the facts dict as key-value pairs.",
+                "For financial tool results, include valuation metrics such as per whenever present.",
                 schema_for_prompt(),
                 "Put interpretation and context in output; keep facts to numbers (and minimal labels) only.",
             ]
@@ -158,6 +164,16 @@ def build_system_prompt_suffix(
             "failures: "
             + ", ".join(sorted(task.blocked_tools))
             + ". Use a different tool or DECOMPOSE."
+        )
+    if not ctx.available_tools and Action.EXECUTE in allowed:
+        lines.append(
+            "No execution tool is available for this task. If the query units require "
+            "different tools, use DECOMPOSE to split them into tool-compatible children."
+        )
+    if task.execution_tool and Action.EXECUTE in allowed:
+        lines.append(
+            f"This task is constrained to execution_tool={task.execution_tool}. "
+            "Any EXECUTE tool_request must use that exact tool."
         )
     if task.tool_hint:
         lines.append(f"Prefer tool_hint={task.tool_hint} when EXECUTE is appropriate.")
@@ -206,6 +222,8 @@ def build_step_prompt(
         sections.append(("[QUERY_UNITS]", query_units_text(task, ctx)))
     if task.tool_hint:
         sections.append(("[TOOL_HINT]", task.tool_hint))
+    if task.execution_tool:
+        sections.append(("[EXECUTION_TOOL]", task.execution_tool))
     if task.blocked_tools:
         sections.append(("[BLOCKED_TOOLS]", ", ".join(sorted(task.blocked_tools))))
     if task.last_invalid_error:
@@ -330,6 +348,7 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
         "[DATA PRESERVATION]",
         "- Every number, ratio, and factual finding from child outputs MUST appear in the report.",
         "- Do NOT summarize away detail. The final report must be MORE comprehensive than any single child.",
+        "- PER is defined as current price divided by reported EPS from official financial tools. Do not introduce forward/consensus PER. Do not synthesize PER from assumed EPS or growth rates.",
         "",
         "[EVIDENCE — MULTIPLES, INTRINSIC, AND SCENARIOS]",
         "- Multiples: implied EV/EBITDA, P/E, P/FCF (or sector-appropriate), vs peers and vs own history where child data allows.",
@@ -358,13 +377,12 @@ def finalize_guidance_text(ctx: TaskContext) -> str:
             "- Use absolute dates: historical claims should stay inside the target period, and current claims should be anchored to as_of_kst.",
             "- grounded=false or unverified information must remain uncertainty, not present-tense fact.",
             "",
-            "[SCENARIOS — BULL / BASE / BEAR + TRADING HOOKS]",
-            "- Bull / Base / Bear with quantified reasoning (target metrics, not just narratives).",
+            "[SCENARIOS — BULL / BASE / BEAR]",
+            "- Bull / Base / Bear는 정성적 촉매·리스크와 그 발생 시 사업·재무에 미치는 방향성으로 서술하라.",
+            "- 시나리오별 목표 주가, 적용 PER, forward EPS·성장률 가정 등 자체 합성 정량값을 제시하지 마라. 컨센서스·forward 기반 정량 추정은 이 파이프라인에서 생산하지 않는다.",
+            "- 관찰 가능한 트리거(계약 공시, 규제 결정, 분기 실적의 정성적 방향)와 그것이 시나리오 간 전환을 유발하는 조건을 명시하라.",
             "- Key assumptions that differentiate each scenario.",
-            "- Rank uncertainties by magnitude of impact on valuation.",
-            "- 각 시나리오에 정량적 진입/이탈 조건: 목표가 구간, 멀티플 상·하단, 실적·성장률 trigger, 관찰 가능한 촉매/리스크 이벤트.",
-            "- 어떤 관찰 가능 지표가 변하면 시나리오 간 전환이 일어나는지 명시하라.",
-            "- Where child outputs lack price data, say so and still give multiple- and scenario-based hooks.",
+            "- Rank uncertainties by magnitude of impact on the thesis.",
             "",
             "[COVERAGE]",
             "- [REQUIREMENTS]의 모든 항목이 보고서 어딘가에서 충족되어야 한다.",
@@ -409,12 +427,13 @@ def subject_context_text(ctx: TaskContext) -> str:
     lines: list[str] = []
     for subject in subjects:
         listing = subject.listing
+        prefix = f"role={subject.role.value}; "
         if listing is None:
-            lines.append(f"company_name={subject.company.company_name}")
+            lines.append(f"{prefix}company_name={subject.company.company_name}")
             continue
         if listing.market == "KRX":
             line = (
-                f"company_name={subject.company.company_name}; exchange={listing.exchange}; "
+                f"{prefix}company_name={subject.company.company_name}; exchange={listing.exchange}; "
                 f"corp={subject.company.company_name}; stock_code={listing.security_code}; "
                 f"yahoo_symbol={listing.yahoo_symbol}"
             )
@@ -424,7 +443,7 @@ def subject_context_text(ctx: TaskContext) -> str:
             lines.append(line)
             continue
         lines.append(
-            f"company_name={subject.company.company_name}; exchange={listing.exchange}; "
+            f"{prefix}company_name={subject.company.company_name}; exchange={listing.exchange}; "
             f"ticker={listing.security_code}; yahoo_symbol={listing.yahoo_symbol}"
         )
     return "\n".join(lines)

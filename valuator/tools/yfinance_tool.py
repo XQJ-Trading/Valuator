@@ -52,12 +52,6 @@ class YFinanceRequest(BaseModel):
             raise ValueError("'start_year' and 'end_year' are required")
         return cls(ticker=ticker, year_range=YearRange(start=int(start), end=int(end)))
 
-    def fallback_query(self) -> str:
-        return (
-            f"{self.ticker} balance sheet total assets total liabilities total equity "
-            f"market cap current price trailing pe price to book {self.year_range}"
-        )
-
 
 @dataclass(frozen=True)
 class LoadedStatements:
@@ -91,13 +85,7 @@ class YFinanceBalanceSheetTool(BaseTool):
                 success=False,
                 result=None,
                 error=f"yfinance dependency is unavailable: {exc}",
-                metadata={
-                    "error_code": "dependency_missing",
-                    "fallback": {
-                        "tool_name": "web_search_tool",
-                        "tool_args": {"query": request.fallback_query()},
-                    },
-                },
+                metadata={"error_code": "dependency_missing"},
             )
 
         statements = _load_statements(yf, request.ticker)
@@ -267,8 +255,8 @@ def _build_findings(result: dict[str, Any]) -> str:
             f"year={result['year']}",
             f"market_cap={result.get('market_cap')}",
             f"current_price={result.get('current_price')}",
-            f"trailing_pe={result.get('trailing_pe')}",
-            f"price_to_book={result.get('price_to_book')}",
+            f"per={result.get('per')}",
+            f"pbr={result.get('pbr')}",
             f"total_revenue={result.get('total_revenue')}",
             f"net_income={result.get('net_income')}",
             f"debt_to_equity={result.get('debt_to_equity')}",

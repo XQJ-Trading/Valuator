@@ -78,7 +78,7 @@ class DecompositionCritic:
             qa = ctx.query_analysis
             subject_lines = []
             for subject in qa.query_intent.subjects:
-                line = subject.company.company_name
+                line = f"[{subject.role.value}] {subject.company.company_name}"
                 if subject.listing:
                     line += f" ({subject.listing.exchange}: {subject.listing.security_code})"
                 subject_lines.append(line)
@@ -89,6 +89,7 @@ class DecompositionCritic:
 
         child_lines = [
             f"{index}. description={child.description}; tool_hint={child.tool_hint or '-'}; "
+            f"execution_tool={child.execution_tool or '-'}; "
             f"depends_on_siblings={list(child.depends_on_siblings)}"
             for index, child in enumerate(decision.children)
         ]
@@ -122,6 +123,8 @@ class DecompositionCritic:
                     "- Are important analytical perspectives missing given the subject?",
                     "  Lower coverage_pct when the plan omits relevant areas or includes irrelevant ones.",
                     "- Does the plan follow the two-phase pattern? Phase 1 = data collection by information type, Phase 2 = analysis by perspective with depends_on_siblings referencing Phase 1.",
+                    "- Financial statements and PER/EV/EBITDA multiples (for the subject and for peers) must be collected via opendart_financial_tool (Korean) or yfinance_balance_sheet (others). Both tools return current_price alongside the financial figures, so PER is computed inside the tool — there is no need for a separate price-fetch step.",
+                    "- Peer comparison plans must decompose into one financial-tool child per peer (one opendart_financial_tool or yfinance_balance_sheet call per company); reject plans that handle peer valuation through a single web_search_tool call. web_search_tool is only valid for peer identification, news, and qualitative information; it must not be used to fetch financial figures or consensus/forward valuation estimates.",
                     "- Reject if Phase 1 children overlap in data sources, or if Phase 2 children lack depends_on_siblings.",
                     "- Do any tracks overlap or could they be consolidated?",
                     "Set allow=false if the plan fundamentally mismatches the subject.",

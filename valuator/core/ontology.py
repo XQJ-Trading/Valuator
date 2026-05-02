@@ -1,9 +1,8 @@
 """Ontology — domain metric schema for structured task output.
 
-Defines canonical property keys that tasks use when reporting quantitative
+Defines property keys that tasks use when reporting quantitative
 findings.  The ontology is injected into LLM prompts as an output format
-guide so that tasks produce consistently-keyed metrics without runtime
-alias matching.
+guide so that tasks produce consistently-keyed metrics.
 """
 
 from __future__ import annotations
@@ -13,12 +12,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PropertyDef:
-    """A single canonical metric definition."""
+    """A single metric definition."""
 
     key: str
     category: str  # "financial", "indicator", "price", "qualitative"
     value_type: str  # "numeric" | "text"
     unit_hint: str = ""
+    input_keys: tuple[str, ...] = ()
 
 
 # ─── Metric Registry ───────────────────────────────────────────────────────────
@@ -26,7 +26,13 @@ class PropertyDef:
 
 PROPERTIES: tuple[PropertyDef, ...] = (
     # Financial Statements
-    PropertyDef("revenue", "financial", "numeric", "KRW"),
+    PropertyDef(
+        "revenue",
+        "financial",
+        "numeric",
+        "KRW",
+        input_keys=("total_revenue",),
+    ),
     PropertyDef("operating_income", "financial", "numeric", "KRW"),
     PropertyDef("net_income", "financial", "numeric", "KRW"),
     PropertyDef("gross_profit", "financial", "numeric", "KRW"),
@@ -66,7 +72,13 @@ PROPERTIES: tuple[PropertyDef, ...] = (
     PropertyDef("earnings_growth", "indicator", "numeric", "%"),
     PropertyDef("net_margin", "indicator", "numeric", "%"),
     # Stock Price
-    PropertyDef("stock_price", "price", "numeric", "KRW"),
+    PropertyDef(
+        "stock_price",
+        "price",
+        "numeric",
+        "KRW",
+        input_keys=("current_price",),
+    ),
     PropertyDef("price_open", "price", "numeric", "KRW"),
     PropertyDef("price_high", "price", "numeric", "KRW"),
     PropertyDef("price_low", "price", "numeric", "KRW"),
@@ -83,19 +95,28 @@ PROPERTIES: tuple[PropertyDef, ...] = (
     PropertyDef("valuation_summary", "qualitative", "text"),
 )
 
-# ─── Lookup index ─────────────────────────────────────────────────────────────
+# ─── Result-Key Lookup ────────────────────────────────────────────────────────
 
-_BY_KEY: dict[str, PropertyDef] = {p.key: p for p in PROPERTIES}
+def _build_result_key_lookup(properties: tuple[PropertyDef, ...]) -> dict[str, str]:
+    property_keys = {p.key for p in properties}
+    result_key_to_property_key = {p.key: p.key for p in properties}
+
+    for prop in properties:
+        for input_key in prop.input_keys:
+            if input_key in property_keys:
+                raise ValueError(
+                    f"input key {input_key!r} collides with ontology property key"
+                )
+            existing = result_key_to_property_key.get(input_key)
+            if existing is not None and existing != prop.key:
+                raise ValueError(
+                    f"input key {input_key!r} maps to both {existing!r} and {prop.key!r}"
+                )
+            result_key_to_property_key[input_key] = prop.key
+    return result_key_to_property_key
 
 
-def lookup(key: str) -> PropertyDef | None:
-    """Return the PropertyDef for a canonical key, or None if unregistered."""
-    return _BY_KEY.get(key)
-
-
-def all_keys() -> list[str]:
-    """All canonical property keys (for prompt injection)."""
-    return [p.key for p in PROPERTIES]
+PROPERTY_KEY_BY_RESULT_KEY: dict[str, str] = _build_result_key_lookup(PROPERTIES)
 
 
 def schema_for_prompt() -> str:

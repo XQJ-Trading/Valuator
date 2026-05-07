@@ -1,7 +1,3 @@
-# Valuator
-
-LLM 기반 기업 가치 분석 플랫폼. 도메인 질의를 분해하여 다단계 파이프라인(Plan → Execute → Aggregate → Review)으로 분석 보고서를 생성한다.
-
 ## System Boundaries
 
 경계(boundary)는 외부 입력이 시스템에 진입하거나 떠나는 지점이다.

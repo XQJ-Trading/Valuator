@@ -36,6 +36,8 @@ def _known_metrics(raw: dict[str, Any]) -> dict[str, Any]:
     input_key_values: list[tuple[str, Any]] = []
 
     for key, value in raw.items():
+        if key == "current_price":
+            continue
         if not _has_fact_value(value):
             continue
         property_key = PROPERTY_KEY_BY_RESULT_KEY.get(key.strip())

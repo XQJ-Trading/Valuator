@@ -4,10 +4,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from domain.boundary.krx_stock_price_collector import fetch_krx_daily_price_bar
+from domain.boundary.krx_stock_price_collector import (
+    MarketValuation,
+    fetch_krx_valuation_snapshot,
+    fetch_krx_year_end_valuation,
+)
 from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
-from domain.boundary.opendart_financial import fetch_opendart_financial
+from domain.boundary.opendart_financial import YearFinancials, fetch_opendart_year
 from domain.knowledge.financial import compute_metrics
+from domain.knowledge.valuation import AnnualValuation
 from domain.time import YearRange
 from .base import BaseTool, ToolResult
 
@@ -61,32 +66,45 @@ class OpenDartFinancialTool(BaseTool):
                 error=f"Corp code not found: {request.corp}",
             )
 
-        current_price = _resolve_current_price(record)
-        corp_name = str(record.get("corp_name") or "").strip()
+        stock_code = str(record.get("stock_code") or "").strip()
+        corp_name = str(record.get("corp_name") or "").strip() or None
+        current_market = _resolve_current_market(stock_code)
 
         per_year: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
         used_fs_divs: set[str] = set()
 
         for year in request.year_range.years():
-            data, used_fs_div, error = _fetch_year(
+            financials, error = _fetch_year(
                 corp_code=corp_code,
                 year=year,
                 preferred_fs_div=request.fs_div,
             )
-            if data is None:
+            if financials is None:
                 missing.append({"year": year, "error": error or "unknown error"})
                 continue
-            data["corp"] = request.corp
-            if corp_name:
-                data["corp_name"] = corp_name
-            data["year"] = year
-            if current_price is not None:
-                data["current_price"] = current_price
-            data = compute_metrics(data)
-            data["findings"] = _build_findings(data)
-            per_year.append(data)
-            used_fs_divs.add(used_fs_div)
+
+            valuation = AnnualValuation(
+                corp=request.corp,
+                corp_name=corp_name,
+                year=year,
+                financials=financials,
+                market=_resolve_year_end_market(stock_code, year),
+            )
+            row = valuation.to_dict()
+            row = compute_metrics(row)
+            row["findings"] = _build_findings(row)
+            per_year.append(row)
+            used_fs_divs.add(financials.fs_div)
+            sources.append(
+                {
+                    "year": year,
+                    "rcept_no": financials.source_rcept_no,
+                    "restated": financials.restated,
+                    "fs_div": financials.fs_div,
+                }
+            )
 
         if not per_year:
             reasons = "; ".join(f"{m['year']}: {m['error']}" for m in missing)
@@ -113,12 +131,14 @@ class OpenDartFinancialTool(BaseTool):
                 "year_range": str(request.year_range),
                 "results": per_year,
                 "missing_years": missing,
+                "market_snapshot": _market_snapshot_dict(current_market),
                 "findings": "\n".join(item["findings"] for item in per_year),
             },
             metadata={
                 "source": "opendart",
                 "corp_code": corp_code,
                 "fs_divs": sorted(used_fs_divs),
+                "sources": sources,
             },
         )
 
@@ -128,41 +148,78 @@ def _fetch_year(
     corp_code: str,
     year: int,
     preferred_fs_div: str,
-) -> tuple[dict[str, float | None] | None, str, str | None]:
+) -> tuple[YearFinancials | None, str | None]:
     """Fetch one year, falling back from CFS to OFS when consolidated is empty."""
-    data, primary_err = fetch_opendart_financial(
+    financials, primary_err = fetch_opendart_year(
         corp_code=corp_code, year=year, fs_div=preferred_fs_div
     )
-    if data is not None:
-        return data, preferred_fs_div, None
+    if financials is not None:
+        return financials, None
 
     if preferred_fs_div != "CFS":
-        return None, preferred_fs_div, primary_err
+        return None, primary_err
 
-    data, ofs_err = fetch_opendart_financial(
+    financials, ofs_err = fetch_opendart_year(
         corp_code=corp_code, year=year, fs_div="OFS"
     )
-    if data is not None:
-        return data, "OFS", None
+    if financials is not None:
+        return financials, None
 
     if primary_err and ofs_err and primary_err != ofs_err:
-        return None, preferred_fs_div, f"CFS: {primary_err}; OFS: {ofs_err}"
-    return None, preferred_fs_div, ofs_err or primary_err
+        return None, f"CFS: {primary_err}; OFS: {ofs_err}"
+    return None, ofs_err or primary_err
 
 
-def _resolve_current_price(record: dict[str, Any]) -> float | None:
-    stock_code = record.get("stock_code", "")
+def _resolve_current_market(stock_code: str) -> MarketValuation | None:
     if not stock_code:
         return None
     try:
-        return fetch_krx_daily_price_bar(f"KRX:{stock_code}").close_krw
+        return fetch_krx_valuation_snapshot(f"KRX:{stock_code}")
     except Exception:
         return None
+
+
+def _resolve_year_end_market(stock_code: str, year: int) -> MarketValuation | None:
+    if not stock_code:
+        return None
+    try:
+        return fetch_krx_year_end_valuation(f"KRX:{stock_code}", year)
+    except Exception:
+        return None
+
+
+def _market_snapshot_dict(market: MarketValuation | None) -> dict[str, Any]:
+    if market is None:
+        return {}
+    snapshot: dict[str, Any] = {
+        "listing_id": market.listing_id,
+        "stock_price_as_of": market.as_of.isoformat(),
+    }
+    for key, value in (
+        ("stock_price", market.stock_price),
+        ("market_cap", market.market_cap),
+        ("shares_outstanding", market.shares_outstanding),
+        ("eps", market.eps),
+        ("bps", market.bps),
+        ("per", market.per),
+        ("pbr", market.pbr),
+        ("dividend_yield", market.dividend_yield),
+        ("dps", market.dps),
+    ):
+        if value is not None:
+            snapshot[key] = value
+    if market.stock_price is not None:
+        snapshot["current_price"] = market.stock_price
+    return snapshot
 
 
 _FINDINGS_KEYS: tuple[str, ...] = (
     "corp",
     "year",
+    "stock_price_as_of",
+    "source_rcept_no",
+    "source_bsns_year",
+    "restated",
     # Balance Sheet
     "total_assets",
     "current_assets",
@@ -200,6 +257,9 @@ _FINDINGS_KEYS: tuple[str, ...] = (
     "total_debt",
     "net_debt",
     "total_shareholder_return",
+    "stock_price",
+    "market_cap",
+    "shares_outstanding",
     "eps",
     "bps",
     "per",

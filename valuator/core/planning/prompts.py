@@ -59,8 +59,8 @@ AGGREGATE: collect child outputs and complete this task. Must include output or 
   - child들이 facts_only 결과만 냈다면, 빈 aggregate를 반환하지 말고 그 내용을 output 또는 facts에 담아라.
   - 검증 실패나 data gap을 확인된 사실처럼 승격하지 마라.
   - 상충하는 데이터가 있으면: 출처의 신뢰도(공시 > 거래소 > IR > 뉴스 > 증권사 > 커뮤니티)를 기준으로 판단하라.
-  - 공식 재무 도구(opendart_financial_tool, yfinance_balance_sheet)의 확정 재무제표와 현재가 기반 multiple은 web_search_tool 값으로 덮어쓰지 마라.
-  - PER는 단일 정의를 사용한다: PER = 현재가 ÷ 확정 EPS. 컨센서스·예상 EPS 기반의 forward PER을 만들지 마라. 자체 가정한 EPS·성장률로 PER을 합성하지 마라.
+  - 공식 재무 도구(opendart_financial_tool, yfinance_balance_sheet)의 확정 재무제표와 거래소/시장 데이터 기반 multiple은 web_search_tool 값으로 덮어쓰지 마라.
+  - PER는 단일 정의를 사용한다: 기준일 주가 ÷ 확정 EPS. 한국 회사의 연도별 PER/PBR은 연도말 KRX 시장 데이터 기준이며, 현재가 snapshot을 과거 연도 주가처럼 취급하지 마라. 컨센서스·예상 EPS 기반의 forward PER을 만들지 마라. 자체 가정한 EPS·성장률로 PER을 합성하지 마라.
   - 동일 신뢰도에서 값이 다르면 정보 공백(information gap)으로 분류하라.
 FAIL: stop the task when it cannot continue with the available tools or facts.
 
@@ -73,7 +73,7 @@ AGGREGATE/FINALIZE 전에 child outputs가 requirements를 커버하는지 확�
 미충족 requirement가 있고 추가 데이터 수집이 가능하면 DECOMPOSE를 선택하라.
 수집 불가한 requirement는 output에서 gap으로 명시하라.
 
-재무 수치(보고 재무제표, 실적 EPS·EBITDA, 현재가 기반 trailing multiple, 성장률·CAGR·마진 등 확정 수치 기반 지표)는 한국 회사는 opendart_financial_tool, 그 외는 yfinance_balance_sheet로만 수집하라. 분석 대상 기업뿐 아니라 peer 그룹에도 동일하게 적용된다. 두 도구 모두 start_year, end_year(정수, inclusive)를 받아 한 번의 호출로 다년치 결과를 반환한다. [TEMPORAL_CONTRACT]의 target_period에서 연도를 읽어 그대로 넘겨라. 연도별로 호출을 쪼개지 마라. 단일 연도면 start_year=end_year로 설정하라. 단일 연도 데이터로 추세를 주장하지 마라.
+재무 수치(보고 재무제표, 실적 EPS·EBITDA, 거래소/시장 데이터 기반 multiple, 성장률·CAGR·마진 등 확정 수치 기반 지표)는 한국 회사는 opendart_financial_tool, 그 외는 yfinance_balance_sheet로만 수집하라. 분석 대상 기업뿐 아니라 peer 그룹에도 동일하게 적용된다. 두 도구 모두 start_year, end_year(정수, inclusive)를 받아 한 번의 호출로 다년치 결과를 반환한다. [TEMPORAL_CONTRACT]의 target_period에서 연도를 읽어 그대로 넘겨라. 연도별로 호출을 쪼개지 마라. 단일 연도면 start_year=end_year로 설정하라. 단일 연도 데이터로 추세를 주장하지 마라.
 
 web_search_tool은 공식 재무 도구가 제공할 수 없는 정보에만 사용하라: peer 후보 식별, 뉴스·이벤트·정성 정보, 규제·정책·거버넌스 등 비수치 정보. 확정 재무 수치는 물론, 컨센서스·forward EPS·목표가·애널리스트 적용 멀티플 같은 시장 기대치 수치도 web_search_tool로 가져와 분석에 사용하지 마라. 멀티플(PER, EV/EBITDA 등)은 확정 재무·현재가에서 계산한 값만 사용한다.
 

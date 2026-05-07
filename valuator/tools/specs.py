@@ -170,8 +170,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         optional=("fs_div",),
         capability=(
             "Korean company financial statements (BS/IS/CF) from DART filings, "
-            "fetched for every year in [start_year, end_year] inclusive. Call once "
-            "per company for the full range; do not split by year."
+            "plus year-end KRX stock_price/EPS/BPS/PER/PBR fallback metrics, fetched "
+            "for every year in [start_year, end_year] inclusive. Call once per company "
+            "for the full range; do not split by year."
         ),
         param_descriptions={
             "corp": "Korean issuer only. Pass the Korean company name or the 6-digit KRX stock_code (e.g., '삼성전자', '005930'). Never pass a US ticker here.",

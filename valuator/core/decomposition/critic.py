@@ -123,7 +123,7 @@ class DecompositionCritic:
                     "- Are important analytical perspectives missing given the subject?",
                     "  Lower coverage_pct when the plan omits relevant areas or includes irrelevant ones.",
                     "- Does the plan follow the two-phase pattern? Phase 1 = data collection by information type, Phase 2 = analysis by perspective with depends_on_siblings referencing Phase 1.",
-                    "- Financial statements and PER/EV/EBITDA multiples (for the subject and for peers) must be collected via opendart_financial_tool (Korean) or yfinance_balance_sheet (others). Both tools return current_price alongside the financial figures, so PER is computed inside the tool — there is no need for a separate price-fetch step.",
+                    "- Financial statements and PER/PBR/EV/EBITDA multiples (for the subject and for peers) must be collected via opendart_financial_tool (Korean) or yfinance_balance_sheet (others). Korean annual PER/PBR should use year-end KRX market data and explicit basis dates; current-price snapshots must not be treated as historical annual prices.",
                     "- Peer comparison plans must decompose into one financial-tool child per peer (one opendart_financial_tool or yfinance_balance_sheet call per company); reject plans that handle peer valuation through a single web_search_tool call. web_search_tool is only valid for peer identification, news, and qualitative information; it must not be used to fetch financial figures or consensus/forward valuation estimates.",
                     "- Reject if Phase 1 children overlap in data sources, or if Phase 2 children lack depends_on_siblings.",
                     "- Do any tracks overlap or could they be consolidated?",

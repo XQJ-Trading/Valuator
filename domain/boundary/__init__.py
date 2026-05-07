@@ -14,6 +14,8 @@ from .krx_stock_price_collector import (
     fetch_krx_daily_price_bar,
     fetch_krx_latest_quote,
     fetch_krx_reference_for_company,
+    fetch_krx_valuation_snapshot,
+    fetch_krx_year_end_valuation,
     normalize_krx_stock_code,
 )
 from .krx_ticker_resolve import (
@@ -35,6 +37,8 @@ __all__ = [
     "fetch_krx_daily_price_bar",
     "fetch_krx_latest_quote",
     "fetch_krx_reference_for_company",
+    "fetch_krx_valuation_snapshot",
+    "fetch_krx_year_end_valuation",
     "krx_on_miss",
     "normalize_krx_stock_code",
     "resolve_krx_listing_seeds",

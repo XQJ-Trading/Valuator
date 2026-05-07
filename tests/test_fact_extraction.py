@@ -77,6 +77,7 @@ def test_augment_decision_promotes_official_financial_per_facts() -> None:
                 "year": 2025,
                 "total_revenue": 4306936127418,
                 "current_price": 941000,
+                "stock_price": 930000,
                 "eps": 11604,
                 "per": 81.09,
             },
@@ -88,8 +89,25 @@ def test_augment_decision_promotes_official_financial_per_facts() -> None:
     assert decision.facts["LIG넥스원:eps:2025"] == 11604
     assert decision.facts["LIG넥스원:revenue:2025"] == 4306936127418
     assert decision.facts["LIG넥스원:revenue:2024"] == 3276339508425
-    assert decision.facts["LIG넥스원:stock_price:2025"] == 941000
+    assert decision.facts["LIG넥스원:stock_price:2025"] == 930000
     assert "LIG넥스원:total_revenue:2025" not in decision.facts
+    assert "LIG넥스원:current_price:2025" not in decision.facts
+
+
+def test_augment_decision_does_not_promote_current_price_as_annual_stock_price() -> None:
+    decision = _decision_for_results(
+        [
+            {
+                "corp": "079550",
+                "corp_name": "LIG넥스원",
+                "year": 2025,
+                "current_price": 941000,
+                "eps": 11604,
+            },
+        ]
+    )
+
+    assert "LIG넥스원:stock_price:2025" not in decision.facts
     assert "LIG넥스원:current_price:2025" not in decision.facts
 
 

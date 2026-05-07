@@ -151,6 +151,7 @@ VALUATION_INFO_KEYS: tuple[tuple[str, str], ...] = (
 # 있어(예: ifrs-full_ProfitLoss는 CIS·CF·SCE 모두에 출현), statement 필터 없이는
 # 마지막 값으로 덮어씌워져 0이 들어가는 회귀가 발생한다. 매핑은 항상 (코드, sj_div)로 한다.
 OPENDART_SJ_BS = "BS"
+OPENDART_SJ_IS = "IS"
 OPENDART_SJ_CIS = "CIS"
 OPENDART_SJ_CF = "CF"
 
@@ -168,6 +169,15 @@ OPENDART_ACCOUNT_ID_MAP: dict[tuple[str, str], str] = {
     ("ifrs-full_Equity", OPENDART_SJ_BS): "total_equity",
     ("ifrs-full_RetainedEarnings", OPENDART_SJ_BS): "retained_earnings",
     # Income Statement
+    ("ifrs-full_Revenue", OPENDART_SJ_IS): "total_revenue",
+    ("ifrs-full_CostOfSales", OPENDART_SJ_IS): "cost_of_revenue",
+    ("ifrs-full_GrossProfit", OPENDART_SJ_IS): "gross_profit",
+    ("dart_TotalSellingGeneralAdministrativeExpenses", OPENDART_SJ_IS): "sga_expense",
+    ("dart_OperatingIncomeLoss", OPENDART_SJ_IS): "operating_income",
+    ("ifrs-full_FinanceCosts", OPENDART_SJ_IS): "interest_expense",
+    ("ifrs-full_IncomeTaxExpenseContinuingOperations", OPENDART_SJ_IS): "tax_expense",
+    ("ifrs-full_ProfitLoss", OPENDART_SJ_IS): "net_income",
+    ("ifrs-full_BasicEarningsLossPerShare", OPENDART_SJ_IS): "eps",
     ("ifrs-full_Revenue", OPENDART_SJ_CIS): "total_revenue",
     ("ifrs-full_CostOfSales", OPENDART_SJ_CIS): "cost_of_revenue",
     ("ifrs-full_GrossProfit", OPENDART_SJ_CIS): "gross_profit",

@@ -87,7 +87,7 @@ web_search_tool은 공식 재무 도구가 제공할 수 없는 정보에만 사
 
 If the task needs multiple tool calls, use DECOMPOSE instead.
 If you cannot name a specific tool and args, you MUST use DECOMPOSE, not EXECUTE.
-Prefer shallow decomposition when one tool call plus AGGREGATE is enough."""
+Prefer shallow decomposition when one tool call plus AGGREGATE is enough AND no unsatisfied [REQUIREMENTS] remain."""
 
 
 def static_system_prefix() -> str:

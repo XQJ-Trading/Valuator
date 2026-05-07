@@ -41,6 +41,8 @@ _QUERY_ANALYSIS_RULES = (
     "- Use web_search_tool only for units whose evidence can validly come from general web sources: news, qualitative events, policy/regulatory context, product/project status, peer discovery, and other non-reported facts.",
     "- Every requirement must include acceptance, unit_ids, entity_ids, provenance. Requirements are for analytical content only, not formatting preferences or table styles.",
     "- requirement unit_ids may refer to units by zero-based position, one-based position, or each unit's id string (must match exactly; prefer copying ids from the units list).",
+    "- If the query contains a markdown outline (headings like '# ...', '## ...', '### N) ...', or bullet lists), every leaf-level item (deepest heading or bullet) MUST become a requirement. Do not merge multiple leaves into one requirement unless they are truly inseparable; when you do merge, every merged leaf's text MUST appear verbatim in the acceptance field.",
+    "- The outline is the user's execution contract. You MAY ADD requirements beyond the outline (e.g., as-of date precision, peer baseline, cross-cutting checks) but MUST NOT drop, summarize away, or abstract any outline leaf.",
     "- Preserve the user's response intent and constraints, such as recommendation, screening, comparison, requested market, count, style lens, and actionability, instead of rewriting the query into a generic valuation essay.",
     "- If the query does not name a concrete company/security, do not invent placeholder company entities such as 'investment candidates'.",
     "- If the query is valuation/investment-related, prefer comprehensive analysis rather than omitting needed aspects.",

@@ -138,7 +138,7 @@ def compute_metrics(raw: dict[str, Any]) -> dict[str, Any]:
             continue
     return result
 
-VALUATION_INFO_KEYS: tuple[tuple[str, str], ...] = (
+MARKET_VIEW_KEYS: tuple[tuple[str, str], ...] = (
     ("market_cap", "marketCap"),
     ("current_price", "currentPrice"),
     ("per", "trailingPE"),

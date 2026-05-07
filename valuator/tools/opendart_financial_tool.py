@@ -5,14 +5,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from domain.boundary.krx_stock_price_collector import (
-    MarketValuation,
-    fetch_krx_valuation_snapshot,
-    fetch_krx_year_end_valuation,
+    MarketView,
+    fetch_krx_market_view,
+    fetch_krx_year_end_market_view,
 )
 from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
 from domain.boundary.opendart_financial import YearFinancials, fetch_opendart_year
+from domain.knowledge.annual_record import AnnualRecord
 from domain.knowledge.financial import compute_metrics
-from domain.knowledge.valuation import AnnualValuation
 from domain.time import YearRange
 from .base import BaseTool, ToolResult
 
@@ -85,14 +85,14 @@ class OpenDartFinancialTool(BaseTool):
                 missing.append({"year": year, "error": error or "unknown error"})
                 continue
 
-            valuation = AnnualValuation(
+            record = AnnualRecord(
                 corp=request.corp,
                 corp_name=corp_name,
                 year=year,
                 financials=financials,
                 market=_resolve_year_end_market(stock_code, year),
             )
-            row = valuation.to_dict()
+            row = record.to_dict()
             row = compute_metrics(row)
             row["findings"] = _build_findings(row)
             per_year.append(row)
@@ -170,25 +170,25 @@ def _fetch_year(
     return None, ofs_err or primary_err
 
 
-def _resolve_current_market(stock_code: str) -> MarketValuation | None:
+def _resolve_current_market(stock_code: str) -> MarketView | None:
     if not stock_code:
         return None
     try:
-        return fetch_krx_valuation_snapshot(f"KRX:{stock_code}")
+        return fetch_krx_market_view(f"KRX:{stock_code}")
     except Exception:
         return None
 
 
-def _resolve_year_end_market(stock_code: str, year: int) -> MarketValuation | None:
+def _resolve_year_end_market(stock_code: str, year: int) -> MarketView | None:
     if not stock_code:
         return None
     try:
-        return fetch_krx_year_end_valuation(f"KRX:{stock_code}", year)
+        return fetch_krx_year_end_market_view(f"KRX:{stock_code}", year)
     except Exception:
         return None
 
 
-def _market_snapshot_dict(market: MarketValuation | None) -> dict[str, Any]:
+def _market_snapshot_dict(market: MarketView | None) -> dict[str, Any]:
     if market is None:
         return {}
     snapshot: dict[str, Any] = {

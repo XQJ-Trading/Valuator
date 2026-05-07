@@ -18,8 +18,8 @@ _LOOKBACK_DAYS = 40
 
 
 @dataclass(frozen=True)
-class MarketValuation:
-    """KRX 시장 데이터 단일 시점 스냅샷. 기준일은 `as_of`."""
+class MarketView:
+    """KRX 시장이 한 시점에 매긴 가격·배수. 기준일은 `as_of`."""
 
     listing_id: str
     as_of: date
@@ -80,14 +80,14 @@ def fetch_krx_daily_price_bar(listing_id: str) -> DailyPriceBar:
     )
 
 
-def fetch_krx_valuation_snapshot(
+def fetch_krx_market_view(
     listing_id: str,
     *,
     end: date | None = None,
-) -> MarketValuation:
-    """KRX OHLCV + fundamental snapshot ending at `end`.
+) -> MarketView:
+    """KRX OHLCV + fundamental view ending at `end`.
 
-    For annual valuation, callers should pass the fiscal year-end date.
+    For annual records, callers should pass the fiscal year-end date.
     Raises if no data is available (no price and no fundamentals).
     """
     from pykrx import stock
@@ -140,9 +140,9 @@ def fetch_krx_valuation_snapshot(
         dps = _to_number(last_fundamental.get("DPS"), omit_zero=True)
 
     if as_of is None:
-        raise ValueError(f"no KRX valuation data for listing_id={canonical_id!r}")
+        raise ValueError(f"no KRX market view for listing_id={canonical_id!r}")
 
-    return MarketValuation(
+    return MarketView(
         listing_id=canonical_id,
         as_of=as_of,
         stock_price=stock_price,
@@ -157,16 +157,16 @@ def fetch_krx_valuation_snapshot(
     )
 
 
-def fetch_krx_year_end_valuation(
+def fetch_krx_year_end_market_view(
     listing_id: str,
     year: int,
-) -> MarketValuation:
-    """Year-end KRX market valuation for a fiscal year (clamped to today)."""
+) -> MarketView:
+    """Year-end KRX market view for a fiscal year (clamped to today)."""
     today = date.today()
     end = date(year, 12, 31)
     if end > today:
         end = today
-    return fetch_krx_valuation_snapshot(listing_id, end=end)
+    return fetch_krx_market_view(listing_id, end=end)
 
 
 def _to_number(value: Any, *, omit_zero: bool = False) -> float | None:

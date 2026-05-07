@@ -1,23 +1,23 @@
-"""Annual valuation: 재무(`YearFinancials`) + 연말 시장(`MarketValuation`) 결합."""
+"""Annual record: 재무(`YearFinancials`) + 연말 시장(`MarketView`) 결합."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-from domain.boundary.krx_stock_price_collector import MarketValuation
+from domain.boundary.krx_stock_price_collector import MarketView
 from domain.boundary.opendart_financial import YearFinancials
 
 
 @dataclass(frozen=True)
-class AnnualValuation:
+class AnnualRecord:
     """한 해 재무와 연말 시장 데이터의 결합. 직렬화 직전의 도메인 타입."""
 
     corp: str
     corp_name: str | None
     year: int
     financials: YearFinancials
-    market: MarketValuation | None
+    market: MarketView | None
 
     # ---- 시장 직접값 우선, 없으면 재무에서 유도 ------------------------------
 

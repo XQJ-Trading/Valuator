@@ -4,7 +4,7 @@ import pytest
 
 from datetime import date
 
-from domain.boundary.krx_stock_price_collector import MarketValuation
+from domain.boundary.krx_stock_price_collector import MarketView
 from domain.boundary.opendart_financial import (
     FetchOutcome,
     YearFinancials,
@@ -602,8 +602,8 @@ async def test_opendart_tool_computes_per(
         },
     )
     monkeypatch.setattr(
-        "valuator.tools.opendart_financial_tool.fetch_krx_valuation_snapshot",
-        lambda listing_id: MarketValuation(
+        "valuator.tools.opendart_financial_tool.fetch_krx_market_view",
+        lambda listing_id: MarketView(
             listing_id="KRX:079550",
             as_of=date(2026, 5, 7),
             stock_price=950000,
@@ -611,8 +611,8 @@ async def test_opendart_tool_computes_per(
         ),
     )
     monkeypatch.setattr(
-        "valuator.tools.opendart_financial_tool.fetch_krx_year_end_valuation",
-        lambda listing_id, year: MarketValuation(
+        "valuator.tools.opendart_financial_tool.fetch_krx_year_end_market_view",
+        lambda listing_id, year: MarketView(
             listing_id="KRX:079550",
             as_of=date(2025, 12, 30),
             stock_price=941000,

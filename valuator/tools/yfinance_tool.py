@@ -6,8 +6,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from domain.knowledge.financial import (
+    MARKET_VIEW_KEYS,
     STATEMENT_FIELDS,
-    VALUATION_INFO_KEYS,
     compute_metrics,
 )
 from domain.time import YearRange
@@ -114,7 +114,7 @@ class YFinanceBalanceSheetTool(BaseTool):
             if _is_empty_row(row):
                 missing.append(year)
                 continue
-            _apply_valuation_info(row, statements.info)
+            _apply_market_view(row, statements.info)
             row = compute_metrics(row)
             row["findings"] = _build_findings(row)
             per_year.append(row)
@@ -243,8 +243,8 @@ def _pick_field(
     return None, None
 
 
-def _apply_valuation_info(result: dict[str, Any], info: dict[str, Any]) -> None:
-    for result_key, info_key in VALUATION_INFO_KEYS:
+def _apply_market_view(result: dict[str, Any], info: dict[str, Any]) -> None:
+    for result_key, info_key in MARKET_VIEW_KEYS:
         result[result_key] = info.get(info_key)
 
 

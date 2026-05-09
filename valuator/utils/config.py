@@ -101,12 +101,6 @@ class Config:
     web_search_rag_exclude_broker_research: bool
 
 
-def normalize_supported_models(values: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(canonical_model_name(item) for item in values if item.strip())
-    )
-
-
 @lru_cache(maxsize=1)
 def load_project_env() -> None:
     load_dotenv(dotenv_path=ENV_FILE)

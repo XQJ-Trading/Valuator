@@ -94,10 +94,6 @@ class TaskContext:
     ancestry: list[TaskSummary]        # 부모들 (루트까지)
     siblings: dict[str, TaskSummary]   # 형제들 (상태 포함)
     
-    # [deprecated] SharedState: 현재 no-op
-    # 모든 정보는 evidence와 child_outputs를 통해 명시적으로 전달됨
-    shared: SharedStateView            
-    
     # 질의
     query: str                         # 원래 질의
     query_analysis: QueryAnalysis      # 질의 구조 분석

@@ -2,36 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from ..types import TaskSpec
-
-
-class Phase1SlotSpec(BaseModel):
-    """Documentation shape for collection slots; optional future wiring."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    description: str = ""
-    tool_hint: str = ""
-
-
-class Phase2TrackSpec(BaseModel):
-    """Analysis track that must depend on Phase-1 sibling indices."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    description: str = ""
-    depends_on_phase1_indices: list[int] = Field(default_factory=list)
-
-
-class RootPlanSpec(BaseModel):
-    """Optional explicit plan; root DECOMPOSE can stay free-form if validation passes below."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    phase1_slots: list[Phase1SlotSpec] = Field(default_factory=list)
-    phase2_tracks: list[Phase2TrackSpec] = Field(default_factory=list)
 
 
 def validate_root_decomposition(children: tuple[TaskSpec, ...]) -> str | None:

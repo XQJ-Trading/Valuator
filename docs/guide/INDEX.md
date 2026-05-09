@@ -15,7 +15,7 @@ LLM 기반 기업 가치 분석 플랫폼. 도메인 질의를 분해하여 다�
   - [계획 (Planning & StepPlanner)](03-Core-Pipeline/03-Planning.md)
   - [에이전트 루프 (Agent Loop)](03-Core-Pipeline/04-Agent-Loop.md)
   - [분해 및 검토 (Decomposition & Gate)](03-Core-Pipeline/05-Decomposition.md)
-  - [공유 상태 (SharedState)](03-Core-Pipeline/06-Shared-State.md)
+  - [작업 통신](03-Core-Pipeline/06-Shared-State.md)
 
 ### 보조 시스템
 - [도구 시스템 (Tools)](04-Tools.md) — 도구 추가 및 도구 레지스트리
@@ -45,7 +45,6 @@ query
   ↓ [Agent Loop] → Task 선택 및 실행
   ↓ [Scheduler] → 의존성 해석, 상태 관리
   ↓ [Decomposition Gate] → 분해 품질 검증
-  ↓ [SharedState] → 사실(fact) 발행
   ↓ [Final Output]
 ```
 
@@ -59,8 +58,7 @@ valuator/
 │   ├── decomposition/ # 분해/검증
 │   ├── scheduler.py   # 스케줄러
 │   ├── task.py        # 작업 정의
-│   ├── context.py     # TaskContext
-│   └── shared_state.py# 공유 상태
+│   └── context.py     # TaskContext
 ├── tools/             # 도구 구현
 ├── models/            # LLM 인터페이스
 └── runtime.py         # 도구 레지스트리

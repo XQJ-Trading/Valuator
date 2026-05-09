@@ -7,7 +7,6 @@ from domain.query import QueryAnalysis, QueryUnit
 from valuator.evidence import EvidenceRow
 from valuator.tools.base import ToolResult
 
-from .shared_state import SharedStateView
 from .types import TaskState
 
 
@@ -30,7 +29,6 @@ class TaskContext:
     current_children: list[TaskSummary] = field(default_factory=list)
     ancestry: list[TaskSummary] = field(default_factory=list)
     siblings: dict[str, TaskSummary] = field(default_factory=dict)
-    shared: SharedStateView = field(default_factory=lambda: SharedStateView({}, []))
     query: str = ""
     query_analysis: QueryAnalysis = field(default_factory=QueryAnalysis)
     query_units: list[QueryUnit] = field(default_factory=list)

@@ -3,7 +3,6 @@ from __future__ import annotations
 from domain.query import QueryAnalysis
 from valuator.core.agent.context_builder import build_task_context
 from valuator.core.scheduler import Scheduler
-from valuator.core.shared_state import SharedState
 from valuator.core.task import ComplexTask
 from valuator.evidence import EvidenceRow, SqliteEvidenceStore, stable_args_hash
 from valuator.tools.base import ToolRegistry
@@ -95,7 +94,6 @@ def test_build_task_context_includes_session_evidence(tmp_path) -> None:
         query="LS전선 분석",
         scheduler=scheduler,
         analysis=QueryAnalysis(allowed_tools=["opendart_financial_tool"]),
-        shared=SharedState(),
         tools=ToolRegistry(),
         evidence_store=store,
         evidence_session_id="session-1",
@@ -152,7 +150,6 @@ def test_build_task_context_limits_evidence_to_task_scope(tmp_path) -> None:
         query="scope test",
         scheduler=scheduler,
         analysis=QueryAnalysis(allowed_tools=["web_search_tool"]),
-        shared=SharedState(),
         tools=ToolRegistry(),
         evidence_store=store,
         evidence_session_id="session-1",

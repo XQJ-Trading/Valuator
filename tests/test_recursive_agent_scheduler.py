@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from domain.query import QueryAnalysis, QueryUnit
 from valuator.core.context import TaskContext
-from valuator.core import Action, AtomicTask, ComplexTask, Scheduler, SharedState
+from valuator.core import Action, AtomicTask, ComplexTask, Scheduler
 from valuator.core.types import TaskDecision, TaskSpec, TaskState
 
 
 def test_scheduler_promotes_atomic_task_on_decompose() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = AtomicTask(id="root", description="root task", task_name="root_task")
 
     scheduler.register(root)
@@ -24,7 +23,6 @@ def test_scheduler_promotes_atomic_task_on_decompose() -> None:
                 )
             ],
         ),
-        shared,
     )
 
     promoted = scheduler.get_task("root")
@@ -40,7 +38,6 @@ def test_scheduler_promotes_atomic_task_on_decompose() -> None:
 
 def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     producer = ComplexTask(id="producer", description="producer")
     consumer = ComplexTask(id="consumer", description="consumer")
 
@@ -53,7 +50,6 @@ def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
             action=Action.WAIT,
             wait_for=["producer"],
         ),
-        shared,
     )
     assert waiting_ready == []
     assert consumer.state is TaskState.WAITING
@@ -65,7 +61,6 @@ def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
             output="WACC 9.5%",
             facts={"wacc": 0.095},
         ),
-        shared,
     )
 
     # fact layer removed — published_facts stored on task
@@ -76,7 +71,6 @@ def test_scheduler_wakes_waiting_task_when_dependency_task_completes() -> None:
 
 def test_scheduler_wait_for_task_dependency_releases_on_completion() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     dependency = ComplexTask(id="dependency", description="dependency")
     waiter = ComplexTask(id="waiter", description="waiter")
 
@@ -88,7 +82,6 @@ def test_scheduler_wait_for_task_dependency_releases_on_completion() -> None:
             action=Action.WAIT,
             wait_for=["dependency"],
         ),
-        shared,
     )
 
     assert waiter.state is TaskState.WAITING
@@ -99,7 +92,6 @@ def test_scheduler_wait_for_task_dependency_releases_on_completion() -> None:
             action=Action.AGGREGATE,
             output="done",
         ),
-        shared,
     )
 
     assert waiter.state is TaskState.READY
@@ -108,7 +100,6 @@ def test_scheduler_wait_for_task_dependency_releases_on_completion() -> None:
 
 def test_scheduler_wait_for_task_dependency_releases_on_failure() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     dependency = ComplexTask(id="dependency", description="dependency")
     waiter = ComplexTask(id="waiter", description="waiter")
 
@@ -120,7 +111,6 @@ def test_scheduler_wait_for_task_dependency_releases_on_failure() -> None:
             action=Action.WAIT,
             wait_for=["dependency"],
         ),
-        shared,
     )
 
     assert waiter.state is TaskState.WAITING
@@ -156,7 +146,6 @@ def test_scheduler_requeues_ready_tasks_in_fifo_order() -> None:
 
 def test_scheduler_does_not_wake_parent_when_sibling_is_still_waiting() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     parent = ComplexTask(id="root", description="root")
 
     scheduler.register(parent)
@@ -169,7 +158,6 @@ def test_scheduler_does_not_wake_parent_when_sibling_is_still_waiting() -> None:
                 TaskSpec(description="waiting child", task_name="waiting_child"),
             ],
         ),
-        shared,
     )
 
     done_child = scheduler.get_task("root.0")
@@ -184,7 +172,6 @@ def test_scheduler_does_not_wake_parent_when_sibling_is_still_waiting() -> None:
             action=Action.WAIT,
             wait_for=["root.0"],
         ),
-        shared,
     )
     newly_ready = scheduler.apply_decision(
         done_child,
@@ -192,7 +179,6 @@ def test_scheduler_does_not_wake_parent_when_sibling_is_still_waiting() -> None:
             action=Action.AGGREGATE,
             output="done",
         ),
-        shared,
     )
 
     assert parent.state is TaskState.WAITING
@@ -241,7 +227,6 @@ def test_scheduler_child_signature_includes_execution_tool() -> None:
 
 def test_scheduler_copies_execution_tool_to_child_task() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = ComplexTask(id="root", description="root")
     scheduler.register(root)
 
@@ -256,7 +241,6 @@ def test_scheduler_copies_execution_tool_to_child_task() -> None:
                 )
             ],
         ),
-        shared,
     )
 
     child = scheduler.get_task("root.0")
@@ -266,7 +250,6 @@ def test_scheduler_copies_execution_tool_to_child_task() -> None:
 
 def test_validate_wait_detects_direct_cycle() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     task_a = ComplexTask(id="a", description="a")
     task_b = ComplexTask(id="b", description="b")
 
@@ -278,7 +261,6 @@ def test_validate_wait_detects_direct_cycle() -> None:
             action=Action.WAIT,
             wait_for=["b"],
         ),
-        shared,
     )
 
     error = scheduler.validate_wait("b", ["a"])
@@ -289,7 +271,6 @@ def test_validate_wait_detects_direct_cycle() -> None:
 
 def test_validate_wait_detects_transitive_cycle() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     task_a = ComplexTask(id="a", description="a")
     task_b = ComplexTask(id="b", description="b")
     task_c = ComplexTask(id="c", description="c")
@@ -303,7 +284,6 @@ def test_validate_wait_detects_transitive_cycle() -> None:
             action=Action.WAIT,
             wait_for=["b"],
         ),
-        shared,
     )
     scheduler.apply_decision(
         task_b,
@@ -311,7 +291,6 @@ def test_validate_wait_detects_transitive_cycle() -> None:
             action=Action.WAIT,
             wait_for=["c"],
         ),
-        shared,
     )
 
     error = scheduler.validate_wait("c", ["a"])
@@ -335,7 +314,6 @@ def test_validate_wait_allows_non_cyclic() -> None:
 
 def test_validate_wait_skips_done_tasks() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     task_a = ComplexTask(id="a", description="a")
     task_b = ComplexTask(id="b", description="b")
 
@@ -347,7 +325,6 @@ def test_validate_wait_skips_done_tasks() -> None:
             action=Action.AGGREGATE,
             output="done",
         ),
-        shared,
     )
 
     error = scheduler.validate_wait("a", ["b"])
@@ -371,7 +348,6 @@ def test_validate_wait_rejects_failed_only_dependencies() -> None:
 
 def test_scheduler_wait_ignores_failed_dependencies_when_other_waits_remain() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     task_a = ComplexTask(id="a", description="a")
     task_b = ComplexTask(id="b", description="b")
     task_c = ComplexTask(id="c", description="c")
@@ -387,7 +363,6 @@ def test_scheduler_wait_ignores_failed_dependencies_when_other_waits_remain() ->
             action=Action.WAIT,
             wait_for=["b", "c"],
         ),
-        shared,
     )
 
     assert task_a.state is TaskState.WAITING
@@ -399,7 +374,6 @@ def test_scheduler_wait_ignores_failed_dependencies_when_other_waits_remain() ->
             action=Action.AGGREGATE,
             output="done",
         ),
-        shared,
     )
 
     assert task_a.state is TaskState.READY
@@ -407,7 +381,6 @@ def test_scheduler_wait_ignores_failed_dependencies_when_other_waits_remain() ->
 
 def test_scheduler_fail_uses_decision_error() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = ComplexTask(id="root", description="root")
 
     scheduler.register(root)
@@ -417,7 +390,6 @@ def test_scheduler_fail_uses_decision_error() -> None:
             action=Action.FAIL,
             output="upstream unavailable",
         ),
-        shared,
     )
 
     assert newly_ready == []
@@ -427,7 +399,6 @@ def test_scheduler_fail_uses_decision_error() -> None:
 
 def test_scheduler_turns_facts_only_aggregate_into_structured_output() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = ComplexTask(id="root", description="root")
 
     scheduler.register(root)
@@ -437,7 +408,6 @@ def test_scheduler_turns_facts_only_aggregate_into_structured_output() -> None:
             action=Action.DECOMPOSE,
             children=[TaskSpec(description="collect facts")],
         ),
-        shared,
     )
 
     child = scheduler.get_task("root.0")
@@ -449,7 +419,6 @@ def test_scheduler_turns_facts_only_aggregate_into_structured_output() -> None:
             action=Action.AGGREGATE,
             facts={"price_uplift": "could not verify"},
         ),
-        shared,
     )
 
     assert child.output is None
@@ -464,7 +433,6 @@ def test_scheduler_turns_facts_only_aggregate_into_structured_output() -> None:
 def test_scheduler_stores_aggregate_facts_on_task() -> None:
     """After fact layer removal, facts are stored on task.published_facts only."""
     scheduler = Scheduler()
-    shared = SharedState()
     root = ComplexTask(id="root", description="root", query_unit_ids=[0])
 
     scheduler.register(root)
@@ -474,19 +442,15 @@ def test_scheduler_stores_aggregate_facts_on_task() -> None:
             action=Action.AGGREGATE,
             facts={"iran_enrichment_level": {"value": 60, "grounded": True}},
         ),
-        shared,
     )
 
     assert root.published_facts == {
         "iran_enrichment_level": {"value": 60, "grounded": True},
     }
-    # SharedState is now a no-op
-    assert shared.view().facts == {}
 
 
 def test_scheduler_inherits_single_parent_query_unit_id() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = ComplexTask(id="root", description="root", query_unit_ids=[2])
 
     scheduler.register(root)
@@ -496,7 +460,6 @@ def test_scheduler_inherits_single_parent_query_unit_id() -> None:
             action=Action.DECOMPOSE,
             children=[TaskSpec(description="child task", task_name="child_task")],
         ),
-        shared,
     )
 
     child = scheduler.get_task("root.0")
@@ -518,7 +481,6 @@ def test_scheduler_requires_child_query_unit_ids_for_multi_unit_parent() -> None
 
 def test_scheduler_wakes_wait_task_when_sibling_dependency_fails() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = ComplexTask(id="root", description="root")
 
     scheduler.register(root)
@@ -531,7 +493,6 @@ def test_scheduler_wakes_wait_task_when_sibling_dependency_fails() -> None:
                 TaskSpec(description="consume fact", task_name="consumer"),
             ],
         ),
-        shared,
     )
 
     producer = scheduler.get_task("root.0")
@@ -541,7 +502,6 @@ def test_scheduler_wakes_wait_task_when_sibling_dependency_fails() -> None:
     scheduler.apply_decision(
         consumer,
         TaskDecision(action=Action.WAIT, wait_for=["root.0"]),
-        shared,
     )
     assert consumer.state == TaskState.WAITING
 

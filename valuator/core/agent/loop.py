@@ -26,7 +26,6 @@ from ..decomposition import (
 )
 from ..fact_extraction import extract_facts
 from ..scheduler import Scheduler
-from ..shared_state import SharedState
 from ..planning import StepPlanner
 from ..task import ComplexTask, Task
 from ..types import (
@@ -100,7 +99,6 @@ class Agent:
         self,
         *,
         scheduler: Scheduler,
-        shared_state: SharedState,
         tool_registry: ToolRegistry,
         llm_client: Any,
         query_analysis: QueryAnalysis,
@@ -117,7 +115,6 @@ class Agent:
 
         gate_cfg = gate_config or GateConfig()
         self._scheduler = scheduler
-        self._shared = shared_state
         self._tools = tool_registry
         self._analysis = query_analysis
         self._on_event = on_event
@@ -185,7 +182,7 @@ class Agent:
                     break
                 if not in_flight:
                     if self._scheduler.has_deadlock():
-                        woken = self._scheduler.break_deadlock(self._shared)
+                        woken = self._scheduler.break_deadlock()
                         if not woken and self._scheduler.has_deadlock():
                             raise RuntimeError(
                                 "deadlock: no tasks ready, not all complete"
@@ -300,7 +297,6 @@ class Agent:
             query=query,
             scheduler=self._scheduler,
             analysis=self._analysis,
-            shared=self._shared,
             tools=self._tools,
             evidence_store=self._evidence_store,
             evidence_session_id=self._evidence_session_id,
@@ -536,7 +532,7 @@ class Agent:
         tool_request: ToolRequest,
     ) -> None:
         task.last_tool_request = tool_request
-        self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
+        self._scheduler.apply_decision(task, decision, ctx=ctx)
         tool_started_at = kst_isoformat()
         started = perf_counter()
         tool_name = tool_request.tool_name
@@ -635,7 +631,7 @@ class Agent:
             facts = extract_facts(task=task, ctx=ctx)
             if facts:
                 decision = decision.update(facts=decision.facts | facts)
-        self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
+        self._scheduler.apply_decision(task, decision, ctx=ctx)
         if (
             self._session_store is not None
             and decision.action in (Action.AGGREGATE, Action.FINALIZE)
@@ -949,7 +945,7 @@ class Agent:
             facts=facts,
             children=[],
         )
-        self._scheduler.apply_decision(task, decision, self._shared)
+        self._scheduler.apply_decision(task, decision)
         if self._session_store is not None:
             artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,

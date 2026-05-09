@@ -9,7 +9,7 @@ import pytest
 
 from domain.query import QueryAnalysis
 from valuator.core.decomposition.gate_config import GateConfig
-from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, SharedState, StepPlanner, TaskState
+from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, StepPlanner, TaskState
 from valuator.evidence import EvidenceRow, SqliteEvidenceStore, stable_args_hash
 from valuator.tools.base import BaseTool, ToolRegistry, ToolResult
 from valuator.session import SessionTraceWriter, ValuatorSessionStore, task_rel_path
@@ -190,7 +190,6 @@ async def test_agent_run_decomposes_waits_and_finalizes() -> None:
     )
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=4),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -231,7 +230,6 @@ async def test_invalid_decision_does_not_increment_step_count() -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=ToolRegistry(),
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(),
@@ -288,7 +286,6 @@ async def test_execute_rejects_tool_outside_task_execution_tool() -> None:
     )
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool", "web_search_tool"]),
@@ -347,7 +344,6 @@ async def test_agent_preserves_facts_only_child_output() -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=ToolRegistry(),
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(),
@@ -437,7 +433,6 @@ async def test_agent_blocks_duplicate_execute_after_successful_tool() -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=2),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -486,7 +481,6 @@ async def test_agent_fail_uses_decision_reason_and_emits_task_failed() -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=ToolRegistry(),
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(),
@@ -583,7 +577,6 @@ async def test_agent_streams_new_ready_tasks_while_siblings_are_still_running() 
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=3),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["latency_tool"]),
@@ -675,7 +668,6 @@ async def test_agent_writes_method_trace_without_sequence_collisions(
     )
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=4),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -732,7 +724,6 @@ async def test_agent_requeries_when_static_gate_rejects_decomposition() -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=ToolRegistry(),
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(),
@@ -804,7 +795,6 @@ async def test_agent_allows_uncertain_decomposition_with_critic_and_updates_thre
     )
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=2),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -858,7 +848,6 @@ async def test_agent_requeries_when_critic_rejects_uncertain_decomposition() -> 
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=ToolRegistry(),
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -927,7 +916,6 @@ async def test_agent_falls_back_to_static_score_when_critic_fails() -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=2),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -1008,7 +996,6 @@ async def test_agent_rejects_cross_task_duplicate_tool_request_from_evidence(tmp
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),
@@ -1122,7 +1109,6 @@ async def test_agent_reuses_covering_financial_range_evidence(tmp_path) -> None:
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=analysis,
@@ -1199,7 +1185,6 @@ async def test_agent_rejects_duplicate_decomposition_against_existing_children()
 
     agent = Agent(
         scheduler=Scheduler(max_steps_per_task=10, concurrency=2),
-        shared_state=SharedState(),
         tool_registry=registry,
         llm_client=llm,  # type: ignore[arg-type]
         query_analysis=QueryAnalysis(allowed_tools=["dummy_tool"]),

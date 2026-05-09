@@ -215,6 +215,55 @@ def test_scheduler_rejects_duplicate_decomposition_against_existing_children() -
     assert "duplicate children" in error
 
 
+def test_scheduler_child_signature_includes_execution_tool() -> None:
+    scheduler = Scheduler()
+    parent = ComplexTask(id="root", description="root")
+    parent.add_child(
+        AtomicTask(
+            id="root.0",
+            description="Collect alpha",
+            execution_tool="dummy_tool",
+        )
+    )
+
+    error = scheduler.validate_decomposition(
+        parent,
+        [
+            TaskSpec(
+                description="Collect alpha",
+                execution_tool="opendart_financial_tool",
+            )
+        ],
+    )
+
+    assert error is None
+
+
+def test_scheduler_copies_execution_tool_to_child_task() -> None:
+    scheduler = Scheduler()
+    shared = SharedState()
+    root = ComplexTask(id="root", description="root")
+    scheduler.register(root)
+
+    scheduler.apply_decision(
+        root,
+        TaskDecision(
+            action=Action.DECOMPOSE,
+            children=[
+                TaskSpec(
+                    description="collect financials",
+                    execution_tool="opendart_financial_tool",
+                )
+            ],
+        ),
+        shared,
+    )
+
+    child = scheduler.get_task("root.0")
+    assert isinstance(child, AtomicTask)
+    assert child.execution_tool == "opendart_financial_tool"
+
+
 def test_validate_wait_detects_direct_cycle() -> None:
     scheduler = Scheduler()
     shared = SharedState()

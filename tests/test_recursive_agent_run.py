@@ -10,9 +10,9 @@ import pytest
 from domain.query import QueryAnalysis
 from valuator.core.decomposition.gate_config import GateConfig
 from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, SharedState, StepPlanner, TaskState
-from valuator.evidence import SqliteEvidenceStore
+from valuator.evidence import EvidenceRow, SqliteEvidenceStore, stable_args_hash
 from valuator.tools.base import BaseTool, ToolRegistry, ToolResult
-from valuator.session import SessionTraceWriter
+from valuator.session import SessionTraceWriter, ValuatorSessionStore, task_rel_path
 
 
 class DummyTool(BaseTool):
@@ -27,6 +27,39 @@ class DummyTool(BaseTool):
             success=True,
             result={"findings": f"value={value}"},
             metadata={"value": value},
+        )
+
+
+class FinancialRangeTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="opendart_financial_tool",
+            description="financial range tool",
+        )
+        self.calls: list[dict[str, Any]] = []
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        self.calls.append(dict(kwargs))
+        start_year = int(kwargs["start_year"])
+        end_year = int(kwargs["end_year"])
+        return ToolResult(
+            success=True,
+            result={
+                "corp": kwargs["corp"],
+                "year_range": f"{start_year}-{end_year}",
+                "results": [
+                    {
+                        "corp": kwargs["corp"],
+                        "year": year,
+                        "findings": f"year={year}",
+                    }
+                    for year in range(start_year, end_year + 1)
+                ],
+                "missing_years": [],
+                "findings": "\n".join(
+                    f"year={year}" for year in range(start_year, end_year + 1)
+                ),
+            },
         )
 
 
@@ -219,6 +252,65 @@ async def test_invalid_decision_does_not_increment_step_count() -> None:
     step_start_events = [event for event in events if event.type == "step_started"]
     assert [event.detail["global_seq"] for event in step_start_events] == [1, 2]
     assert [event.detail["step"] for event in step_start_events] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_execute_rejects_tool_outside_task_execution_tool() -> None:
+    registry = ToolRegistry()
+    registry.register(DummyTool())
+    events: list[AgentEvent] = []
+
+    async def on_event(event: AgentEvent) -> None:
+        events.append(event)
+
+    llm = ScriptedLLM(
+        {
+            "root": [
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "web_search_tool",
+                        "args": {"query": "alpha"},
+                    },
+                },
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "dummy_tool",
+                        "args": {"value": "ok"},
+                    },
+                },
+                {
+                    "action": "aggregate",
+                },
+            ]
+        }
+    )
+    agent = Agent(
+        scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
+        shared_state=SharedState(),
+        tool_registry=registry,
+        llm_client=llm,  # type: ignore[arg-type]
+        query_analysis=QueryAnalysis(allowed_tools=["dummy_tool", "web_search_tool"]),
+        on_event=on_event,
+        step_planner=StepPlanner(llm, repair_retries=0),
+    )
+
+    root = ComplexTask(
+        id="root",
+        description="root valuation task",
+        execution_tool="dummy_tool",
+    )
+    output = await agent.run("alpha query", root)
+
+    assert output == {"findings": "value=ok"}
+    assert root.invalid_decision_count == 1
+    assert registry.get_tool("dummy_tool").calls == [{"value": "ok"}]  # type: ignore[union-attr]
+    assert any(
+        event.type == "failed"
+        and "violates task execution_tool" in str(event.detail.get("error"))
+        for event in events
+    )
 
 
 @pytest.mark.asyncio
@@ -935,6 +1027,120 @@ async def test_agent_rejects_cross_task_duplicate_tool_request_from_evidence(tmp
     assert duplicate_child.invalid_decision_count == 1
     assert duplicate_child.failed_attempts[-1].kind == "decision_rejected"
     assert "already collected in task root.0" in duplicate_child.failed_attempts[-1].error
+
+
+@pytest.mark.asyncio
+async def test_agent_reuses_covering_financial_range_evidence(tmp_path) -> None:
+    registry = ToolRegistry()
+    tool = FinancialRangeTool()
+    registry.register(tool)
+
+    root_task = ComplexTask(id="root", description="root")
+    analysis = QueryAnalysis(allowed_tools=["opendart_financial_tool"])
+    session_store = ValuatorSessionStore(
+        session_id="session-1",
+        query="LIG넥스원 재무",
+        model="test",
+        created_at="2026-05-01T16:49:18+09:00",
+        root_dir=tmp_path,
+    )
+    session_store.write_plan(
+        effective_query="LIG넥스원 재무",
+        analysis=analysis,
+        root_task=root_task,
+    )
+    source_result_dir = session_store.tasks_dir / task_rel_path("root.0") / "execution"
+    source_result_dir.mkdir(parents=True)
+    (source_result_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "raw_result": {
+                    "corp": "079550",
+                    "year_range": "2023-2025",
+                    "results": [
+                        {"corp": "079550", "year": 2023, "findings": "year=2023"},
+                        {"corp": "079550", "year": 2024, "findings": "year=2024"},
+                        {"corp": "079550", "year": 2025, "findings": "year=2025"},
+                    ],
+                    "missing_years": [],
+                    "findings": "year=2023\nyear=2024\nyear=2025",
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    store = SqliteEvidenceStore(session_store.session_dir / "evidence.db")
+    source_args = {
+        "corp": "079550",
+        "start_year": 2023,
+        "end_year": 2025,
+        "fs_div": "CFS",
+    }
+    store.record(
+        EvidenceRow(
+            session_id="session-1",
+            tool_name="opendart_financial_tool",
+            stable_args_hash=stable_args_hash(
+                "opendart_financial_tool",
+                source_args,
+            ),
+            status="satisfied",
+            value_summary="corp=079550, year=2023 ... year=2025",
+            value_ref="execution/result.md",
+            task_id="root.0",
+            unit_objective="2023-2025 재무제표 수집",
+            created_at="2026-05-01T16:49:18+09:00",
+            updated_at="2026-05-01T16:49:18+09:00",
+            stable_args=source_args,
+        )
+    )
+
+    llm = ScriptedLLM(
+        {
+            "root": [
+                {
+                    "action": "execute",
+                    "tool_request": {
+                        "tool_name": "opendart_financial_tool",
+                        "args": {
+                            "corp": "079550",
+                            "start_year": 2024,
+                            "end_year": 2025,
+                            "fs_div": "CFS",
+                        },
+                    },
+                },
+                {
+                    "action": "aggregate",
+                    "output": "reused financial evidence",
+                },
+            ],
+        }
+    )
+
+    agent = Agent(
+        scheduler=Scheduler(max_steps_per_task=10, concurrency=1),
+        shared_state=SharedState(),
+        tool_registry=registry,
+        llm_client=llm,  # type: ignore[arg-type]
+        query_analysis=analysis,
+        gate_config=GateConfig(enabled=False),
+        session_store=session_store,
+        evidence_store=store,
+        evidence_session_id="session-1",
+    )
+
+    output = await agent.run("LIG넥스원 재무", root_task)
+    root = agent._scheduler.get_task("root")
+
+    assert output == "reused financial evidence"
+    assert tool.calls == []
+    assert root is not None
+    assert root.invalid_decision_count == 0
+    assert root.tool_results[0].metadata["evidence_reused"] is True
+    assert root.tool_results[0].metadata["source_task_id"] == "root.0"
 
 
 @pytest.mark.asyncio

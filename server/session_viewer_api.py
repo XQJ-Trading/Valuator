@@ -388,6 +388,49 @@ def _read_root_task_id(session_dir: Path) -> str | None:
     return None
 
 
+def _read_task_id_from_browse_readme(browse_dir: Path) -> str | None:
+    readme = browse_dir / "README.md"
+    if not readme.is_file():
+        return None
+    try:
+        for line in readme.read_text(encoding="utf-8").splitlines():
+            if line.startswith("- task_id:"):
+                task_id = line.split(":", 1)[1].strip()
+                return task_id or None
+    except OSError:
+        return None
+    return None
+
+
+def _task_id_order_path(task_id: str | None) -> tuple[int, ...]:
+    if not task_id:
+        return ()
+    parts = task_id.split(".")
+    order_path: list[int] = []
+    for part in parts[1:]:
+        if not part.isdigit():
+            return ()
+        order_path.append(int(part))
+    return tuple(order_path)
+
+
+def _task_id_outline_number(task_id: str | None) -> str:
+    order_path = _task_id_order_path(task_id)
+    if not order_path:
+        return ""
+    display_parts = [str(value + 1) for value in order_path]
+    return f"[{'.'.join(display_parts)}]"
+
+
+def _browse_directory_order(
+    entry: Path, task_id: str | None
+) -> tuple[int, tuple[int, ...], str]:
+    order_path = _task_id_order_path(task_id)
+    if order_path:
+        return (0, order_path, entry.name.lower())
+    return (1, (), entry.name.lower())
+
+
 def _browse_outline_rows(
     browse_abs: Path,
     rel_prefix: str,
@@ -397,18 +440,25 @@ def _browse_outline_rows(
     if not browse_abs.is_dir():
         return rows
     try:
-        entries = sorted(browse_abs.iterdir(), key=lambda e: e.name.lower())
+        entries = [
+            (entry, _read_task_id_from_browse_readme(entry))
+            for entry in browse_abs.iterdir()
+            if entry.is_dir() and not entry.name.startswith(".")
+        ]
+        entries.sort(key=lambda item: _browse_directory_order(item[0], item[1]))
     except OSError:
         return rows
-    for entry in entries:
-        if not entry.is_dir() or entry.name.startswith("."):
-            continue
+    for entry, task_id in entries:
         rel_path = f"{rel_prefix}/{entry.name}"
+        title = entry.name.replace("_", " ")
+        outline_number = _task_id_outline_number(task_id)
+        if outline_number:
+            title = f"{outline_number} {title}"
         rows.append(
             {
                 "depth": depth,
                 "relPath": rel_path.replace("\\", "/"),
-                "title": entry.name.replace("_", " "),
+                "title": title,
             }
         )
         rows.extend(_browse_outline_rows(entry, rel_path, depth + 1))

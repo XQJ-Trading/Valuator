@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .company import Subject
+from .time import YearRange, year_range_from_iso_dates
 
 TaskId = str
 
@@ -36,6 +37,7 @@ class TemporalContract:
     time_scope: str = ""
     target_start: str = ""
     target_end: str = ""
+    year_range: YearRange | None = None
 
 
 @dataclass(slots=True)
@@ -200,6 +202,7 @@ def summarize_temporal_contract(
         time_scope=time_scope,
         target_start=target_start,
         target_end=target_end,
+        year_range=year_range_from_iso_dates(target_start, target_end),
     )
 
 

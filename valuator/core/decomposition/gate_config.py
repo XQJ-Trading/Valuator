@@ -14,11 +14,11 @@ class PenaltyWeights:
 class GateConfig:
     """MCTS-inspired decomposition gate (selection + backprop). Defaults are field defaults."""
 
-    enabled: bool = True
+    enabled: bool = False
     weights: PenaltyWeights = field(default_factory=PenaltyWeights)
     initial_threshold: float = -0.05
     learning_rate: float = 0.05
-    max_depth: int = 3
+    max_depth: int = 4
     max_children: int = 8
     accept_bound: float = -0.01
     reject_bound: float = -0.45

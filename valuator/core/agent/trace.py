@@ -174,6 +174,7 @@ def task_runtime_payload(task: Task) -> dict[str, Any]:
         "step_count": task.step_count,
         "invalid_decision_count": task.invalid_decision_count,
         "tool_hint": task.tool_hint,
+        "execution_tool": task.execution_tool,
         "last_tool_request": (
             {
                 "tool_name": task.last_tool_request.tool_name,
@@ -206,6 +207,7 @@ def planned_child_records(task: Task, decision: TaskDecision) -> list[dict[str, 
             "id": f"{task.id}.{start_index + offset}",
             "description": child.description,
             "tool_hint": child.tool_hint,
+            "execution_tool": child.execution_tool,
         }
         for offset, child in enumerate(decision.children)
     ]

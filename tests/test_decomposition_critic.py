@@ -215,6 +215,7 @@ def test_root_system_prompt_is_plan_critic() -> None:
     assert "plan critic" in prompt
     assert "analysis plan" in prompt
     assert "industry and business model" in prompt
+    assert "opendart_financial_tool" in prompt
     assert "decomposition gate critic" not in prompt
 
 

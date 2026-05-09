@@ -7,10 +7,18 @@ import pytest
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
+from valuator.core.planning.prompts import build_step_prompt
 from valuator.core.shared_state import SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, FailedAttempt, TaskState, TaskWorkPhase, ToolResult
+from valuator.core.types import (
+    Action,
+    FailedAttempt,
+    TaskState,
+    TaskWorkPhase,
+    ToolRequest,
+    ToolResult,
+)
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.evidence import EvidenceRow
 
@@ -85,6 +93,65 @@ def _context(*, available_tools: list[str]) -> TaskContext:
     )
 
 
+def test_financial_last_tool_result_keeps_current_market_snapshot() -> None:
+    task = AtomicTask(id="task", description="collect LIG financials")
+    task.last_tool_request = ToolRequest(
+        tool_name="opendart_financial_tool",
+        args={"corp": "079550", "start_year": 2021, "end_year": 2025},
+    )
+    ctx = TaskContext(
+        task_id="task",
+        description="collect LIG financials",
+        step_count=1,
+        available_tools=["opendart_financial_tool"],
+        tool_results=[
+            ToolResult(
+                success=True,
+                result={
+                    "corp": "079550",
+                    "year_range": "2021-2025",
+                    "results": [
+                        {
+                            "corp": "079550",
+                            "corp_name": "LIG넥스원",
+                            "year": 2025,
+                            "total_revenue": 4306936127418.0,
+                            "operating_income": 319442306790.0,
+                            "eps": 10173.0,
+                            "per": 41.38,
+                            "findings": "x" * 5000,
+                        }
+                    ],
+                    "market_snapshot": {
+                        "listing_id": "KRX:079550",
+                        "stock_price_as_of": "2026-05-08",
+                        "current_price": 840000.0,
+                        "eps": 11604.0,
+                        "per": 72.39,
+                        "pbr": 12.83,
+                    },
+                    "findings": "y" * 5000,
+                },
+            )
+        ],
+    )
+
+    prompt = build_step_prompt(
+        task=task,
+        ctx=ctx,
+        allowed_actions=[Action.AGGREGATE],
+        max_prompt_chars=20_000,
+        prompt_value_preview_chars=1_000,
+        prompt_query_chars=1_000,
+    )
+
+    assert "market snapshot" in prompt
+    assert "**current price**: 840000.0" in prompt
+    assert "**per**: 72.39" in prompt
+    assert "**pbr**: 12.83" in prompt
+    assert "yyyy" not in prompt
+
+
 @pytest.mark.asyncio
 async def test_step_planner_repairs_invalid_execute_payload() -> None:
     llm = ScriptedLLM(
@@ -151,40 +218,6 @@ async def test_step_planner_salvages_tool_request_embedded_in_reason() -> None:
         "query": "Amazon competitive strategy",
         "search_intent": "general",
     }
-
-
-@pytest.mark.asyncio
-async def test_step_planner_falls_back_invalid_web_search_intent_to_general() -> None:
-    llm = ScriptedLLM(
-        [
-            {
-                "action": "execute",
-                "tool_request": {
-                    "tool_name": "web_search_tool",
-                    "args": {
-                        "query": "Amazon competitive strategy",
-                        "search_intent": "web",
-                    },
-                },
-            },
-        ]
-    )
-    planner = StepPlanner(llm, repair_retries=1)
-    task = AtomicTask(
-        id="root.0",
-        description="collect Amazon segment data",
-        tool_hint="web_search_tool",
-    )
-
-    decision = await planner.decide(task, _context(available_tools=["web_search_tool"]))
-
-    assert decision.action.value == "execute"
-    assert decision.tool_request is not None
-    assert decision.tool_request.args == {
-        "query": "Amazon competitive strategy",
-        "search_intent": "general",
-    }
-    assert len(llm.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -527,7 +560,6 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
 
     assert decision.action.value == "aggregate"
     assert llm.calls[0]["response_json_schema"]["$defs"]["Action"]["enum"] == [
-        "decompose",
         "wait",
         "aggregate",
         "finalize",
@@ -537,6 +569,33 @@ async def test_step_planner_excludes_execute_after_successful_tool_result() -> N
     assert call["system_prompt"] == ""
     assert "This task already has a successful tool result." in call["prompt"]
     assert "You must not return EXECUTE." in call["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_step_planner_excludes_decompose_for_fresh_tool_leaf() -> None:
+    llm = ScriptedLLM(
+        [
+            {
+                "action": "execute",
+                "tool_request": {
+                    "tool_name": "web_search_tool",
+                    "args": {"query": "latest data"},
+                },
+            }
+        ]
+    )
+    planner = StepPlanner(llm, repair_retries=0)
+    task = AtomicTask(
+        id="root.0",
+        description="collect data",
+        tool_hint="web_search_tool",
+    )
+
+    decision = await planner.decide(task, _context(available_tools=["web_search_tool"]))
+
+    assert decision.action.value == "execute"
+    action_enum = llm.calls[0]["response_json_schema"]["$defs"]["Action"]["enum"]
+    assert "decompose" not in action_enum
 
 
 @pytest.mark.asyncio
@@ -876,7 +935,7 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
     assert "[SUBJECTS]" in prompt
     assert "company_name=삼성전자; exchange=KOSPI; corp=삼성전자; stock_code=005930; yahoo_symbol=005930.KS" in prompt
     assert "company_name=Amazon.com; exchange=USA; ticker=AMZN; yahoo_symbol=AMZN" in prompt
-    assert "opendart_financial_tool: args=corp, year, fs_div?" in prompt
+    assert "opendart_financial_tool: args=corp, start_year, end_year, fs_div?" in prompt
     assert "Korean issuer only." in prompt
 
 
@@ -920,7 +979,12 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
                 unit_objective="2024 재무제표 수집",
                 created_at="2026-04-16T10:00:00+09:00",
                 updated_at="2026-04-16T10:00:00+09:00",
-                stable_args={"corp": "LS전선", "year": 2024, "fs_div": "CFS"},
+                stable_args={
+                    "corp": "LS전선",
+                    "fs_div": "CFS",
+                    "start_year": 2024,
+                    "end_year": 2024,
+                },
             ),
             EvidenceRow(
                 session_id="session-1",
@@ -944,7 +1008,10 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
     prompt = llm.calls[0]["prompt"]
     assert llm.calls[0]["system_prompt"] == ""
     assert "[EVIDENCE]" in prompt
-    assert "opendart_financial_tool(corp=\"LS전선\", fs_div=\"CFS\", year=2024): satisfied" in prompt
+    assert (
+        "opendart_financial_tool(corp=\"LS전선\", end_year=2024, fs_div=\"CFS\", start_year=2024)"
+        ": satisfied"
+    ) in prompt
     assert "[FAILED_ATTEMPTS]" in prompt
     assert "web_search_tool(query=\"LS전선 경쟁사\"): tool_error - Search failed" in prompt
     assert llm.calls[0]["cached_content"] == "cache::planner:system-prefix:v1"

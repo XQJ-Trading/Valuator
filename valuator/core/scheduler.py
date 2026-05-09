@@ -215,12 +215,13 @@ class Scheduler:
         for offset, spec in enumerate(specs):
             child_id = f"{parent.id}.{start_index + offset}"
             child: Task
-            if spec.tool_hint:
+            if spec.tool_hint or spec.execution_tool:
                 child = AtomicTask(
                     id=child_id,
                     description=spec.description,
                     task_name=spec.task_name,
                     tool_hint=spec.tool_hint,
+                    execution_tool=spec.execution_tool,
                     query_unit_ids=self._child_query_unit_ids(parent, spec),
                     decide=parent._decide,
                 )
@@ -230,6 +231,7 @@ class Scheduler:
                     description=spec.description,
                     task_name=spec.task_name,
                     tool_hint=spec.tool_hint,
+                    execution_tool=spec.execution_tool,
                     query_unit_ids=self._child_query_unit_ids(parent, spec),
                     decide=parent._decide,
                 )
@@ -261,7 +263,11 @@ class Scheduler:
             return cycle_err
 
         existing = {
-            self._child_signature(child.description, child.tool_hint): child.id
+            self._child_signature(
+                child.description,
+                child.tool_hint,
+                child.execution_tool,
+            ): child.id
             for child in task.children()
         }
         proposed: dict[str, str] = {}
@@ -269,7 +275,11 @@ class Scheduler:
         duplicates_proposed: list[str] = []
 
         for spec in spec_list:
-            signature = self._child_signature(spec.description, spec.tool_hint)
+            signature = self._child_signature(
+                spec.description,
+                spec.tool_hint,
+                spec.execution_tool,
+            )
             if signature in existing:
                 duplicates_existing.append(spec.description)
                 continue
@@ -365,6 +375,7 @@ class Scheduler:
             description=task.description,
             task_name=task.task_name,
             tool_hint=task.tool_hint,
+            execution_tool=task.execution_tool,
             decide=task._decide,
         )
         task.copy_runtime_to(promoted)
@@ -419,10 +430,15 @@ class Scheduler:
             self.mark_failed(parent, f"all children failed (last: {task.id})")
 
     @staticmethod
-    def _child_signature(description: str, tool_hint: str) -> str:
+    def _child_signature(
+        description: str,
+        tool_hint: str,
+        execution_tool: str,
+    ) -> str:
         normalized_description = " ".join(description.split()).casefold()
         normalized_tool_hint = tool_hint.strip().casefold()
-        return f"{normalized_tool_hint}|{normalized_description}"
+        normalized_execution_tool = execution_tool.strip().casefold()
+        return f"{normalized_tool_hint}|{normalized_execution_tool}|{normalized_description}"
 
     @staticmethod
     def _child_query_unit_ids(parent: Task, spec: TaskSpec) -> list[int]:

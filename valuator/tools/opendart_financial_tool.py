@@ -2,18 +2,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from domain.boundary.krx_stock_price_collector import fetch_krx_daily_price_bar
+from domain.boundary.krx_stock_price_collector import (
+    MarketView,
+    fetch_krx_market_view,
+    fetch_krx_year_end_market_view,
+)
 from domain.boundary.krx_ticker_resolve import resolve_krx_corp_record
-from domain.boundary.opendart_financial import fetch_opendart_financial
-from domain.knowledge.financial import DERIVED_DIFFERENCES, DERIVED_RATIOS
+from domain.boundary.opendart_financial import YearFinancials, fetch_opendart_year
+from domain.knowledge.annual_record import AnnualRecord
+from domain.knowledge.financial import compute_metrics
+from domain.time import YearRange
 from .base import BaseTool, ToolResult
 
 
 class OpenDartFinancialRequest(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     corp: str
-    year: int
+    year_range: YearRange
     fs_div: str = "CFS"
 
     @classmethod
@@ -21,19 +29,19 @@ class OpenDartFinancialRequest(BaseModel):
         corp = str(kwargs.get("corp") or "").strip()
         if not corp:
             raise ValueError("'corp' is required")
-        year = str(kwargs.get("year") or "").strip()
-        if not year:
-            raise ValueError("'year' is required")
-        try:
-            year_value = int(year)
-        except ValueError as exc:
-            raise ValueError("'year' must be an integer") from exc
+        year_range = _year_range_from_kwargs(kwargs)
         fs_div = str(kwargs.get("fs_div") or "CFS").strip().upper()
         if fs_div not in {"CFS", "OFS"}:
             raise ValueError("'fs_div' must be 'CFS' or 'OFS'")
-        return cls.model_validate(
-            {"corp": corp, "year": year_value, "fs_div": fs_div}
-        )
+        return cls(corp=corp, year_range=year_range, fs_div=fs_div)
+
+
+def _year_range_from_kwargs(kwargs: dict[str, Any]) -> YearRange:
+    start = kwargs.get("start_year")
+    end = kwargs.get("end_year")
+    if start is None or end is None:
+        raise ValueError("'start_year' and 'end_year' are required")
+    return YearRange(start=int(start), end=int(end))
 
 
 class OpenDartFinancialTool(BaseTool):
@@ -56,202 +64,210 @@ class OpenDartFinancialTool(BaseTool):
                 success=False,
                 result=None,
                 error=f"Corp code not found: {request.corp}",
-                metadata={
-                    "fallback": {
-                        "tool_name": "web_search_tool",
-                        "tool_args": {
-                            "query": f"{request.corp} financial statements {request.year}",
-                        },
-                    },
-                },
             )
 
-        result, primary_err = fetch_opendart_financial(
-            corp_code=corp_code,
-            year=request.year,
-            fs_div=request.fs_div,
-        )
-        used_fs_div = request.fs_div
-        detail_err = primary_err
-        if result is None and request.fs_div == "CFS":
-            result, ofs_err = fetch_opendart_financial(
+        stock_code = str(record.get("stock_code") or "").strip()
+        corp_name = str(record.get("corp_name") or "").strip() or None
+        current_market = _resolve_current_market(stock_code)
+
+        per_year: list[dict[str, Any]] = []
+        missing: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        used_fs_divs: set[str] = set()
+
+        for year in request.year_range.years():
+            financials, error = _fetch_year(
                 corp_code=corp_code,
-                year=request.year,
-                fs_div="OFS",
+                year=year,
+                preferred_fs_div=request.fs_div,
             )
-            if result is not None:
-                used_fs_div = "OFS"
-            elif ofs_err:
-                if primary_err and primary_err != ofs_err:
-                    detail_err = f"CFS: {primary_err}; OFS: {ofs_err}"
-                else:
-                    detail_err = ofs_err or primary_err
+            if financials is None:
+                missing.append({"year": year, "error": error or "unknown error"})
+                continue
 
-        if not result:
-            reason = detail_err or "unknown error"
+            record = AnnualRecord(
+                corp=request.corp,
+                corp_name=corp_name,
+                year=year,
+                financials=financials,
+                market=_resolve_year_end_market(stock_code, year),
+            )
+            row = record.to_dict()
+            row = compute_metrics(row)
+            row["findings"] = _build_findings(row)
+            per_year.append(row)
+            used_fs_divs.add(financials.fs_div)
+            sources.append(
+                {
+                    "year": year,
+                    "rcept_no": financials.source_rcept_no,
+                    "restated": financials.restated,
+                    "fs_div": financials.fs_div,
+                }
+            )
+
+        if not per_year:
+            reasons = "; ".join(f"{m['year']}: {m['error']}" for m in missing)
             return ToolResult(
                 success=False,
                 result=None,
                 error=(
-                    f"No financial data: corp={request.corp}, year={request.year} — {reason}"
+                    f"No financial data: corp={request.corp}, "
+                    f"year_range={request.year_range} — {reasons}"
                 ),
                 metadata={
-                    "dart_error": reason,
+                    "dart_errors": missing,
                     "fallback": {
                         "tool_name": "yfinance_balance_sheet",
-                        "tool_args": {"ticker": request.corp, "year": str(request.year)},
+                        "tool_args": {"ticker": request.corp},
                     },
                 },
             )
 
-        result["corp"] = request.corp
-        result["year"] = request.year
-
-        stock_code = record.get("stock_code", "")
-        if stock_code:
-            try:
-                bar = fetch_krx_daily_price_bar(f"KRX:{stock_code}")
-                result["current_price"] = bar.close_krw
-            except Exception:
-                pass
-
-        _apply_derived_metrics(result)
-        result["findings"] = _build_findings(result)
-
         return ToolResult(
             success=True,
-            result=result,
+            result={
+                "corp": request.corp,
+                "year_range": str(request.year_range),
+                "results": per_year,
+                "missing_years": missing,
+                "market_snapshot": _market_snapshot_dict(current_market),
+                "findings": "\n".join(item["findings"] for item in per_year),
+            },
             metadata={
                 "source": "opendart",
                 "corp_code": corp_code,
-                "fs_div": used_fs_div,
+                "fs_divs": sorted(used_fs_divs),
+                "sources": sources,
             },
         )
 
 
-def _apply_derived_metrics(result: dict[str, Any]) -> None:
-    for metric in DERIVED_RATIOS:
-        numerator = result.get(metric.numerator)
-        denominator = result.get(metric.denominator)
-        if numerator is None or denominator in (None, 0):
-            continue
-        denominator_value = abs(denominator) if metric.abs_denominator else denominator
-        if not denominator_value:
-            continue
-        result[metric.name] = numerator / denominator_value
-
-    for metric in DERIVED_DIFFERENCES:
-        minuend = result.get(metric.minuend)
-        subtrahend = result.get(metric.subtrahend)
-        if minuend is None or subtrahend is None:
-            continue
-        result[metric.name] = minuend - subtrahend
-
-    _calc_ebitda(result)
-    _calc_operating_margin(result)
-    _calc_net_margin(result)
-    _calc_effective_tax_rate(result)
-    _calc_working_capital(result)
-    _calc_net_debt(result)
-    _calc_shareholder_return(result)
-    _calc_per_pbr(result)
-
-
-def _calc_ebitda(result: dict[str, Any]) -> None:
-    operating_income = result.get("operating_income")
-    depreciation = result.get("depreciation", 0) or 0
-    amortization = result.get("amortization", 0) or 0
-    if operating_income is not None:
-        result["ebitda"] = operating_income + depreciation + amortization
-
-
-def _calc_operating_margin(result: dict[str, Any]) -> None:
-    operating_income = result.get("operating_income")
-    total_revenue = result.get("total_revenue")
-    if operating_income is not None and total_revenue:
-        result["operating_margin"] = operating_income / total_revenue
-
-
-def _calc_net_margin(result: dict[str, Any]) -> None:
-    net_income = result.get("net_income")
-    total_revenue = result.get("total_revenue")
-    if net_income is not None and total_revenue:
-        result["net_margin"] = net_income / total_revenue
-
-
-def _calc_effective_tax_rate(result: dict[str, Any]) -> None:
-    tax_expense = result.get("tax_expense")
-    net_income = result.get("net_income")
-    if net_income is None or tax_expense is None:
-        return
-    pretax_income = net_income + tax_expense
-    if pretax_income:
-        result["effective_tax_rate"] = tax_expense / pretax_income
-
-
-def _calc_working_capital(result: dict[str, Any]) -> None:
-    current_assets = result.get("current_assets")
-    current_liabilities = result.get("current_liabilities")
-    if current_assets is not None and current_liabilities is not None:
-        result["working_capital"] = current_assets - current_liabilities
-
-
-def _calc_net_debt(result: dict[str, Any]) -> None:
-    short_term_debt = result.get("short_term_debt", 0) or 0
-    long_term_debt = result.get("long_term_debt", 0) or 0
-    cash_and_equivalents = result.get("cash_and_equivalents", 0) or 0
-    total_debt = short_term_debt + long_term_debt
-    if total_debt:
-        result["total_debt"] = total_debt
-        result["net_debt"] = total_debt - cash_and_equivalents
-
-
-def _calc_shareholder_return(result: dict[str, Any]) -> None:
-    dividends_paid = result.get("dividends_paid")
-    share_buyback = result.get("share_buyback")
-    if dividends_paid is None and share_buyback is None:
-        return
-    result["total_shareholder_return"] = abs(dividends_paid or 0) + abs(
-        share_buyback or 0
+def _fetch_year(
+    *,
+    corp_code: str,
+    year: int,
+    preferred_fs_div: str,
+) -> tuple[YearFinancials | None, str | None]:
+    """Fetch one year, falling back from CFS to OFS when consolidated is empty."""
+    financials, primary_err = fetch_opendart_year(
+        corp_code=corp_code, year=year, fs_div=preferred_fs_div
     )
+    if financials is not None:
+        return financials, None
+
+    if preferred_fs_div != "CFS":
+        return None, primary_err
+
+    financials, ofs_err = fetch_opendart_year(
+        corp_code=corp_code, year=year, fs_div="OFS"
+    )
+    if financials is not None:
+        return financials, None
+
+    if primary_err and ofs_err and primary_err != ofs_err:
+        return None, f"CFS: {primary_err}; OFS: {ofs_err}"
+    return None, ofs_err or primary_err
 
 
-def _calc_per_pbr(result: dict[str, Any]) -> None:
-    current_price = result.get("current_price")
-    if current_price is None:
-        return
-    eps_basic = result.get("eps_basic")
-    if eps_basic and eps_basic > 0:
-        result["per"] = current_price / eps_basic
-    bps = result.get("bps")
-    if bps and bps > 0:
-        result["pbr"] = current_price / bps
+def _resolve_current_market(stock_code: str) -> MarketView | None:
+    if not stock_code:
+        return None
+    try:
+        return fetch_krx_market_view(f"KRX:{stock_code}")
+    except Exception:
+        return None
+
+
+def _resolve_year_end_market(stock_code: str, year: int) -> MarketView | None:
+    if not stock_code:
+        return None
+    try:
+        return fetch_krx_year_end_market_view(f"KRX:{stock_code}", year)
+    except Exception:
+        return None
+
+
+def _market_snapshot_dict(market: MarketView | None) -> dict[str, Any]:
+    if market is None:
+        return {}
+    snapshot: dict[str, Any] = {
+        "listing_id": market.listing_id,
+        "stock_price_as_of": market.as_of.isoformat(),
+    }
+    for key, value in (
+        ("stock_price", market.stock_price),
+        ("market_cap", market.market_cap),
+        ("shares_outstanding", market.shares_outstanding),
+        ("eps", market.eps),
+        ("bps", market.bps),
+        ("per", market.per),
+        ("pbr", market.pbr),
+        ("dividend_yield", market.dividend_yield),
+        ("dps", market.dps),
+    ):
+        if value is not None:
+            snapshot[key] = value
+    if market.stock_price is not None:
+        snapshot["current_price"] = market.stock_price
+    return snapshot
+
+
+_FINDINGS_KEYS: tuple[str, ...] = (
+    "corp",
+    "year",
+    "stock_price_as_of",
+    "source_rcept_no",
+    "source_bsns_year",
+    "restated",
+    # Balance Sheet
+    "total_assets",
+    "current_assets",
+    "total_liabilities",
+    "current_liabilities",
+    "short_term_debt",
+    "long_term_debt",
+    "cash_and_equivalents",
+    "total_equity",
+    "retained_earnings",
+    # Income Statement
+    "total_revenue",
+    "cost_of_revenue",
+    "gross_profit",
+    "sga_expense",
+    "operating_income",
+    "interest_expense",
+    "tax_expense",
+    "net_income",
+    "ebitda",
+    # Cash Flow
+    "operating_cash_flow",
+    "capex",
+    "free_cash_flow",
+    "dividends_paid",
+    # Derived
+    "gross_margin",
+    "operating_margin",
+    "net_margin",
+    "effective_tax_rate",
+    "debt_to_equity",
+    "current_ratio",
+    "interest_coverage",
+    "working_capital",
+    "total_debt",
+    "net_debt",
+    "total_shareholder_return",
+    "stock_price",
+    "market_cap",
+    "shares_outstanding",
+    "eps",
+    "bps",
+    "per",
+    "pbr",
+)
 
 
 def _build_findings(result: dict[str, Any]) -> str:
-    keys = (
-        "corp",
-        "year",
-        "total_assets",
-        "total_equity",
-        "total_revenue",
-        "net_income",
-        "operating_income",
-        "ebitda",
-        "gross_margin",
-        "operating_margin",
-        "net_margin",
-        "debt_to_equity",
-        "current_ratio",
-        "net_debt",
-        "interest_coverage",
-        "operating_cash_flow",
-        "free_cash_flow",
-        "total_shareholder_return",
-        "eps_basic",
-        "eps_diluted",
-        "bps",
-        "per",
-        "pbr",
+    return ", ".join(
+        f"{key}={result[key]}" for key in _FINDINGS_KEYS if result.get(key) is not None
     )
-    return ", ".join(f"{key}={result.get(key)}" for key in keys if result.get(key) is not None)

@@ -4,7 +4,13 @@ from typing import Any, Callable, Iterable, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
-from domain.company import ListingSeed, resolve_company_surfaces, resolve_subjects
+from domain.company import (
+    ListingSeed,
+    SubjectRole,
+    merge_subjects,
+    resolve_company_surfaces,
+    resolve_subjects,
+)
 from domain.query import (
     QueryAnalysis,
     QueryIntent,
@@ -29,6 +35,8 @@ class QueryIntentPayload(BaseModel):
 
     company_names: list[str] = Field(default_factory=list)
     tickers: list[str] = Field(default_factory=list)
+    peer_company_names: list[str] = Field(default_factory=list)
+    peer_tickers: list[str] = Field(default_factory=list)
 
 
 class QueryEntityPayload(BaseModel):
@@ -104,13 +112,26 @@ def _response_schema() -> dict[str, Any]:
             "query_intent": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["company_names", "tickers"],
+                "required": [
+                    "company_names",
+                    "tickers",
+                    "peer_company_names",
+                    "peer_tickers",
+                ],
                 "properties": {
                     "company_names": {
                         "type": "array",
                         "items": {"type": "string"},
                     },
                     "tickers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "peer_company_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "peer_tickers": {
                         "type": "array",
                         "items": {"type": "string"},
                     },
@@ -214,13 +235,27 @@ def _build_query_intent(
     raw_entities: list[QueryEntityPayload],
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
 ) -> QueryIntent:
-    company_names = _dedupe_strings([*raw_intent.tickers, *raw_intent.company_names])
+    primary_names = _dedupe_strings([*raw_intent.tickers, *raw_intent.company_names])
+    peer_names = _dedupe_strings(
+        [
+            name
+            for name in [*raw_intent.peer_tickers, *raw_intent.peer_company_names]
+            if name not in primary_names
+        ]
+    )
+    primary_subjects = resolve_subjects(
+        company_names=tuple(primary_names),
+        on_miss=on_miss,
+        role=SubjectRole.PRIMARY,
+    )
+    peer_subjects = resolve_subjects(
+        company_names=tuple(peer_names),
+        on_miss=on_miss,
+        role=SubjectRole.PEER,
+    )
     return QueryIntent(
         query=query,
-        subjects=resolve_subjects(
-            company_names=tuple(company_names),
-            on_miss=on_miss,
-        ),
+        subjects=merge_subjects(primary_subjects, peer_subjects),
         entities=_intent_entities(raw_entities),
     )
 
@@ -381,7 +416,9 @@ def _company_surfaces_fully_resolved(
     raw: QueryIntentPayload,
     on_miss: Callable[[str], Iterable[ListingSeed]] | None,
 ) -> bool:
-    combined = _dedupe_strings([*raw.tickers, *raw.company_names])
+    combined = _dedupe_strings(
+        [*raw.tickers, *raw.company_names, *raw.peer_tickers, *raw.peer_company_names]
+    )
     if not combined:
         return True
     resolution = resolve_company_surfaces(

@@ -98,12 +98,6 @@ class ToolSpec:
                 continue
             value = normalized[key]
             selected = _select_choice(value, choices)
-            if (
-                selected is None
-                and self.name == "web_search_tool"
-                and key == "search_intent"
-            ):
-                selected = "general"
             if selected is None and isinstance(value, str):
                 selected = value.strip().lower()
             if selected not in choices:
@@ -121,19 +115,19 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="web_search_tool",
         required=("query",),
         optional=("search_intent",),
-        arg_choices={"search_intent": ("general", "deep", "financial")},
-        capability="general/deep/financial grounded search",
+        arg_choices={"search_intent": ("general", "deep")},
+        capability="general/deep grounded search",
         llm_required=(),
         schema_extra_keys=("queries",),
         param_descriptions={
-            "query": "Search query for current web information",
+            "query": "Search query for current non-financial web information. Do not request financial statements, filings, segment revenue, order backlog, valuation multiples, prices, or other reported financial facts; use opendart_financial_tool or yfinance_balance_sheet for those.",
             "search_intent": "Provider-neutral web search intent",
-            "queries": "Parallel search queries",
+            "queries": "Parallel non-financial search queries",
         },
         param_properties={
             "search_intent": {
                 "type": "string",
-                "enum": ["general", "deep", "financial"],
+                "enum": ["general", "deep"],
             },
             "queries": {"type": "array", "items": {"type": "string"}},
         },
@@ -153,34 +147,42 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     ),
     "yfinance_balance_sheet": ToolSpec(
         name="yfinance_balance_sheet",
-        required=("ticker",),
-        optional=("year", "min_year"),
+        required=("ticker", "start_year", "end_year"),
         capability=(
-            "Single-year financial statements plus valuation/pricing. "
-            "Call once per year for multi-year trend analysis. "
-            "Returns: balance sheet, income, cashflow, derived ratios, market data."
+            "Multi-year financial statements plus valuation/pricing for the given "
+            "[start_year, end_year] inclusive. Returns per-year rows: balance sheet, "
+            "income, cashflow, derived ratios, market data. Call once per ticker for "
+            "the full range; do not split by year."
         ),
         param_descriptions={
             "ticker": "Market ticker for the target listing. Use US tickers like 'AAPL' for US listings. For Korean listings use the market/vendor ticker understood by yfinance, not the OpenDART corp field.",
-            "year": "Year (e.g., '2025') or 'latest' for the most recent available",
-            "min_year": "Minimum acceptable year when using 'latest'",
+            "start_year": "First fiscal year to fetch (inclusive). Read from [TEMPORAL_CONTRACT].",
+            "end_year": "Last fiscal year to fetch (inclusive). Read from [TEMPORAL_CONTRACT]. Equal to start_year for a single year.",
         },
         param_properties={
-            "min_year": {"type": "integer"},
+            "start_year": {"type": "integer"},
+            "end_year": {"type": "integer"},
         },
     ),
     "opendart_financial_tool": ToolSpec(
         name="opendart_financial_tool",
-        required=("corp", "year"),
+        required=("corp", "start_year", "end_year"),
         optional=("fs_div",),
-        capability="Korean company financial statements (BS/IS/CF) from DART filings",
+        capability=(
+            "Korean company financial statements (BS/IS/CF) from DART filings, "
+            "plus year-end KRX stock_price/EPS/BPS/PER/PBR fallback metrics, fetched "
+            "for every year in [start_year, end_year] inclusive. Call once per company "
+            "for the full range; do not split by year."
+        ),
         param_descriptions={
             "corp": "Korean issuer only. Pass the Korean company name or the 6-digit KRX stock_code (e.g., '삼성전자', '005930'). Never pass a US ticker here.",
-            "year": "Target year (e.g., 2024)",
+            "start_year": "First fiscal year to fetch (inclusive). Read from [TEMPORAL_CONTRACT].",
+            "end_year": "Last fiscal year to fetch (inclusive). Read from [TEMPORAL_CONTRACT]. Equal to start_year for a single year.",
             "fs_div": "'CFS' (consolidated, default) or 'OFS' (separate)",
         },
         param_properties={
-            "year": {"type": "integer"},
+            "start_year": {"type": "integer"},
+            "end_year": {"type": "integer"},
             "fs_div": {"type": "string", "enum": ["CFS", "OFS"]},
         },
     ),

@@ -8,6 +8,17 @@ from valuator.core.shared_state import SharedStateView
 from valuator.core.types import ToolRequest
 
 
+def _ctx_with_unit(unit: QueryUnit) -> TaskContext:
+    return TaskContext(
+        task_id="t",
+        description="d",
+        step_count=0,
+        as_of_kst="2026-03-30 09:00:00",
+        shared=SharedStateView({}, []),
+        query_units=[unit],
+    )
+
+
 def test_enrich_web_search_injects_temporal_contract() -> None:
     ctx = TaskContext(
         task_id="t",
@@ -37,3 +48,29 @@ def test_enrich_web_search_injects_temporal_contract() -> None:
     assert req.args["time_scope"] == "historical"
     assert req.args["target_start"] == "2020-01-01"
     assert req.args["target_end"] == "2023-12-31"
+
+
+def test_enrich_does_not_inject_year_range_for_financial_tools() -> None:
+    """Financial tools take start_year/end_year directly from the LLM."""
+    ctx = _ctx_with_unit(
+        QueryUnit(
+            id="u0",
+            objective="o",
+            retrieval_query="q",
+            time_scope="historical",
+            target_start="2020-01-01",
+            target_end="2023-12-31",
+        )
+    )
+    for tool_name, args in [
+        ("opendart_financial_tool", {"corp": "삼성전자"}),
+        ("yfinance_balance_sheet", {"ticker": "AMZN"}),
+    ]:
+        req = enrich_tool_request(
+            tool_request=ToolRequest(tool_name=tool_name, args=args),
+            ctx=ctx,
+        )
+        assert "year_range" not in req.args
+        assert "start_year" not in req.args
+        assert "end_year" not in req.args
+        assert req.args == args

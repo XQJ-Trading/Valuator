@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from time import perf_counter
 from typing import Any, Awaitable, Callable
 
 from domain.query import QueryAnalysis
 from valuator.evidence import EvidenceRow, SqliteEvidenceStore, stable_args_hash
+from valuator.evidence.financial_range import (
+    FinancialEvidenceReuse,
+    FinancialRangeRequest,
+    financial_reuse_from_session,
+)
 from valuator.tools.base import ToolRegistry
 from valuator.utils.time_utils import Measurement, kst_isoformat
 
@@ -18,6 +24,7 @@ from ..decomposition import (
     MCTSGateController,
     PassthroughGate,
 )
+from ..fact_extraction import extract_facts
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
@@ -30,6 +37,8 @@ from ..types import (
     TaskDecision,
     TaskState,
     TaskWorkPhase,
+    ToolRequest,
+    ToolResult,
 )
 from . import context_builder, trace as agent_trace
 
@@ -268,6 +277,7 @@ class Agent:
                 task_seq=task_seq,
                 ctx=ctx,
                 decision=effective_decision,
+                tool_request=effective_decision.tool_request,
             )
             return
 
@@ -347,23 +357,19 @@ class Agent:
             invalid_error = "execute action missing tool_request"
         elif (
             decision.tool_request is not None
-            and ctx.available_tools
             and decision.tool_request.tool_name not in ctx.available_tools
         ):
-            error = f"tool not allowed: {decision.tool_request.tool_name}"
-            agent_trace.log_step_decision(
-                self._trace_writer,
-                task=task,
-                task_seq=task_seq,
-                ctx=ctx,
-                decision=decision,
-                status="failed",
-                started_at=started_at,
-                duration_ms=duration_ms,
-                error=error,
-            )
-            await self._fail_task(task, task_seq=task_seq, reason=error)
-            return False
+            if (
+                task.execution_tool
+                and decision.tool_request.tool_name != task.execution_tool
+            ):
+                invalid_error = (
+                    "execute action violates task execution_tool constraint: "
+                    f"required={task.execution_tool}, "
+                    f"received={decision.tool_request.tool_name}"
+                )
+            else:
+                invalid_error = f"tool not allowed: {decision.tool_request.tool_name}"
         elif decision.action is Action.EXECUTE and task.last_tool_success is True:
             invalid_error = (
                 "execute action is not allowed after a successful tool result; "
@@ -440,12 +446,50 @@ class Agent:
                 ),
             )
             return None
+        if (
+            task.execution_tool
+            and effective_request.tool_name != task.execution_tool
+        ):
+            await self._reject_step(
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
+                error=(
+                    "execute action violates task execution_tool constraint: "
+                    f"required={task.execution_tool}, received={effective_request.tool_name}"
+                ),
+            )
+            return None
+        if effective_request.tool_name not in ctx.available_tools:
+            allowed = ", ".join(ctx.available_tools) or "(none)"
+            await self._reject_step(
+                task=task,
+                task_seq=task_seq,
+                ctx=ctx,
+                decision=effective_decision,
+                started_at=started_at,
+                duration_ms=duration_ms,
+                error=(
+                    "execute action uses a tool outside this task's available tools: "
+                    f"{effective_request.tool_name}; available=[{allowed}]"
+                ),
+            )
+            return None
 
         evidence = self._lookup_evidence(
             tool_name=effective_request.tool_name,
             args=effective_request.args,
         )
         if evidence is not None and evidence.status == "satisfied":
+            if self._financial_reuse_for_evidence(
+                evidence=evidence,
+                tool_name=effective_request.tool_name,
+                args=effective_request.args,
+            ):
+                return effective_decision
             summary = evidence.value_summary or "already collected"
             await self._reject_step(
                 task=task,
@@ -489,26 +533,33 @@ class Agent:
         task_seq: int,
         ctx: TaskContext,
         decision: TaskDecision,
+        tool_request: ToolRequest,
     ) -> None:
-        assert decision.tool_request is not None
-        task.last_tool_request = decision.tool_request
+        task.last_tool_request = tool_request
         self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
         tool_started_at = kst_isoformat()
         started = perf_counter()
-        result = await self._tools.execute_tool(
-            decision.tool_request.tool_name,
-            **decision.tool_request.args,
-        )
-        duration_ms = (perf_counter() - started) * 1000.0
-        tool_name = decision.tool_request.tool_name
+        tool_name = tool_request.tool_name
         artifact_refs: dict[str, str] = {}
+        evidence_reuse = self._financial_reuse_for_request(
+            tool_name=tool_name,
+            args=tool_request.args,
+        )
+        if evidence_reuse is not None:
+            result = self._tool_result_from_financial_reuse(evidence_reuse)
+        else:
+            result = await self._tools.execute_tool(
+                tool_name,
+                **tool_request.args,
+            )
+        duration_ms = (perf_counter() - started) * 1000.0
         if result.success:
             task.tool_failure_counts.pop(tool_name, None)
         else:
             task.failed_tool_request_signatures.add(
                 _tool_request_signature(
                     tool_name=tool_name,
-                    args=decision.tool_request.args,
+                    args=tool_request.args,
                 )
             )
             task.tool_failure_counts[tool_name] = (
@@ -522,7 +573,7 @@ class Agent:
             self._append_failed_attempt(
                 task=task,
                 tool_name=tool_name,
-                args=decision.tool_request.args,
+                args=tool_request.args,
                 error=result.error or "tool execution failed",
                 kind="tool_error",
             )
@@ -530,29 +581,30 @@ class Agent:
         if self._session_store is not None:
             artifact_refs = self._session_store.write_execution_result(
                 task_id=task.id,
-                tool_name=decision.tool_request.tool_name,
-                args=decision.tool_request.args,
+                tool_name=tool_request.tool_name,
+                args=tool_request.args,
                 result=result,
                 started_at=tool_started_at,
                 duration_ms=duration_ms,
             )
             task.artifacts.update(artifact_refs)
             result.metadata["artifacts"] = artifact_refs
-        self._record_evidence(
-            task=task,
-            ctx=ctx,
-            tool_name=tool_name,
-            args=decision.tool_request.args,
-            result=result,
-            value_ref=artifact_refs.get("execution_result_path", ""),
-        )
+        if not result.metadata.get("evidence_reused"):
+            self._record_evidence(
+                task=task,
+                ctx=ctx,
+                tool_name=tool_name,
+                args=tool_request.args,
+                result=result,
+                value_ref=artifact_refs.get("execution_result_path", ""),
+            )
         self._sync_session_tree()
         agent_trace.log_tool_execution(
             self._trace_writer,
             task_id=task.id,
             task_seq=task_seq,
-            tool_name=decision.tool_request.tool_name,
-            args=decision.tool_request.args,
+            tool_name=tool_request.tool_name,
+            args=tool_request.args,
             result=result,
             started_at=tool_started_at,
             duration_ms=duration_ms,
@@ -562,8 +614,8 @@ class Agent:
                 type=EventType.TOOL_EXECUTED,
                 task_id=task.id,
                 detail={
-                    "tool": decision.tool_request.tool_name,
-                    "args": decision.tool_request.args,
+                    "tool": tool_request.tool_name,
+                    "args": tool_request.args,
                     "duration_ms": round(duration_ms, 3),
                     "tool_result": result.model_dump(),
                     "task_name": task.task_name,
@@ -579,6 +631,10 @@ class Agent:
         ctx: TaskContext,
         decision: TaskDecision,
     ) -> None:
+        if decision.action is Action.AGGREGATE:
+            facts = extract_facts(task=task, ctx=ctx)
+            if facts:
+                decision = decision.update(facts=decision.facts | facts)
         self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
         if (
             self._session_store is not None
@@ -714,6 +770,72 @@ class Agent:
             tool_name=tool_name,
             args=args,
         )
+
+    def _financial_reuse_for_request(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> FinancialEvidenceReuse | None:
+        requested = FinancialRangeRequest.from_tool_args(
+            tool_name=tool_name,
+            args=args,
+        )
+        if requested is None:
+            return None
+        if self._evidence_store is None or not self._evidence_session_id:
+            return None
+        tasks_dir = self._financial_evidence_tasks_dir()
+        if tasks_dir is None:
+            return None
+
+        candidates: list[FinancialEvidenceReuse] = []
+        for row in self._evidence_store.list_for_session(self._evidence_session_id):
+            if row.tool_name != tool_name or row.status != "satisfied":
+                continue
+            reuse = financial_reuse_from_session(
+                tasks_dir=tasks_dir,
+                row=row,
+                requested=requested,
+            )
+            if reuse is not None:
+                candidates.append(reuse)
+        if not candidates:
+            return None
+        return min(candidates, key=lambda candidate: candidate.span)
+
+    def _financial_reuse_for_evidence(
+        self,
+        *,
+        evidence: EvidenceRow,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> FinancialEvidenceReuse | None:
+        requested = FinancialRangeRequest.from_tool_args(
+            tool_name=tool_name,
+            args=args,
+        )
+        if requested is None:
+            return None
+        tasks_dir = self._financial_evidence_tasks_dir()
+        if tasks_dir is None:
+            return None
+        return financial_reuse_from_session(
+            tasks_dir=tasks_dir,
+            row=evidence,
+            requested=requested,
+        )
+
+    def _financial_evidence_tasks_dir(self) -> Path | None:
+        if self._session_store is None:
+            return None
+        return self._session_store.tasks_dir
+
+    @staticmethod
+    def _tool_result_from_financial_reuse(
+        reuse: FinancialEvidenceReuse,
+    ) -> ToolResult:
+        return ToolResult(success=True, result=reuse.payload, metadata=reuse.metadata)
 
     def _record_evidence(
         self,

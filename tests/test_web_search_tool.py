@@ -45,36 +45,6 @@ class _FakeTavilyClient:
 
 
 @pytest.mark.asyncio
-async def test_perplexity_provider_maps_financial_intent_to_sec(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_module = importlib.import_module("valuator.utils.config")
-    from valuator.tools import web_search_providers as module
-
-    chat = _FakeChatPerplexity()
-
-    def fake_init_client(self, api_key: str):
-        assert api_key == "test-key"
-        self._HumanMessage = _Message
-        self._SystemMessage = _Message
-        return chat
-
-    monkeypatch.setattr(
-        config_module, "config", SimpleNamespace(perplexity_api_key="test-key")
-    )
-    monkeypatch.setattr(module.PerplexityProvider, "_init_client", fake_init_client)
-
-    provider = PerplexityProvider()
-    result = await provider.search("latest Amazon filing", intent="financial")
-
-    assert provider.available is True
-    assert result.answer == "answer"
-    assert chat.calls[0]["kwargs"] == {
-        "extra_body": {"web_search_options": {"search_mode": "sec"}}
-    }
-
-
-@pytest.mark.asyncio
 async def test_tavily_provider_maps_deep_intent_to_advanced_general(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -99,28 +69,6 @@ async def test_tavily_provider_maps_deep_intent_to_advanced_general(
     assert client.calls[0]["search_depth"] == "advanced"
     assert client.calls[0]["chunks_per_source"] == 3
     assert client.calls[0]["time_range"] == "month"
-
-
-@pytest.mark.asyncio
-async def test_tavily_provider_maps_financial_intent_to_general_topic(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_module = importlib.import_module("valuator.utils.config")
-    from valuator.tools import web_search_providers as module
-
-    client = _FakeTavilyClient()
-    monkeypatch.setattr(
-        config_module, "config", SimpleNamespace(tavily_api_key="test-key")
-    )
-    monkeypatch.setattr(
-        module.TavilyProvider, "_init_client", lambda self, api_key: client
-    )
-
-    provider = TavilyProvider()
-    await provider.search("PBR 지표", intent="financial")
-
-    assert client.calls[0]["topic"] == "general"
-    assert client.calls[0]["search_depth"] == "advanced"
 
 
 @pytest.mark.asyncio
@@ -235,7 +183,6 @@ async def test_web_search_tool_appends_rag_source_policy_by_default(
     assert RAG_SOURCE_POLICY_MARKER in calls[0]["query"]
     assert "sell-side" in calls[0]["query"].lower()
 
-
 @pytest.mark.asyncio
 async def test_web_search_tool_rejects_invalid_search_intent() -> None:
     class FakeProvider:
@@ -250,7 +197,7 @@ async def test_web_search_tool_rejects_invalid_search_intent() -> None:
     result = await tool.execute(query="Samsung revenue", search_intent="unknown")
 
     assert result.success is False
-    assert result.error == "search_intent must be one of: deep, financial, general"
+    assert result.error == "search_intent must be one of: deep, general"
 
 
 @pytest.mark.asyncio

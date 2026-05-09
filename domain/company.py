@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from functools import lru_cache
 from datetime import date
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
@@ -87,10 +88,16 @@ class Listing:
         return market_for_exchange(self.exchange)
 
 
+class SubjectRole(str, Enum):
+    PRIMARY = "primary"
+    PEER = "peer"
+
+
 @dataclass(frozen=True, slots=True)
 class Subject:
     company: Company
     listing: Listing | None = None
+    role: SubjectRole = SubjectRole.PRIMARY
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +129,7 @@ def resolve_company_surfaces(
     *,
     company_names: tuple[str, ...],
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
+    role: SubjectRole = SubjectRole.PRIMARY,
 ) -> CompanySurfaceResolution:
     """Resolve surface strings without failing the whole batch on one miss."""
     normalized = tuple(
@@ -135,7 +143,8 @@ def resolve_company_surfaces(
     failures: list[str] = []
     for surface in normalized:
         try:
-            resolved.append(_subject_from_surface_form(index, surface, on_miss=on_miss))
+            subject = _subject_from_surface_form(index, surface, on_miss=on_miss)
+            resolved.append(replace(subject, role=role))
         except ValueError:
             failures.append(surface)
 
@@ -151,6 +160,7 @@ def resolve_subjects(
     security_code: str = "",
     company_names: tuple[str, ...] = (),
     on_miss: Callable[[str], Iterable[ListingSeed]] | None = None,
+    role: SubjectRole = SubjectRole.PRIMARY,
 ) -> tuple[Subject, ...]:
     normalized_ticker = ticker.strip().upper()
     normalized_security_code = security_code.strip().upper()
@@ -165,10 +175,13 @@ def resolve_subjects(
         return ()
 
     index = _entity_index()
-    identifier_subjects = _resolve_identifier_subject(
-        index,
-        ticker=normalized_ticker,
-        security_code=normalized_security_code,
+    identifier_subjects = tuple(
+        replace(subject, role=role)
+        for subject in _resolve_identifier_subject(
+            index,
+            ticker=normalized_ticker,
+            security_code=normalized_security_code,
+        )
     )
     if not normalized_company_names:
         return merge_subjects(identifier_subjects, ())
@@ -176,6 +189,7 @@ def resolve_subjects(
     surface_resolution = resolve_company_surfaces(
         company_names=normalized_company_names,
         on_miss=on_miss,
+        role=role,
     )
     if (
         not identifier_subjects

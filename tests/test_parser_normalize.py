@@ -107,6 +107,25 @@ def test_parse_decision_decompose_wait_mix_produces_wait() -> None:
     assert list(decision.wait_for) == ["root.0"]
 
 
+def test_parse_decision_preserves_child_execution_tool() -> None:
+    task = ComplexTask(id="root", description="x")
+    decision = parse_decision(
+        task,
+        {
+            "action": "decompose",
+            "children": [
+                {
+                    "description": "collect financials",
+                    "task_name": "collect_financials",
+                    "execution_tool": "opendart_financial_tool",
+                }
+            ],
+        },
+    )
+
+    assert decision.children[0].execution_tool == "opendart_financial_tool"
+
+
 def test_parse_decision_wait_without_action_uses_mapper() -> None:
     task = AtomicTask(id="root.0", description="x", tool_hint="")
     decision = parse_decision(

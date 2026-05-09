@@ -269,11 +269,6 @@ class SECTool(BaseTool):
         except SecToolError as exc:
             error_text = str(exc)
             metadata = {"error_code": exc.error_code}
-            if exc.recoverable:
-                metadata["fallback"] = {
-                    "tool_name": "web_search_tool",
-                    "tool_args": {"query": query},
-                }
             return ToolResult(
                 success=False,
                 result=None,
@@ -288,4 +283,3 @@ class SECTool(BaseTool):
                 error=error_text,
                 metadata={"error_code": "other"},
             )
-

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -72,6 +72,7 @@ class TaskSpec:
     description: str
     task_name: str = ""
     tool_hint: str = ""
+    execution_tool: str = ""
     depends_on_siblings: list[int] = field(default_factory=list)
     query_unit_ids: list[int] = field(default_factory=list)
 
@@ -88,6 +89,9 @@ class TaskDecision:
     def __post_init__(self) -> None:
         object.__setattr__(self, "children", tuple(self.children))
         object.__setattr__(self, "wait_for", tuple(self.wait_for))
+
+    def update(self, **changes: Any) -> "TaskDecision":
+        return replace(self, **changes)
 
 
 @dataclass

@@ -271,7 +271,11 @@ class ValuatorSessionStore:
                 meta_path,
                 {
                     "tool": tool_name,
-                    "args_hash": self._args_hash(args),
+                    "args_hash": hashlib.sha256(
+                        json.dumps(
+                            args, ensure_ascii=False, sort_keys=True, default=str
+                        ).encode("utf-8")
+                    ).hexdigest(),
                     "args": args,
                     "success": result.success,
                     "error": result.error,
@@ -394,7 +398,11 @@ class ValuatorSessionStore:
             final_path = self.output_dir / "final.md"
             meta_path = self.output_dir / "final.md.meta.json"
             trace_path = self.output_dir / "final.trace.json"
-            source_reports = self._collect_all_task_ids()
+            source_reports = [
+                task_id
+                for task_id in self._plan_tasks
+                if task_id != self._root_task_id
+            ]
             final_markdown = self.final_output_markdown(content)
 
             self._write_text(final_path, final_markdown.strip() + "\n")
@@ -481,11 +489,6 @@ class ValuatorSessionStore:
             self._session_payload["updated_at"] = kst_isoformat()
             self._write_session()
 
-    def _collect_all_task_ids(self) -> list[str]:
-        return [
-            task_id for task_id in self._plan_tasks if task_id != self._root_task_id
-        ]
-
     def _artifacts_for(self, task_id: str) -> dict[str, str | None]:
         return self._task_artifacts.setdefault(
             task_id,
@@ -517,12 +520,6 @@ class ValuatorSessionStore:
 
     def _rel(self, path: Path) -> str:
         return str(path.relative_to(self.session_dir))
-
-
-    @staticmethod
-    def _args_hash(args: dict[str, Any]) -> str:
-        text = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _write_text(path: Path, content: str) -> None:

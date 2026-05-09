@@ -683,7 +683,9 @@ class GeminiClient:
     def _explicit_cache(
         cached_content: Any, *, ttl_seconds: int
     ) -> ExplicitGeminiCache:
-        payload = GeminiClient._sdk_dict(cached_content)
+        if hasattr(cached_content, "model_dump"):
+            cached_content = cached_content.model_dump()
+        payload = cached_content if isinstance(cached_content, dict) else {}
         usage_metadata = payload.get("usage_metadata", payload.get("usageMetadata", {}))
         if hasattr(usage_metadata, "model_dump"):
             usage_metadata = usage_metadata.model_dump()
@@ -708,12 +710,6 @@ class GeminiClient:
                 payload.get("expire_time", payload.get("expireTime"))
             ),
         )
-
-    @staticmethod
-    def _sdk_dict(value: Any) -> dict[str, Any]:
-        if hasattr(value, "model_dump"):
-            value = value.model_dump()
-        return value if isinstance(value, dict) else {}
 
     @staticmethod
     def _sdk_time(value: Any) -> str | None:

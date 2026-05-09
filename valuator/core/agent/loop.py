@@ -280,7 +280,6 @@ class Agent:
 
         await self._complete_non_execute_step(
             task=task,
-            task_seq=task_seq,
             ctx=ctx,
             decision=effective_decision,
         )
@@ -532,7 +531,7 @@ class Agent:
         tool_request: ToolRequest,
     ) -> None:
         task.last_tool_request = tool_request
-        self._scheduler.apply_decision(task, decision, ctx=ctx)
+        self._scheduler.apply_decision(task, decision)
         tool_started_at = kst_isoformat()
         started = perf_counter()
         tool_name = tool_request.tool_name
@@ -542,7 +541,11 @@ class Agent:
             args=tool_request.args,
         )
         if evidence_reuse is not None:
-            result = self._tool_result_from_financial_reuse(evidence_reuse)
+            result = ToolResult(
+                success=True,
+                result=evidence_reuse.payload,
+                metadata=evidence_reuse.metadata,
+            )
         else:
             result = await self._tools.execute_tool(
                 tool_name,
@@ -623,7 +626,6 @@ class Agent:
         self,
         *,
         task: Task,
-        task_seq: int,
         ctx: TaskContext,
         decision: TaskDecision,
     ) -> None:
@@ -631,7 +633,7 @@ class Agent:
             facts = extract_facts(task=task, ctx=ctx)
             if facts:
                 decision = decision.update(facts=decision.facts | facts)
-        self._scheduler.apply_decision(task, decision, ctx=ctx)
+        self._scheduler.apply_decision(task, decision)
         if (
             self._session_store is not None
             and decision.action in (Action.AGGREGATE, Action.FINALIZE)
@@ -826,12 +828,6 @@ class Agent:
         if self._session_store is None:
             return None
         return self._session_store.tasks_dir
-
-    @staticmethod
-    def _tool_result_from_financial_reuse(
-        reuse: FinancialEvidenceReuse,
-    ) -> ToolResult:
-        return ToolResult(success=True, result=reuse.payload, metadata=reuse.metadata)
 
     def _record_evidence(
         self,

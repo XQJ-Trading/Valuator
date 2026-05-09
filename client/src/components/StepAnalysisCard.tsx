@@ -184,7 +184,7 @@ export default function StepAnalysisCard({
   async function copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      pushToast({ type: "success", title: "복사됨", message: "클립보드에 복사되었습니다" });
+      pushToast({ type: "info", title: "복사됨", message: "클립보드에 복사되었습니다" });
     } catch (err) {
       pushToast({ type: "error", title: "복사 실패", message: String(err) });
     }
@@ -404,7 +404,7 @@ export default function StepAnalysisCard({
                                     className={styles.copyBtn}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      void copyToClipboard(step.response_text);
+                                      void copyToClipboard(step.response_text ?? "");
                                     }}
                                   >
                                     Copy

@@ -16,12 +16,14 @@ import {
   fetchChatMessages,
   fetchFile,
   fetchTree,
+  fetchWebSearchProviders,
   getOrCreateChatSessionId,
   postChatMessage,
   postChatStop,
   type ChatMessage,
   type ChatResetEvent,
   type DataSource,
+  type WebSearchProvider,
 } from "./api";
 import { parseProgressLine } from "./chatProgressParse";
 
@@ -53,6 +55,10 @@ export type ChatSessionContextValue = {
   setDraftText: (s: string) => void;
   /** Latest agent step line (gN/lN + task) for the center status bar. */
   lastStepFlow: StepFlowSnapshot | null;
+  webSearchProvider: WebSearchProvider | "";
+  setWebSearchProvider: (p: WebSearchProvider | "") => void;
+  webSearchProviders: WebSearchProvider[];
+  webSearchProvidersLoading: boolean;
 };
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -82,12 +88,23 @@ export function ChatSessionProvider({
   const [lastStepFlow, setLastStepFlow] = useState<StepFlowSnapshot | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [webSearchProvider, setWebSearchProvider] = useState<WebSearchProvider | "">("");
+  const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>([]);
+  const [webSearchProvidersLoading, setWebSearchProvidersLoading] = useState(false);
   const messageIdsRef = useRef<Set<string>>(new Set());
   const chatSessionIdRef = useRef<string>(getOrCreateChatSessionId());
 
   useEffect(() => {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
+
+  useEffect(() => {
+    setWebSearchProvidersLoading(true);
+    fetchWebSearchProviders()
+      .then((res) => setWebSearchProviders(res.available))
+      .catch(() => {})
+      .finally(() => setWebSearchProvidersLoading(false));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -390,6 +407,10 @@ export function ChatSessionProvider({
       draftText,
       setDraftText,
       lastStepFlow,
+      webSearchProvider,
+      setWebSearchProvider,
+      webSearchProviders,
+      webSearchProvidersLoading,
     }),
     [
       messages,
@@ -405,6 +426,9 @@ export function ChatSessionProvider({
       stopAgent,
       draftText,
       lastStepFlow,
+      webSearchProvider,
+      webSearchProviders,
+      webSearchProvidersLoading,
     ],
   );
 

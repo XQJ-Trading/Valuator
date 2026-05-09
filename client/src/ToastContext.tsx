@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 import ToastContainer from "./components/Toast";
 
 export type ToastType = "warning" | "error" | "info";
@@ -21,8 +21,10 @@ export function useToast(): PushToast {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const push: PushToast = (t) =>
-    setToasts((prev) => [...prev, { ...t, id: Date.now() }]);
+  const push: PushToast = useCallback(
+    (t) => setToasts((prev) => [...prev, { ...t, id: Date.now() }]),
+    [],
+  );
 
   const dismiss = (id: number) =>
     setToasts((prev) => prev.filter((t) => t.id !== id));

@@ -116,14 +116,6 @@ export default function LLMCallFlowchart({
     };
   }, [mermaidCode]);
 
-  function resetView() {
-    if (panZoomRef.current) {
-      panZoomRef.current.resetZoom();
-      panZoomRef.current.center();
-      panZoomRef.current.fit();
-    }
-  }
-
   async function loadAndGenerateFlowchart(sessionId: string) {
     setLoading(true);
     setError(null);

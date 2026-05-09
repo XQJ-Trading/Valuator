@@ -7,14 +7,16 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from .context import TaskContext
 from .ontology import PROPERTY_KEY_BY_RESULT_KEY
 from .task import Task
-from .types import Action, TaskDecision
 
-_FINANCIAL_TOOL_NAMES: frozenset[str] = frozenset(
+FINANCIAL_FACT_TOOL_NAMES: frozenset[str] = frozenset(
     {"opendart_financial_tool", "yfinance_balance_sheet"}
 )
+IGNORED_FINANCIAL_RESULT_KEYS: frozenset[str] = frozenset({"current_price"})
 
 
-class _PeriodRow(BaseModel):
+class FinancialResultRow(BaseModel):
+    """One year of financial data returned by a financial tool."""
+
     model_config = ConfigDict(extra="allow")
 
     year: int
@@ -23,32 +25,57 @@ class _PeriodRow(BaseModel):
         default=None, validation_alias=AliasChoices("corp", "ticker")
     )
 
-    def metrics(self) -> dict[str, Any]:
-        return _known_metrics(self.__pydantic_extra__ or {})
+
+class FinancialToolPayload(BaseModel):
+    results: list[FinancialResultRow]
 
 
-class _FinancialPayload(BaseModel):
-    results: list[_PeriodRow]
+def extract_facts(*, task: Task, ctx: TaskContext) -> dict[str, Any]:
+    tool_name = task.last_tool_request.tool_name if task.last_tool_request else ""
+    if tool_name not in FINANCIAL_FACT_TOOL_NAMES:
+        return {}
+
+    facts: dict[str, Any] = {}
+    for tool_result in task.tool_results:
+        if not tool_result.success:
+            continue
+
+        payload = FinancialToolPayload.model_validate(tool_result.result)
+        for row in sorted(payload.results, key=lambda r: r.year, reverse=True):
+            subject = fact_subject(row=row, task=task, ctx=ctx)
+            metrics = metric_values(row.model_extra or {})
+            for property_key, value in metrics.items():
+                facts[f"{subject}:{property_key}:{row.year}"] = value
+
+    return facts
 
 
-def _known_metrics(raw: dict[str, Any]) -> dict[str, Any]:
+def metric_values(raw: dict[str, Any]) -> dict[str, Any]:
+    """Return non-empty financial metrics keyed by ontology property keys.
+
+    Tool result keys can be either standard property keys, such as ``revenue``,
+    or source-specific aliases, such as ``total_revenue``. Standard keys win
+    when both are present.
+    """
+
     metrics: dict[str, Any] = {}
-    input_key_values: list[tuple[str, Any]] = []
+    alias_metric_values: list[tuple[str, Any]] = []
 
     for key, value in raw.items():
-        if key == "current_price":
+        result_key = key.strip()
+        if result_key in IGNORED_FINANCIAL_RESULT_KEYS:
             continue
         if not _has_fact_value(value):
             continue
-        property_key = PROPERTY_KEY_BY_RESULT_KEY.get(key.strip())
+        property_key = PROPERTY_KEY_BY_RESULT_KEY.get(result_key)
         if property_key is None:
             continue
-        if property_key == key.strip():
+        if property_key == result_key:
             metrics[property_key] = value
         else:
-            input_key_values.append((property_key, value))
+            alias_metric_values.append((property_key, value))
 
-    for property_key, value in input_key_values:
+    for property_key, value in alias_metric_values:
         if property_key not in metrics:
             metrics[property_key] = value
     return metrics
@@ -58,49 +85,12 @@ def _has_fact_value(value: Any) -> bool:
     return value not in (None, "", [], {})
 
 
-def augment_decision_with_official_facts(
+def fact_subject(
     *,
+    row: FinancialResultRow,
     task: Task,
-    decision: TaskDecision,
     ctx: TaskContext,
-) -> TaskDecision:
-    if decision.action is not Action.AGGREGATE:
-        return decision
-
-    official_facts = official_financial_facts(task=task, ctx=ctx)
-    if not official_facts:
-        return decision
-
-    merged = dict(decision.facts)
-    merged.update(official_facts)
-    return TaskDecision(
-        action=decision.action,
-        children=decision.children,
-        tool_request=decision.tool_request,
-        wait_for=decision.wait_for,
-        output=decision.output,
-        facts=merged,
-    )
-
-
-def official_financial_facts(*, task: Task, ctx: TaskContext) -> dict[str, Any]:
-    tool_name = task.last_tool_request.tool_name if task.last_tool_request else ""
-    if tool_name not in _FINANCIAL_TOOL_NAMES:
-        return {}
-
-    facts: dict[str, Any] = {}
-    for tool_result in task.tool_results:
-        if not tool_result.success:
-            continue
-        payload = _FinancialPayload.model_validate(tool_result.result)
-        for row in sorted(payload.results, key=lambda r: r.year, reverse=True):
-            subject = _subject_label(row=row, task=task, ctx=ctx)
-            for key, value in row.metrics().items():
-                facts[f"{subject}:{key}:{row.year}"] = value
-    return facts
-
-
-def _subject_label(*, row: _PeriodRow, task: Task, ctx: TaskContext) -> str:
+) -> str:
     name = (row.corp_name or "").strip()
     identifier = (row.identifier or "").strip()
 

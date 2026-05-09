@@ -24,7 +24,7 @@ from ..decomposition import (
     MCTSGateController,
     PassthroughGate,
 )
-from ..fact_extraction import augment_decision_with_official_facts
+from ..fact_extraction import extract_facts
 from ..scheduler import Scheduler
 from ..shared_state import SharedState
 from ..planning import StepPlanner
@@ -631,11 +631,10 @@ class Agent:
         ctx: TaskContext,
         decision: TaskDecision,
     ) -> None:
-        decision = augment_decision_with_official_facts(
-            task=task,
-            decision=decision,
-            ctx=ctx,
-        )
+        if decision.action is Action.AGGREGATE:
+            facts = extract_facts(task=task, ctx=ctx)
+            if facts:
+                decision = decision.update(facts=decision.facts | facts)
         self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
         if (
             self._session_store is not None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -89,6 +89,9 @@ class TaskDecision:
     def __post_init__(self) -> None:
         object.__setattr__(self, "children", tuple(self.children))
         object.__setattr__(self, "wait_for", tuple(self.wait_for))
+
+    def update(self, **changes: Any) -> "TaskDecision":
+        return replace(self, **changes)
 
 
 @dataclass

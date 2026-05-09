@@ -5,12 +5,12 @@ from typing import Any
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent
 from valuator.core.context import TaskContext
-from valuator.core.fact_extraction import augment_decision_with_official_facts
+from valuator.core.fact_extraction import extract_facts
 from valuator.core.task import AtomicTask
-from valuator.core.types import Action, TaskDecision, ToolRequest, ToolResult
+from valuator.core.types import ToolRequest, ToolResult
 
 
-def _decision_for_results(results: list[dict[str, Any]]) -> TaskDecision:
+def _facts_for_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     task = AtomicTask(
         id="root.0",
         description="collect official financials",
@@ -32,9 +32,8 @@ def _decision_for_results(results: list[dict[str, Any]]) -> TaskDecision:
         )
     )
 
-    return augment_decision_with_official_facts(
+    return extract_facts(
         task=task,
-        decision=TaskDecision(action=Action.AGGREGATE),
         ctx=_ctx(task),
     )
 
@@ -60,8 +59,8 @@ def _ctx(task: AtomicTask) -> TaskContext:
     )
 
 
-def test_augment_decision_promotes_official_financial_per_facts() -> None:
-    decision = _decision_for_results(
+def test_extract_facts_adds_metrics() -> None:
+    facts = _facts_for_results(
         [
             {
                 "corp": "079550",
@@ -84,18 +83,18 @@ def test_augment_decision_promotes_official_financial_per_facts() -> None:
         ]
     )
 
-    assert decision.facts["LIG넥스원:per:2025"] == 81.09
-    assert decision.facts["LIG넥스원:per:2024"] == 92.5
-    assert decision.facts["LIG넥스원:eps:2025"] == 11604
-    assert decision.facts["LIG넥스원:revenue:2025"] == 4306936127418
-    assert decision.facts["LIG넥스원:revenue:2024"] == 3276339508425
-    assert decision.facts["LIG넥스원:stock_price:2025"] == 930000
-    assert "LIG넥스원:total_revenue:2025" not in decision.facts
-    assert "LIG넥스원:current_price:2025" not in decision.facts
+    assert facts["LIG넥스원:per:2025"] == 81.09
+    assert facts["LIG넥스원:per:2024"] == 92.5
+    assert facts["LIG넥스원:eps:2025"] == 11604
+    assert facts["LIG넥스원:revenue:2025"] == 4306936127418
+    assert facts["LIG넥스원:revenue:2024"] == 3276339508425
+    assert facts["LIG넥스원:stock_price:2025"] == 930000
+    assert "LIG넥스원:total_revenue:2025" not in facts
+    assert "LIG넥스원:current_price:2025" not in facts
 
 
-def test_augment_decision_does_not_promote_current_price_as_annual_stock_price() -> None:
-    decision = _decision_for_results(
+def test_extract_facts_skips_current_price() -> None:
+    facts = _facts_for_results(
         [
             {
                 "corp": "079550",
@@ -107,12 +106,12 @@ def test_augment_decision_does_not_promote_current_price_as_annual_stock_price()
         ]
     )
 
-    assert "LIG넥스원:stock_price:2025" not in decision.facts
-    assert "LIG넥스원:current_price:2025" not in decision.facts
+    assert "LIG넥스원:stock_price:2025" not in facts
+    assert "LIG넥스원:current_price:2025" not in facts
 
 
-def test_official_financial_facts_prefers_property_key_over_input_key() -> None:
-    decision = _decision_for_results(
+def test_extract_facts_prefers_property_key() -> None:
+    facts = _facts_for_results(
         [
             {
                 "corp": "079550",
@@ -124,4 +123,4 @@ def test_official_financial_facts_prefers_property_key_over_input_key() -> None:
         ]
     )
 
-    assert decision.facts["LIG넥스원:revenue:2025"] == 2
+    assert facts["LIG넥스원:revenue:2025"] == 2

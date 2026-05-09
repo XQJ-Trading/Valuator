@@ -26,6 +26,12 @@ def _compact_tool_args_for_prompt(args: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in args.items() if k not in _TEMPORAL_ARG_KEYS}
 
 
+def prioritize_market_snapshot(value: Any) -> Any:
+    if not isinstance(value, Mapping) or "market_snapshot" not in value:
+        return value
+    return {"market_snapshot": value["market_snapshot"], **dict(value)}
+
+
 _STATIC_SYSTEM_PREFIX = """\
 You are the step function of a recursive valuation agent.
 Write markdown in Korean for output and facts. Keep numbers, tickers, proper nouns, and quotes as in sources.
@@ -142,6 +148,10 @@ def build_system_prompt_suffix(
                 "This task already has a successful tool result. You must not return EXECUTE.",
                 "Extract key numeric values from the tool result into the facts dict as key-value pairs.",
                 "For financial tool results, include valuation metrics such as per whenever present.",
+                "For financial tool market_snapshot, preserve "
+                "stock_price_as_of/current_price/EPS/BPS/PER/PBR as current "
+                "as-of facts; do not replace them with historical year-end "
+                "multiples.",
                 schema_for_prompt(),
                 "Put interpretation and context in output; keep facts to numbers (and minimal labels) only.",
             ]
@@ -238,11 +248,14 @@ def build_step_prompt(
         sections.append(("[FAILED_ATTEMPTS]", failed_attempts_text(task)))
     if ctx.tool_results:
         latest = ctx.tool_results[-1]
+        rendered_latest = render_prompt_value_limited(
+            prioritize_market_snapshot(latest.result),
+            max_chars=_LAST_TOOL_RESULT_MAX_CHARS,
+        )
         sections.append(
             (
                 "[LAST_TOOL_RESULT]",
-                f"success={latest.success}\n"
-                f"{render_prompt_value_limited(latest.result, max_chars=_LAST_TOOL_RESULT_MAX_CHARS)}",
+                f"success={latest.success}\n{rendered_latest}",
             )
         )
     if task.last_tool_request is not None:

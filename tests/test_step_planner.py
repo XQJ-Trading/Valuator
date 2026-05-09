@@ -7,10 +7,18 @@ import pytest
 from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
+from valuator.core.planning.prompts import build_step_prompt
 from valuator.core.shared_state import SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
-from valuator.core.types import Action, FailedAttempt, TaskState, TaskWorkPhase, ToolResult
+from valuator.core.types import (
+    Action,
+    FailedAttempt,
+    TaskState,
+    TaskWorkPhase,
+    ToolRequest,
+    ToolResult,
+)
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.evidence import EvidenceRow
 
@@ -83,6 +91,65 @@ def _context(*, available_tools: list[str]) -> TaskContext:
         query_analysis=QueryAnalysis(),
         available_tools=available_tools,
     )
+
+
+def test_financial_last_tool_result_keeps_current_market_snapshot() -> None:
+    task = AtomicTask(id="task", description="collect LIG financials")
+    task.last_tool_request = ToolRequest(
+        tool_name="opendart_financial_tool",
+        args={"corp": "079550", "start_year": 2021, "end_year": 2025},
+    )
+    ctx = TaskContext(
+        task_id="task",
+        description="collect LIG financials",
+        step_count=1,
+        available_tools=["opendart_financial_tool"],
+        tool_results=[
+            ToolResult(
+                success=True,
+                result={
+                    "corp": "079550",
+                    "year_range": "2021-2025",
+                    "results": [
+                        {
+                            "corp": "079550",
+                            "corp_name": "LIG넥스원",
+                            "year": 2025,
+                            "total_revenue": 4306936127418.0,
+                            "operating_income": 319442306790.0,
+                            "eps": 10173.0,
+                            "per": 41.38,
+                            "findings": "x" * 5000,
+                        }
+                    ],
+                    "market_snapshot": {
+                        "listing_id": "KRX:079550",
+                        "stock_price_as_of": "2026-05-08",
+                        "current_price": 840000.0,
+                        "eps": 11604.0,
+                        "per": 72.39,
+                        "pbr": 12.83,
+                    },
+                    "findings": "y" * 5000,
+                },
+            )
+        ],
+    )
+
+    prompt = build_step_prompt(
+        task=task,
+        ctx=ctx,
+        allowed_actions=[Action.AGGREGATE],
+        max_prompt_chars=20_000,
+        prompt_value_preview_chars=1_000,
+        prompt_query_chars=1_000,
+    )
+
+    assert "market snapshot" in prompt
+    assert "**current price**: 840000.0" in prompt
+    assert "**per**: 72.39" in prompt
+    assert "**pbr**: 12.83" in prompt
+    assert "yyyy" not in prompt
 
 
 @pytest.mark.asyncio

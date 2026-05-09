@@ -238,7 +238,13 @@ def listings_for_company(company_id: str) -> tuple[Listing, ...]:
 def representative_listing(subject: Subject) -> Listing | None:
     if subject.listing is not None:
         return subject.listing
-    return _representative_listing_for_company(subject.company.company_id)
+    listings = listings_for_company(subject.company.company_id)
+    if len(listings) == 1:
+        return listings[0]
+    primary = [listing for listing in listings if listing.is_primary]
+    if len(primary) == 1:
+        return primary[0]
+    return None
 
 
 def market_for_exchange(exchange: str) -> str:
@@ -268,7 +274,7 @@ def _resolve_identifier_subject(
         listing = candidate
     if listing is None:
         return ()
-    return (_subject_for_listing(index, listing),)
+    return (Subject(company=index.companies_by_id[listing.company_id], listing=listing),)
 
 
 def _subject_from_surface_form(
@@ -280,49 +286,49 @@ def _subject_from_surface_form(
     identifier = surface_form.strip().upper()
     listing = index.listings_by_identifier.get(identifier)
     if listing is not None:
-        return _subject_for_listing(index, listing)
+        return Subject(company=index.companies_by_id[listing.company_id], listing=listing)
 
     company = _company_from_name(index, surface_form)
     if company is None and on_miss is not None:
         seeds = tuple(on_miss(surface_form))
         if seeds:
-            _ingest_seeds(index, seeds)
-            return _subject_from_surface_form(index, surface_form)
+            _build_index(index, seeds)
+            listing = index.listings_by_identifier.get(identifier)
+            if listing is not None:
+                return Subject(
+                    company=index.companies_by_id[listing.company_id], listing=listing
+                )
+            company = _company_from_name(index, surface_form)
     if company is None:
         raise ValueError(f"unknown company: {surface_form}")
     return Subject(company=company)
 
 
-def _subject_for_listing(index: _EntityIndex, listing: Listing) -> Subject:
-    company = index.companies_by_id[listing.company_id]
-    return Subject(company=company, listing=listing)
-
-
-def _company_from_name(
-    index: _EntityIndex,
-    company_name: str,
-) -> Company | None:
-    key = _name_key(company_name)
+def _company_from_name(index: _EntityIndex, company_name: str) -> Company | None:
+    key = normalized_name_key(company_name)
     if not key:
         return None
+    candidates = index.companies_by_name.get(key) or _fuzzy_name_candidates(
+        index, company_name
+    )
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    company_ids = ", ".join(
+        list(dict.fromkeys(candidate.company_id for candidate in candidates))[:5]
+    )
+    raise ValueError(f"ambiguous company: {company_name} ({company_ids})")
 
-    candidates = index.companies_by_name.get(key, ())
-    if candidates:
-        return _single_company(company_name, candidates)
 
-    return _fuzzy_company_by_name(index, company_name)
-
-
-def _fuzzy_company_by_name(
-    index: _EntityIndex,
-    company_name: str,
-) -> Company | None:
+def _fuzzy_name_candidates(
+    index: _EntityIndex, company_name: str
+) -> tuple[Company, ...]:
     query_key = jamo_fuzzy_key(company_name)
     if not query_key:
-        return None
+        return ()
     best_score = 0.0
     best_matches: dict[str, Company] = {}
-
     for candidate_key, candidates in index.companies_by_name.items():
         ck = jamo_fuzzy_key(candidate_key)
         if not ck:
@@ -332,88 +338,79 @@ def _fuzzy_company_by_name(
             continue
         if score > best_score:
             best_score = score
-            best_matches = {candidate.company_id: candidate for candidate in candidates}
+            best_matches = {c.company_id: c for c in candidates}
             continue
         if score == best_score:
             for candidate in candidates:
                 best_matches[candidate.company_id] = candidate
-
-    if not best_matches:
-        return None
-
-    return _single_company(company_name, tuple(best_matches.values()))
-
-
-def _single_company(
-    company_name: str,
-    candidates: tuple[Company, ...],
-) -> Company:
-    if len(candidates) == 1:
-        return candidates[0]
-    raise _ambiguous_company_error(company_name, candidates)
-
-
-def _ambiguous_company_error(
-    company_name: str,
-    candidates: tuple[Company, ...],
-) -> ValueError:
-    company_ids = ", ".join(
-        list(dict.fromkeys(candidate.company_id for candidate in candidates))[:5]
-    )
-    return ValueError(f"ambiguous company: {company_name} ({company_ids})")
-
-
-def _representative_listing_for_company(company_id: str) -> Listing | None:
-    listings = listings_for_company(company_id)
-    if len(listings) == 1:
-        return listings[0]
-    primary_listings = [listing for listing in listings if listing.is_primary]
-    if len(primary_listings) == 1:
-        return primary_listings[0]
-    return None
+    return tuple(best_matches.values())
 
 
 @lru_cache(maxsize=1)
 def _entity_index() -> _EntityIndex:
-    index = _EntityIndex()
-    name_index: dict[str, list[Company]] = {}
-    company_seeds: dict[str, list[ListingSeed]] = {}
+    return _build_index(
+        _EntityIndex(),
+        (*_load_krx_listing_seeds(), *_load_sec_listing_seeds()),
+    )
 
-    for seed in (*_load_krx_listing_seeds(), *_load_sec_listing_seeds()):
-        _bind_listing(index, seed.listing)
-        company_seeds.setdefault(seed.company_id, []).append(seed)
 
-    for company_id, seeds in company_seeds.items():
-        listings = tuple(seed.listing for seed in seeds)
-        company = Company(
-            company_id=company_id,
-            company_name=seeds[0].company_name,
-            aliases=_company_aliases_from_seeds(seeds),
+def _build_index(index: _EntityIndex, seeds: Iterable[ListingSeed]) -> _EntityIndex:
+    """Merge seeds into index. Idempotent w.r.t. listing_id / company_id."""
+    by_company: dict[str, list[ListingSeed]] = {}
+    for seed in seeds:
+        by_company.setdefault(seed.company_id, []).append(seed)
+
+    for company_id, group in by_company.items():
+        for seed in group:
+            listing = seed.listing
+            _bind_listing_identifier(index.listings_by_id, listing.listing_id, listing)
+            for ident in (
+                listing.security_code,
+                listing.listing_id,
+                *listing.vendor_symbols.values(),
+            ):
+                _bind_listing_identifier(index.listings_by_identifier, ident, listing)
+
+        listings_by_id = {
+            listing.listing_id: listing
+            for listing in index.listings_by_company_id.get(company_id, ())
+        }
+        for seed in group:
+            listings_by_id[seed.listing.listing_id] = seed.listing
+        index.listings_by_company_id[company_id] = tuple(listings_by_id.values())
+
+        existing = index.companies_by_id.get(company_id)
+        canonical_name = existing.company_name if existing else group[0].company_name
+        alias_sources: tuple[str, ...] = (
+            canonical_name,
+            *(existing.aliases if existing else ()),
+            *(
+                alias
+                for seed in group
+                for alias in (seed.company_name, *seed.company_aliases)
+            ),
         )
-        index.companies_by_id[company_id] = company
-        index.listings_by_company_id[company_id] = listings
-        _bind_company(name_index, company)
+        index.companies_by_id[company_id] = Company(
+            company_id=company_id,
+            company_name=canonical_name,
+            aliases=tuple(dict.fromkeys(alias for alias in alias_sources if alias)),
+        )
 
-    index.companies_by_name = {
-        key: tuple(companies) for key, companies in name_index.items()
-    }
+    name_index: dict[str, list[Company]] = {}
+    for company in index.companies_by_id.values():
+        for alias in company.aliases:
+            key = normalized_name_key(alias)
+            if not key:
+                continue
+            companies = name_index.setdefault(key, [])
+            if not any(c.company_id == company.company_id for c in companies):
+                companies.append(company)
+    index.companies_by_name = {key: tuple(v) for key, v in name_index.items()}
     return index
 
 
-def _bind_listing(index: _EntityIndex, listing: Listing) -> None:
-    _bind_listing_unique(index.listings_by_id, listing.listing_id, listing)
-    for identifier in (
-        listing.security_code,
-        listing.listing_id,
-        *listing.vendor_symbols.values(),
-    ):
-        _bind_listing_unique(index.listings_by_identifier, identifier, listing)
-
-
-def _bind_listing_unique(
-    store: dict[str, Listing],
-    identifier: str,
-    listing: Listing,
+def _bind_listing_identifier(
+    store: dict[str, Listing], identifier: str, listing: Listing
 ) -> None:
     key = identifier.strip().upper()
     if not key:
@@ -426,100 +423,25 @@ def _bind_listing_unique(
         raise ValueError(f"duplicate listing identifier: {key}")
 
 
-def _bind_company(
-    store: dict[str, list[Company]],
-    company: Company,
-) -> None:
-    for alias in company.aliases:
-        key = _name_key(alias)
-        if not key:
-            continue
-        companies = store.setdefault(key, [])
-        if any(existing.company_id == company.company_id for existing in companies):
-            continue
-        companies.append(company)
-
-
-def _ingest_seeds(
-    index: _EntityIndex,
-    seeds: Iterable[ListingSeed],
-) -> None:
-    company_groups: dict[str, list[ListingSeed]] = {}
-    for seed in seeds:
-        _bind_listing(index, seed.listing)
-        company_groups.setdefault(seed.company_id, []).append(seed)
-
-    for company_id, group in company_groups.items():
-        existing_company = index.companies_by_id.get(company_id)
-        if existing_company is None:
-            company_name = group[0].company_name
-            aliases = _company_aliases_from_seeds(group)
-        else:
-            company_name = existing_company.company_name
-            aliases = tuple(
-                dict.fromkeys(
-                    alias
-                    for alias in (
-                        existing_company.company_name,
-                        *existing_company.aliases,
-                        *_company_aliases_from_seeds(group),
-                    )
-                    if alias
-                )
-            )
-        index.companies_by_id[company_id] = Company(
-            company_id=company_id,
-            company_name=company_name,
-            aliases=aliases,
-        )
-        index.listings_by_company_id[company_id] = _merge_company_listings(
-            index.listings_by_company_id.get(company_id, ()),
-            [seed.listing for seed in group],
-        )
-
-    _rebuild_company_name_index(index)
-
-
-def _rebuild_company_name_index(index: _EntityIndex) -> None:
-    name_index: dict[str, list[Company]] = {}
-    for company in index.companies_by_id.values():
-        _bind_company(name_index, company)
-    index.companies_by_name = {
-        key: tuple(companies) for key, companies in name_index.items()
-    }
-
-
-def _merge_company_listings(
-    existing: tuple[Listing, ...],
-    incoming: list[Listing],
-) -> tuple[Listing, ...]:
-    listings_by_id = {listing.listing_id: listing for listing in existing}
-    for listing in incoming:
-        listings_by_id[listing.listing_id] = listing
-    return tuple(listings_by_id.values())
-
-
-def _company_aliases_from_seeds(seeds: list[ListingSeed]) -> tuple[str, ...]:
-    aliases: list[str] = []
-    for seed in seeds:
-        aliases.append(seed.company_name)
-        aliases.extend(seed.company_aliases)
-    return tuple(dict.fromkeys(alias for alias in aliases if alias))
-
-
 def _load_krx_listing_seeds() -> list[ListingSeed]:
-    records = _load_json_records(KRX_SECURITIES_PATH)
+    if not KRX_SECURITIES_PATH.exists():
+        return []
+    payload = json.loads(KRX_SECURITIES_PATH.read_text(encoding="utf-8"))
     seeds: list[ListingSeed] = []
-    for record in records:
+    for record in payload:
         company_name = str(record["issuer_name"]).strip()
-        security_code = str(record["security_code"]).strip().upper()
-        exchange = str(record["exchange"]).strip().upper()
         listing_id = str(record["listing_id"]).strip().upper()
-        vendor_symbols = {
-            str(vendor): str(symbol).strip().upper()
-            for vendor, symbol in dict(record["vendor_symbols"]).items()
-            if str(symbol).strip()
-        }
+        listing = Listing(
+            listing_id=listing_id,
+            company_id=listing_id,
+            security_code=str(record["security_code"]).strip().upper(),
+            exchange=str(record["exchange"]).strip().upper(),
+            vendor_symbols={
+                str(vendor): str(symbol).strip().upper()
+                for vendor, symbol in dict(record["vendor_symbols"]).items()
+                if str(symbol).strip()
+            },
+        )
         company_aliases = tuple(
             dict.fromkeys(
                 alias
@@ -529,13 +451,6 @@ def _load_krx_listing_seeds() -> list[ListingSeed]:
                 )
                 if alias
             )
-        )
-        listing = Listing(
-            listing_id=listing_id,
-            company_id=listing_id,
-            security_code=security_code,
-            exchange=exchange,
-            vendor_symbols=vendor_symbols,
         )
         seeds.append(
             ListingSeed(
@@ -551,13 +466,15 @@ def _load_krx_listing_seeds() -> list[ListingSeed]:
 def listing_seed_from_sec_record(record: dict[str, Any]) -> ListingSeed | None:
     """Boundary: build a US listing seed from a SEC company_tickers.json row."""
     ticker = str(record.get("ticker") or "").strip().upper()
-    title = str(record.get("title") or "").strip()
     if not ticker:
         return None
-    company_name = _sec_company_name(title, ticker)
+    title = str(record.get("title") or "").strip()
+    aliases = _sec_aliases(title)
+    company_name = aliases[0] if aliases else ticker
+    cik = str(record.get("cik_str") or "").strip()
     listing = Listing(
         listing_id=f"USA:{ticker}",
-        company_id=_sec_company_id(record, ticker),
+        company_id=f"SEC:{cik}" if cik else f"USA:{ticker}",
         security_code=ticker,
         exchange="USA",
         vendor_symbols={"yahoo": ticker},
@@ -565,93 +482,65 @@ def listing_seed_from_sec_record(record: dict[str, Any]) -> ListingSeed | None:
     return ListingSeed(
         company_id=listing.company_id,
         company_name=company_name,
-        company_aliases=_sec_company_aliases(title, company_name),
+        company_aliases=aliases,
         listing=listing,
     )
 
 
 def _load_sec_listing_seeds() -> list[ListingSeed]:
+    if not SEC_TICKERS_PATH.exists():
+        return []
+    payload = json.loads(SEC_TICKERS_PATH.read_text(encoding="utf-8"))
     seeds: list[ListingSeed] = []
-    for record in _load_json_records(SEC_TICKERS_PATH):
+    for record in payload:
         seed = listing_seed_from_sec_record(dict(record))
         if seed is not None:
             seeds.append(seed)
     return seeds
 
 
-def _load_json_records(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return [dict(record) for record in payload]
+def _sec_aliases(title: str) -> tuple[str, ...]:
+    """Generate canonical-name + aliases from a SEC `title`.
 
+    First entry is the canonical company name; remainder are deduped aliases.
+    Mixed-case titles are kept as-is for canonical; all-uppercase titles are
+    display-cased and stripped of legal-suffix tails (INC, CORP, ...) to derive
+    a more readable canonical form. Trimmed variants are emitted as aliases
+    regardless of original case so that "Apple Inc." → ["Apple Inc.", "Apple"].
+    """
+    if not title:
+        return ()
 
-def _sec_company_id(record: dict[str, Any], ticker: str) -> str:
-    cik = str(record.get("cik_str") or "").strip()
-    if cik:
-        return f"SEC:{cik}"
-    return f"USA:{ticker}"
+    cleaned = "".join(c if c.isalnum() else " " for c in title.upper())
+    words = [w for w in cleaned.split() if w]
 
-
-def _sec_company_name(title: str, ticker: str) -> str:
-    if title and not title.isupper():
-        return title
-    trimmed_aliases = _sec_trimmed_aliases(title)
-    if trimmed_aliases:
-        return trimmed_aliases[0]
-    if title:
-        return _display_sec_name(title)
-    return title or ticker
-
-
-def _sec_company_aliases(title: str, company_name: str) -> tuple[str, ...]:
-    aliases: list[str] = []
-    if company_name:
-        aliases.append(company_name)
-    if title:
-        aliases.append(_display_sec_name(title))
-    aliases.extend(_sec_trimmed_aliases(title))
-
-    return tuple(dict.fromkeys(alias for alias in aliases if alias))
-
-
-def _sec_trimmed_aliases(title: str) -> tuple[str, ...]:
-    aliases: list[str] = []
-    words = _trim_trailing_words(_title_words(title), _SEC_PRIMARY_SUFFIXES)
-    while words:
-        aliases.append(_display_sec_name(" ".join(words)))
-        if words[-1] not in _SEC_SECONDARY_SUFFIXES:
+    head = list(words)
+    while head and head[-1] in _SEC_PRIMARY_SUFFIXES:
+        head.pop()
+    trimmed_variants: list[str] = []
+    while head:
+        trimmed_variants.append(_display_caps(" ".join(head)))
+        if head[-1] not in _SEC_SECONDARY_SUFFIXES:
             break
-        words = words[:-1]
-    return tuple(dict.fromkeys(alias for alias in aliases if alias))
+        head.pop()
+
+    full_display = title if not title.isupper() else _display_caps(title)
+    if title.isupper():
+        canonical = trimmed_variants[0] if trimmed_variants else full_display
+    else:
+        canonical = title
+
+    candidates = (canonical, full_display, *trimmed_variants)
+    return tuple(dict.fromkeys(a for a in candidates if a))
 
 
-def _display_sec_name(alias: str) -> str:
-    if not alias.isupper():
-        return alias
-    words = alias.split()
-    return " ".join(word if len(word) <= 4 else word.capitalize() for word in words)
-
-
-def _title_words(text: str) -> list[str]:
-    cleaned = "".join(char if char.isalnum() else " " for char in text.strip().upper())
-    return [word for word in cleaned.split() if word]
-
-
-def _trim_trailing_words(words: list[str], suffixes: frozenset[str]) -> list[str]:
-    trimmed = list(words)
-    while trimmed and trimmed[-1] in suffixes:
-        trimmed.pop()
-    return trimmed
-
-
-def _name_key(text: str) -> str:
-    return "".join(char for char in text.strip().upper() if char.isalnum())
+def _display_caps(text: str) -> str:
+    return " ".join(w if len(w) <= 4 else w.capitalize() for w in text.split())
 
 
 def normalized_name_key(text: str) -> str:
     """Stable key for company/title matching (shared with SEC resolve boundary)."""
-    return _name_key(text)
+    return "".join(char for char in text.strip().upper() if char.isalnum())
 
 
 def company_with_reference_from_daily_bar(

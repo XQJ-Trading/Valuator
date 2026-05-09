@@ -76,7 +76,6 @@ def build_task_tree_snapshot(
             "description": task.description,
             "task_name": task.task_name,
             "execution_tool": task.execution_tool,
-            "merge_instruction": "",
         }
         task_payloads[task.id] = {
             "task_id": task.id,
@@ -94,7 +93,6 @@ def build_task_tree_snapshot(
             "deps": list(plan_tasks[task.id]["deps"]),
             "tool": tool,
             "output": plan_tasks[task.id]["output"],
-            "merge_instruction": "",
             "children": [child.id for child in children],
             "artifacts": artifacts,
         }

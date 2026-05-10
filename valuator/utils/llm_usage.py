@@ -127,13 +127,6 @@ def get_model_price(model: str) -> ModelPrice | None:
     return MODEL_PRICES.get(canonical_model_name(model))
 
 
-def build_pricing_summary() -> dict[str, dict[str, float]]:
-    return {
-        model: price.to_dict()
-        for model, price in sorted(MODEL_PRICES.items())
-    }
-
-
 @dataclass
 class LLMUsage:
     method: str

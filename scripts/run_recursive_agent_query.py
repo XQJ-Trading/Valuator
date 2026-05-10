@@ -294,7 +294,7 @@ def render_event(event, *, jsonl: bool) -> str:
 
 
 async def run(args: argparse.Namespace) -> int:
-    from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler, SharedState
+    from valuator.core import Agent, AgentEvent, ComplexTask, Scheduler
     from valuator.utils.config import config
 
     raw_query = read_query(args)
@@ -381,7 +381,6 @@ async def run(args: argparse.Namespace) -> int:
                     max_steps_per_task=max_steps,
                     concurrency=concurrency,
                 ),
-                shared_state=SharedState(),
                 tool_registry=tool_registry,
                 llm_client=create_llm_client(
                     model=model,

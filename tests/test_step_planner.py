@@ -8,7 +8,6 @@ from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent, QueryRequirement, QueryUnit
 from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.planning.prompts import build_step_prompt
-from valuator.core.shared_state import SharedStateView
 from valuator.core.planning import StepPlanner
 from valuator.core.planning.parser import TASK_NAME_MAX_CHARS, truncate_task_name
 from valuator.core.types import (
@@ -86,7 +85,6 @@ def _context(*, available_tools: list[str]) -> TaskContext:
         description="collect current facts",
         step_count=0,
         as_of_kst="2026-03-30 09:00:00",
-        shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=available_tools,
@@ -484,7 +482,6 @@ async def test_step_planner_prompt_includes_current_children_and_done_sibling_ou
         step_count=1,
         current_children=[child],
         siblings={"root.1": sibling},
-        shared=SharedStateView({}, []),
         query="[THINKING_LEVEL]\nhigh\n\n[QUERY]\nAmazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],
@@ -522,7 +519,6 @@ async def test_step_planner_finalize_prompt_preserves_unverified_gaps() -> None:
                 "facts": {"price_uplift": "could not verify"},
             }
         },
-        shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],
@@ -673,7 +669,6 @@ async def test_finalize_prompt_includes_synthesis_guidance() -> None:
         step_count=1,
         as_of_kst="2026-03-30 09:00:00",
         child_outputs={"root.0": {"summary": "segment analysis complete"}},
-        shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],
@@ -733,7 +728,6 @@ async def test_step_planner_prompt_includes_query_units_and_temporal_shared_fact
         description="root task",
         step_count=1,
         as_of_kst="2026-03-30 09:00:00",
-        shared=SharedStateView({}, []),
         query="2026-03-30 기준으로 2024년 이란 상황 분석",
         query_analysis=QueryAnalysis(
             as_of_kst="2026-03-30 09:00:00",
@@ -811,7 +805,6 @@ async def test_step_planner_drops_low_priority_sections_before_child_outputs() -
             }
         },
         siblings={"root.1": sibling},
-        shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],
@@ -861,7 +854,6 @@ async def test_step_planner_prompt_excludes_artifact_refs_and_keeps_results() ->
                 output={"summary": "finished"},
             )
         ],
-        shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],
@@ -914,7 +906,6 @@ async def test_step_planner_prompt_exposes_korean_stock_code_and_us_ticker_rules
         description="mixed market identifier task",
         step_count=0,
         as_of_kst="2026-03-30 09:00:00",
-        shared=SharedStateView({}, []),
         query="삼성전자와 Amazon 재무 조회",
         query_analysis=QueryAnalysis(
             query_intent=QueryIntent(
@@ -963,7 +954,6 @@ async def test_step_planner_prompt_includes_evidence_and_failed_attempts() -> No
         task_id="root",
         description="root task",
         step_count=0,
-        shared=SharedStateView({}, []),
         query="LS전선 분석",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool", "opendart_financial_tool"],
@@ -1039,7 +1029,6 @@ async def test_step_planner_no_shared_facts_or_conflicts_in_prompt() -> None:
         description="root task",
         step_count=0,
         child_outputs={"root.0": {"summary": "done"}},
-        shared=SharedStateView({}, []),
         query="분석",
         query_analysis=QueryAnalysis(),
         available_tools=["web_search_tool"],

@@ -558,10 +558,6 @@ def json_arg(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def preview_json(value: Any, *, max_chars: int) -> str:
-    return render_prompt_value_limited(value, max_chars=max_chars)
-
-
 def prompt_query(query: str, *, prompt_query_chars: int) -> str:
     filtered: list[str] = []
     skipping_thinking_level = False

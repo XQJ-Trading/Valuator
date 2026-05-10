@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable
 
-from .context import TaskContext
-from .shared_state import SharedState
 from .task import AtomicTask, ComplexTask, Task
 from .types import (
     Action,
@@ -87,7 +85,7 @@ class Scheduler:
             )
         )
 
-    def break_deadlock(self, _shared: SharedState) -> bool:
+    def break_deadlock(self) -> bool:
         """Clear stale WAIT edges where all dependencies are already terminal."""
         newly_ready: list[str] = []
         for task_id, task in list(self._tasks.items()):
@@ -112,9 +110,6 @@ class Scheduler:
         self,
         task: Task,
         decision: TaskDecision,
-        shared: SharedState,
-        *,
-        ctx: TaskContext | None = None,
     ) -> list[str]:
         self._discard_ready(task.id)
         task.step_count += 1

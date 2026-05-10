@@ -13,18 +13,8 @@ from valuator.tools.base import ToolRegistry
 
 from ..context import TaskContext, TaskSummary
 from ..scheduler import Scheduler
-from ..shared_state import SharedState
 from ..task import Task
 from ..types import TaskState, ToolRequest
-
-
-def _fact_keys_from_child_completion_payload(payload: Any) -> set[str]:
-    """Legacy — retained for compatibility but unused after fact layer removal."""
-    if not isinstance(payload, dict):
-        return set()
-    if payload.get("status") == "facts_only" and isinstance(payload.get("facts"), dict):
-        return set(payload["facts"].keys())
-    return set()
 
 
 def _task_scoped_evidence(
@@ -63,7 +53,6 @@ def build_task_context(
     query: str,
     scheduler: Scheduler,
     analysis: QueryAnalysis,
-    shared: SharedState,
     tools: ToolRegistry,
     evidence_store: SqliteEvidenceStore | None = None,
     evidence_session_id: str = "",
@@ -99,7 +88,6 @@ def build_task_context(
         ],
         ancestry=build_ancestry(task=task, scheduler=scheduler),
         siblings=build_siblings(task=task, scheduler=scheduler),
-        shared=shared.view_for(),
         query=query,
         query_analysis=analysis,
         query_units=query_units,

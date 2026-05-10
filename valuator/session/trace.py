@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
@@ -377,13 +376,11 @@ class SessionTraceWriter:
         status: str,
         summary: str = "",
         started_at: str | None = None,
-        finished_at: str | None = None,
         duration_ms: float | None = None,
         input_payload: Any = None,
         result_payload: Any = None,
         error: str | None = None,
     ) -> None:
-        del finished_at
         if task_id is None:
             self.write_diagnostic_record(
                 category=category,
@@ -464,9 +461,6 @@ class SessionTraceWriter:
     def _relative_path(self, path: Path) -> str:
         return str(path.relative_to(self.session_dir))
 
-    def task_dir(self, task_id: str) -> Path:
-        return self._task_dir(task_id)
-
     @staticmethod
     def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -486,8 +480,3 @@ class SessionTraceWriter:
         if not path.exists():
             return None
         return json.loads(path.read_text(encoding="utf-8"))
-
-    @staticmethod
-    def _safe_file_component(value: str) -> str:
-        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
-        return cleaned or "call"

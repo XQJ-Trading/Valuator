@@ -27,7 +27,7 @@ TaskDecision (의사 결정)
   - action: DECOMPOSE | EXECUTE | WAIT | AGGREGATE | FINALIZE | FAIL
   - children: 자식 작업 스펙 (분해 시)
   - tool_request: 도구 호출 정보 (실행 시)
-  - facts: 발행할 팩트 (집계 시)
+  - facts: 집계 결과에서 추출된 구조화 값
 ```
 
 ### 단계 2: Execute (실행)
@@ -50,10 +50,6 @@ ToolResult
 Task (완료)
   - child_outputs: {task_id: output}
   - published_facts: {key: value}
-    ↓
-SharedState
-  - 팩트 발행
-  - 타이 scope, 출처 URL 기록
     ↓
 의존 작업들 해제 (READY)
 ```
@@ -111,7 +107,7 @@ scheduler.register(task, depends_on=[dep1, dep2])
 ready_tasks = scheduler.ready_tasks(limit=4)
 
 # 의사 결정 적용
-newly_ready = scheduler.apply_decision(task, decision, shared_state)
+newly_ready = scheduler.apply_decision(task, decision)
 
 # 실패 전파 (자식, 의존 작업들에게)
 scheduler.mark_failed(task, reason)
@@ -139,23 +135,6 @@ async def run(query: str, root_task: Task):
         for task in ready:
             decision = await planner.decide(task, ctx)
             newly_ready = scheduler.apply_decision(task, decision)
-```
-
-### SharedState
-**역할**: 모든 작업이 접근 가능한 팩트 저장소
-
-```python
-# 팩트 발행
-shared.publish(
-    key="apple_revenue",
-    value=195_000_000_000,
-    source_task_id="task.1.0",
-    grounded=True,  # 근거 있음
-    source_urls=[...],
-)
-
-# 팩트 조회 (TaskContext에서)
-ctx.shared.get("apple_revenue")
 ```
 
 ## 설계 원칙
@@ -213,7 +192,7 @@ class TaskContext:
     step_count: int
     tool_results: list[ToolResult]  # 지금까지 실행한 도구 결과
     child_outputs: dict[str, Any]   # 자식 작업들의 출력
-    shared: SharedStateView         # 다른 작업들이 발행한 팩트
+    evidence: list[EvidenceRow]     # 세션에서 축적된 근거
     query: str                      # 원래 질의
     query_analysis: QueryAnalysis   # 질의 분석 결과
     available_tools: list[str]      # 이 작업에서 사용 가능한 도구

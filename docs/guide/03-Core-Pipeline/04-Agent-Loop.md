@@ -5,13 +5,12 @@
 
 
 ## 1. Agent 클래스 구조
-에이전트는 스케줄러, 상태 저장소, 도구 레지스트리 및 플래너를 하나로 묶어 관리합니다.
+에이전트는 스케줄러, 도구 레지스트리 및 플래너를 하나로 묶어 관리합니다.
 
 ```python
 class Agent:
-    def __init__(self, *, scheduler, shared_state, tool_registry, llm_client, ...):
+    def __init__(self, *, scheduler, tool_registry, llm_client, ...):
         self._scheduler = scheduler      # 작업 우선순위 및 상태 관리
-        self._shared = shared_state      # 모든 작업이 공유하는 사실(Facts) 저장소
         self._tools = tool_registry      # 사용 가능한 도구 집합
         self._step_planner = StepPlanner(llm_client, ...) # LLM 기반 의사결정기
         self._gate = GateController(...) # 분해(Decomposition) 결과 검증 및 필터링
@@ -35,7 +34,7 @@ async def run(self, query: str, root_task: Task) -> Any:
         
         # 교착 상태(Deadlock) 해결
         if not ready_tasks and self._scheduler.has_deadlock():
-            self._scheduler.break_deadlock(self._shared)
+            self._scheduler.break_deadlock()
             continue
         
         # 2. 작업 처리 (동시성 제어가 가능하지만 기본적으로 순차 처리)
@@ -50,7 +49,7 @@ async def run(self, query: str, root_task: Task) -> Any:
 ## 3. 작업 처리 상세 (`_process_task`)
 개별 작업이 LLM에 의해 계획되고 실제 동작으로 이어지는 5단계 프로세스입니다.
 
-1.  **Context Builder:** 작업 상태, 부모/자식 관계, 공유 상태의 핵심 팩트 등을 모아 LLM에 전달할 컨텍스트를 구성합니다.
+1.  **Context Builder:** 작업 상태, 부모/자식 관계, 증거, 도구 결과를 모아 LLM에 전달할 컨텍스트를 구성합니다.
 2.  **Decision (계획):** `StepPlanner`를 호출하여 다음 행동(실행, 분해, 대기 등)을 결정합니다.
 3.  **Gate (검토):** 복잡한 작업 분해가 제안될 경우, 깊이 제한이나 정책에 맞는지 검증합니다.
 4.  **Validation:** 결정된 행동이 논리적으로 유효한지(예: 없는 도구 호출 등) 확인합니다.
@@ -89,7 +88,6 @@ root = ComplexTask(id=f"{session_id}.root", description="분석 요청")
 
 agent = Agent(
     scheduler=Scheduler(),
-    shared_state=SharedState(),
     tool_registry=create_tool_registry(model),
     llm_client=get_llm_client(model)
 )

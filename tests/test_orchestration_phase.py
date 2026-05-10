@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from valuator.core.planning.plan_spec import validate_root_decomposition
 from valuator.core.scheduler import Scheduler
-from valuator.core.shared_state import SharedState
 from valuator.core.task import AtomicTask, ComplexTask
 from valuator.core.types import Action, TaskDecision, TaskSpec, TaskState, TaskWorkPhase
 
@@ -37,7 +36,6 @@ def test_validate_root_decomposition_phase2_must_depend_on_phase1() -> None:
 
 def test_scheduler_sets_synthesize_when_child_finishes() -> None:
     scheduler = Scheduler()
-    shared = SharedState()
     root = AtomicTask(id="root", description="root task", task_name="root_task")
     scheduler.register(root)
     scheduler.apply_decision(
@@ -52,7 +50,6 @@ def test_scheduler_sets_synthesize_when_child_finishes() -> None:
                 )
             ],
         ),
-        shared,
     )
     parent = scheduler.get_task("root")
     assert isinstance(parent, ComplexTask)
@@ -62,7 +59,6 @@ def test_scheduler_sets_synthesize_when_child_finishes() -> None:
     scheduler.apply_decision(
         child,
         TaskDecision(action=Action.AGGREGATE, output="done", facts={}),
-        shared,
     )
     assert parent.state is TaskState.READY
     assert parent.work_phase is TaskWorkPhase.SYNTHESIZE

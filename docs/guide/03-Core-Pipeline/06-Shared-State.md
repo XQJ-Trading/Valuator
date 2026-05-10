@@ -1,6 +1,6 @@
-# 공유 상태 및 작업 통신
+# 작업 통신
 
-Task 간의 정보 흐름을 이해하기 위한 실제 통신 메커니즘입니다. `SharedState`는 현재 no-op stub이며, 모든 정보는 Task의 `outputs` 필드와 `TaskSummary`를 통해 계층 구조로 전달됩니다.
+Task 간의 정보 흐름을 이해하기 위한 실제 통신 메커니즘입니다. 중앙 `SharedState`는 제거되었고, 모든 정보는 Task의 `output`, `child_outputs`, `TaskSummary`, `EvidenceRow`를 통해 명시적으로 전달됩니다.
 
 ---
 
@@ -48,7 +48,6 @@ class TaskContext:
     task_id: str
     evidence: list[EvidenceRow] = field(default_factory=list)  # 축적된 증거
     as_of_kst: str = ""                                         # 타임스탬프
-    shared: SharedStateView = field(...)                        # [현재 미사용]
     # ... 기타 필드
 ```
 
@@ -148,7 +147,7 @@ class AtomicTask:
 
 ---
 
-## 5. SharedState는 왜 no-op인가?
+## 5. SharedState는 왜 제거됐는가?
 
 **설계 변경 (2026-04-21 커밋 e7f3f77)**
 
@@ -255,7 +254,7 @@ for child_id, summary in self.child_outputs.items():
 
 ## 요약
 
-**SharedState는 더 이상 활성 메커니즘이 아닙니다.** 대신:
+**SharedState는 더 이상 존재하는 런타임 메커니즘이 아닙니다.** 대신:
 
 - ✅ **명시적 계층 구조** (Parent → Children → Outputs)
 - ✅ **Evidence 기반 정보 전달** (출처 명확)

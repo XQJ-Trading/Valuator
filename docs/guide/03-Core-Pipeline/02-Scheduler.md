@@ -48,14 +48,13 @@ ready = scheduler.ready_tasks(limit=2) # 최대 2개
 # 3. max_ready만큼만 반환
 ```
 
-### apply_decision(task, decision, shared_state)
+### apply_decision(task, decision)
 TaskDecision을 적용하여 상태 업데이트:
 
 ```python
 newly_ready = scheduler.apply_decision(
     task,
     TaskDecision(action=Action.DECOMPOSE, children=(...)),
-    shared_state,
 )
 # newly_ready: 새로 READY 상태가 된 task id들
 ```
@@ -67,7 +66,7 @@ newly_ready = scheduler.apply_decision(
 | DECOMPOSE | task 승격 (Atomic→Complex) + 자식 생성 + task 상태 WAITING |
 | EXECUTE | task 상태 RUNNING |
 | WAIT | task 상태 WAITING + 의존성 설정 |
-| AGGREGATE | task 상태 DONE + 팩트 발행 + 의존 작업 해제 |
+| AGGREGATE | task 상태 DONE + 결과 저장 + 의존 작업 해제 |
 | FINALIZE | task 상태 DONE + 의존 작업 해제 |
 | FAIL | task 상태 FAILED + 자식/의존 작업에 전파 |
 
@@ -161,7 +160,7 @@ def has_deadlock(self) -> bool:
 ### 해제
 
 ```python
-def break_deadlock(self, shared: SharedState) -> bool:
+def break_deadlock(self) -> bool:
     # WAITING 작업들 순회
     for task_id in waiting_tasks:
         # 의존성이 모두 terminal (DONE/FAILED)인가?
@@ -207,7 +206,7 @@ if scheduler.is_complete():
 
 # 교착 상태?
 if scheduler.has_deadlock():
-    scheduler.break_deadlock(shared_state)
+    scheduler.break_deadlock()
 
 # 특정 작업 조회
 task = scheduler.get_task(task_id)

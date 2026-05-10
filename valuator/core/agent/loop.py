@@ -26,7 +26,6 @@ from ..decomposition import (
 )
 from ..fact_extraction import extract_facts
 from ..scheduler import Scheduler
-from ..shared_state import SharedState
 from ..planning import StepPlanner
 from ..task import ComplexTask, Task
 from ..types import (
@@ -100,7 +99,6 @@ class Agent:
         self,
         *,
         scheduler: Scheduler,
-        shared_state: SharedState,
         tool_registry: ToolRegistry,
         llm_client: Any,
         query_analysis: QueryAnalysis,
@@ -117,7 +115,6 @@ class Agent:
 
         gate_cfg = gate_config or GateConfig()
         self._scheduler = scheduler
-        self._shared = shared_state
         self._tools = tool_registry
         self._analysis = query_analysis
         self._on_event = on_event
@@ -185,7 +182,7 @@ class Agent:
                     break
                 if not in_flight:
                     if self._scheduler.has_deadlock():
-                        woken = self._scheduler.break_deadlock(self._shared)
+                        woken = self._scheduler.break_deadlock()
                         if not woken and self._scheduler.has_deadlock():
                             raise RuntimeError(
                                 "deadlock: no tasks ready, not all complete"
@@ -283,7 +280,6 @@ class Agent:
 
         await self._complete_non_execute_step(
             task=task,
-            task_seq=task_seq,
             ctx=ctx,
             decision=effective_decision,
         )
@@ -300,7 +296,6 @@ class Agent:
             query=query,
             scheduler=self._scheduler,
             analysis=self._analysis,
-            shared=self._shared,
             tools=self._tools,
             evidence_store=self._evidence_store,
             evidence_session_id=self._evidence_session_id,
@@ -536,7 +531,7 @@ class Agent:
         tool_request: ToolRequest,
     ) -> None:
         task.last_tool_request = tool_request
-        self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
+        self._scheduler.apply_decision(task, decision)
         tool_started_at = kst_isoformat()
         started = perf_counter()
         tool_name = tool_request.tool_name
@@ -546,7 +541,11 @@ class Agent:
             args=tool_request.args,
         )
         if evidence_reuse is not None:
-            result = self._tool_result_from_financial_reuse(evidence_reuse)
+            result = ToolResult(
+                success=True,
+                result=evidence_reuse.payload,
+                metadata=evidence_reuse.metadata,
+            )
         else:
             result = await self._tools.execute_tool(
                 tool_name,
@@ -627,7 +626,6 @@ class Agent:
         self,
         *,
         task: Task,
-        task_seq: int,
         ctx: TaskContext,
         decision: TaskDecision,
     ) -> None:
@@ -635,7 +633,7 @@ class Agent:
             facts = extract_facts(task=task, ctx=ctx)
             if facts:
                 decision = decision.update(facts=decision.facts | facts)
-        self._scheduler.apply_decision(task, decision, self._shared, ctx=ctx)
+        self._scheduler.apply_decision(task, decision)
         if (
             self._session_store is not None
             and decision.action in (Action.AGGREGATE, Action.FINALIZE)
@@ -831,12 +829,6 @@ class Agent:
             return None
         return self._session_store.tasks_dir
 
-    @staticmethod
-    def _tool_result_from_financial_reuse(
-        reuse: FinancialEvidenceReuse,
-    ) -> ToolResult:
-        return ToolResult(success=True, result=reuse.payload, metadata=reuse.metadata)
-
     def _record_evidence(
         self,
         *,
@@ -949,7 +941,7 @@ class Agent:
             facts=facts,
             children=[],
         )
-        self._scheduler.apply_decision(task, decision, self._shared)
+        self._scheduler.apply_decision(task, decision)
         if self._session_store is not None:
             artifact_refs = self._session_store.write_aggregation_report(
                 task_id=task.id,

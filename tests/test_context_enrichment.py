@@ -4,7 +4,6 @@ from domain.query import QueryUnit
 
 from valuator.core.agent.context_builder import enrich_tool_request
 from valuator.core.context import TaskContext
-from valuator.core.shared_state import SharedStateView
 from valuator.core.types import ToolRequest
 
 
@@ -14,7 +13,6 @@ def _ctx_with_unit(unit: QueryUnit) -> TaskContext:
         description="d",
         step_count=0,
         as_of_kst="2026-03-30 09:00:00",
-        shared=SharedStateView({}, []),
         query_units=[unit],
     )
 
@@ -25,7 +23,6 @@ def test_enrich_web_search_injects_temporal_contract() -> None:
         description="d",
         step_count=0,
         as_of_kst="2026-03-30 09:00:00",
-        shared=SharedStateView({}, []),
         query_units=[
             QueryUnit(
                 id="u0",

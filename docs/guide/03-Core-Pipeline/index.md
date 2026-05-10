@@ -21,7 +21,6 @@ valuator/core/
 ├── scheduler.py        # 작업 스케줄링
 ├── task.py             # Task, ComplexTask, AtomicTask
 ├── context.py          # TaskContext, TaskSummary
-├── shared_state.py     # 팩트 저장소
 ├── types.py            # TaskState, Action, TaskDecision 등
 └── __init__.py
 ```
@@ -58,11 +57,6 @@ valuator/core/
    - 동적 임계값 조정
    - 거절 및 requery
 
-6. [공유 상태 (SharedState)](06-Shared-State.md)
-   - 팩트 저장 및 조회
-   - 메타데이터 (시간, 출처, 근거)
-   - 모든 작업에서 접근
-
 ## 🔄 처리 단계별 담당
 
 ### 단계 1: Plan
@@ -80,7 +74,7 @@ valuator/core/
 ### 단계 3: Aggregate
 **파일**: `scheduler.py` (Action.AGGREGATE)
 - 자식 작업들의 출력 병합
-- 팩트를 SharedState에 발행
+- 결과를 Task에 저장
 - 의존 작업 해제 (READY)
 
 ### 단계 4: Review
@@ -115,7 +109,7 @@ while not scheduler.is_complete():
             scheduler.mark_tool_complete(task, result)
         
         # 6. 상태 업데이트 (Aggregate)
-        newly_ready = scheduler.apply_decision(task, decision, shared)
+        newly_ready = scheduler.apply_decision(task, decision)
 ```
 
 ## 💡 설계 특징
@@ -136,7 +130,7 @@ TaskDecision (수정 가능)
     ↓ [Agent Execute]
 ToolResult (또는 자식 TaskSpec)
     ↓ [Scheduler]
-Task 상태 업데이트 + SharedState 변경
+Task 상태 업데이트
     ↓ [AgentEvent 발행]
 next iteration
 ```

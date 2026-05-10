@@ -151,10 +151,6 @@ def decision_input_payload(task: Task, ctx: TaskContext) -> dict[str, Any]:
                 for task_id, summary in ctx.siblings.items()
             },
             "evidence": [asdict(row) for row in ctx.evidence],
-            "shared": {
-                "facts": {key: asdict(fact) for key, fact in ctx.shared.facts.items()},
-                "conflicts": [asdict(conflict) for conflict in ctx.shared.conflicts],
-            },
         },
     }
 

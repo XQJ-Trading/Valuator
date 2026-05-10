@@ -7,9 +7,8 @@ from ..context import TaskContext
 from ..task import Task
 from ..types import Action, TaskDecision
 from . import prompts
-from .parser import StepIntentPayload, parse_decision
+from .parser import TASK_NAME_MAX_CHARS, StepIntentPayload, parse_decision
 
-TASK_NAME_MAX_CHARS = 30
 _PLANNER_SYSTEM_CACHE_KEY = "planner:system-prefix:v1"
 # Gemini explicit cache forbids system_instruction on GenerateContent; fold per-call system into user text.
 _STEP_PLANNER_CACHED_CONTEXT_TAG = "[STEP_PLANNER_CONTEXT]"

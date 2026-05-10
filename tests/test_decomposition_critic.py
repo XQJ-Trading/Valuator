@@ -9,7 +9,6 @@ from domain.company import Company, Listing, Subject
 from domain.query import QueryAnalysis, QueryIntent
 from valuator.core.context import TaskContext, TaskSummary
 from valuator.core.decomposition.critic import DecompositionCritic
-from valuator.core.shared_state import SharedStateView
 from valuator.core.task import ComplexTask
 from valuator.core.types import Action, TaskDecision, TaskSpec, TaskState
 
@@ -80,7 +79,6 @@ def _context() -> TaskContext:
                 state=TaskState.WAITING,
             )
         ],
-        shared=SharedStateView({}, []),
         query="Amazon analysis",
         query_analysis=QueryAnalysis(),
         available_tools=["dummy_tool", "web_search_tool"],
@@ -196,7 +194,6 @@ def _root_context() -> TaskContext:
         description="root task",
         step_count=0,
         ancestry=[],
-        shared=SharedStateView({}, []),
         query="Amazon valuation analysis",
         query_analysis=QueryAnalysis(
             query_intent=QueryIntent(

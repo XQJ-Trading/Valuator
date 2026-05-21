@@ -109,6 +109,7 @@ class ModelPrice:
 
 MODEL_PRICES: dict[str, ModelPrice] = {
     "gemini-3-flash-preview": ModelPrice(0.50, 3.00, 0.05, 1.00),
+    "gemini-3.5-flash": ModelPrice(1.50, 9.00, 0.15, 1.00),
     "gemini-3-pro-preview": ModelPrice(2.00, 12.00, 0.20, 4.50),
     "gemini-3.1-pro-preview": ModelPrice(2.00, 12.00, 0.20, 4.50),
     "gemini-3.1-flash-lite-preview": ModelPrice(0.25, 1.50, 0.025, 1.00),

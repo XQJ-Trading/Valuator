@@ -109,7 +109,7 @@ def test_load_config_normalizes_supported_models(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_MODEL", "gemini-2.5-flash")
     monkeypatch.setenv(
         "SUPPORTED_MODELS",
-        "gemini-2.5-flash, gemini-3-flash-preview, gemini-pro-latest",
+        "gemini-2.5-flash, gemini-3-flash-preview, gemini-2.5-pro",
     )
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("MONGODB_ENABLED", "true")

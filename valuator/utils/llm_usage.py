@@ -53,7 +53,9 @@ class TokenUsage:
                 usage.get("total_tokens", usage.get("total_token_count", 0)) or 0
             ),
             cache_write_tokens=int(
-                usage.get("cache_write_tokens", usage.get("cache_creation_input_tokens", 0))
+                usage.get(
+                    "cache_write_tokens", usage.get("cache_creation_input_tokens", 0)
+                )
                 or 0
             ),
         )
@@ -111,8 +113,10 @@ MODEL_PRICES: dict[str, ModelPrice] = {
     "gemini-3-flash-preview": ModelPrice(0.50, 3.00, 0.05, 1.00),
     "gemini-3.5-flash": ModelPrice(1.50, 9.00, 0.15, 1.00),
     "gemini-3-pro-preview": ModelPrice(2.00, 12.00, 0.20, 4.50),
+    "gemini-3.1-flash": ModelPrice(0.25, 1.50, 0.025, 1.00),
     "gemini-3.1-pro-preview": ModelPrice(2.00, 12.00, 0.20, 4.50),
     "gemini-3.1-flash-lite-preview": ModelPrice(0.25, 1.50, 0.025, 1.00),
+    "gemini-3.1-flash-lite": ModelPrice(0.25, 1.50, 0.025, 1.00),
     "gemini-2.5-flash": ModelPrice(0.30, 2.50, 0.03, 1.00),
     "gemini-2.5-pro": ModelPrice(1.25, 10.00, 0.125, 4.50),
     "google/gemini-2.5-flash": ModelPrice(0.50, 3.00),
@@ -121,11 +125,12 @@ MODEL_PRICES: dict[str, ModelPrice] = {
 
 
 def register_model_price(model: str, price: ModelPrice) -> None:
-    MODEL_PRICES[canonical_model_name(model)] = price
+    MODEL_PRICES[model.strip()] = price
 
 
 def get_model_price(model: str) -> ModelPrice | None:
-    return MODEL_PRICES.get(canonical_model_name(model))
+    name = model.strip()
+    return MODEL_PRICES.get(name) or MODEL_PRICES.get(canonical_model_name(name))
 
 
 @dataclass
@@ -205,9 +210,7 @@ class LLMUsage:
             billable_prompt_tokens = self.usage.prompt_tokens
 
         billable_output_tokens = self.usage.output_tokens
-        prompt_cost_usd = (
-            billable_prompt_tokens * price.prompt_usd_per_1m / 1_000_000.0
-        )
+        prompt_cost_usd = billable_prompt_tokens * price.prompt_usd_per_1m / 1_000_000.0
         output_cost_usd = (
             billable_output_tokens * price.completion_usd_per_1m / 1_000_000.0
         )

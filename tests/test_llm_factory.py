@@ -126,6 +126,28 @@ def test_create_llm_client_falls_back_from_openrouter_model_without_key(
     assert client.model == "gemini-3-flash-preview"
 
 
+def test_create_llm_client_preserves_gemini_31_flash_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "valuator.models.factory.config",
+        SimpleNamespace(
+            agent_model="gemini-3-flash-preview",
+            llm_backend="google_genai",
+            openrouter_api_key=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "valuator.models.gemini_direct.GeminiClient",
+        _DummyGeminiClient,
+    )
+
+    client = create_llm_client(model="gemini-3.1-flash")
+
+    assert isinstance(client, _DummyGeminiClient)
+    assert client.model == "gemini-3.1-flash"
+
+
 def test_create_llm_client_uses_openrouter_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,0 +1,425 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from valuator.models.protocol import LlmClient
+
+from .types import Page, TreeNode
+
+DEFAULT_GROUP_TOKENS = 20_000
+DEFAULT_MAX_PAGE_NUM_EACH_NODE = 5
+DEFAULT_MAX_TOKEN_NUM_EACH_NODE = 20_000
+DEFAULT_MAX_RECURSION_DEPTH = 4
+
+PAGE_INDEX_SYSTEM_PROMPT = (
+    "Return JSON only. Build a hierarchical document tree from the provided pages. "
+    "Use inclusive page_range ordinals exactly as shown in [ordinal N] input markers. "
+    "Do not copy table-of-contents page numbers unless they match an ordinal marker. "
+    "Keep titles concise, summaries factual, and children ordered by document order. "
+    "Do not invent page numbers or facts outside the provided pages."
+)
+
+INIT_PROMPT = (
+    "Create the initial document tree from these pages.\n\n"
+    "{group_text}\n\n"
+    "Return a single root TreeNode covering the provided pages."
+)
+
+CONTINUE_PROMPT = (
+    "Extend the existing document tree with the next pages.\n\n"
+    "Existing tree JSON:\n{tree_json}\n\n"
+    "Next pages:\n{group_text}\n\n"
+    "Return only a delta: updated root metadata and top-level child nodes that "
+    "start in or materially continue through the next pages. Do not repeat "
+    "unchanged previous child nodes."
+)
+
+TREE_NODE_RESPONSE_JSON_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["node_id", "title", "page_range", "summary", "children"],
+    "properties": {
+        "node_id": {"type": "string"},
+        "title": {"type": "string"},
+        "page_range": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {"type": "integer"},
+        },
+        "summary": {"type": "string"},
+        "children": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/TreeNode"},
+        },
+    },
+    "$defs": {
+        "TreeNode": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["node_id", "title", "page_range", "summary", "children"],
+            "properties": {
+                "node_id": {"type": "string"},
+                "title": {"type": "string"},
+                "page_range": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {"type": "integer"},
+                },
+                "summary": {"type": "string"},
+                "children": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/TreeNode"},
+                },
+            },
+        }
+    },
+}
+
+TREE_CONTINUATION_RESPONSE_JSON_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["title", "page_range", "summary", "children"],
+    "properties": {
+        "title": {"type": "string"},
+        "page_range": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {"type": "integer"},
+        },
+        "summary": {"type": "string"},
+        "children": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/TreeNode"},
+        },
+    },
+    "$defs": TREE_NODE_RESPONSE_JSON_SCHEMA["$defs"],
+}
+
+
+class TreeContinuation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    page_range: list[int] = Field(min_length=2, max_length=2)
+    summary: str
+    children: list[TreeNode] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PageGroup:
+    pages: list[Page]
+    text: str
+    token_count: int
+
+
+@dataclass
+class PageIndexMetrics:
+    init_calls: int = 0
+    continue_calls: int = 0
+    recursion_calls: int = 0
+    nodes_split: int = 0
+    no_progress_skips: int = 0
+    max_depth_skips: int = 0
+    single_page_skips: int = 0
+    max_depth: int = 0
+
+
+@dataclass(frozen=True)
+class _Violation:
+    node: TreeNode
+    depth: int
+
+
+class PageIndexer:
+    def __init__(
+        self,
+        client: LlmClient,
+        *,
+        group_max_tokens: int = DEFAULT_GROUP_TOKENS,
+        overlap_page: int = 1,
+        max_page_num_each_node: int = DEFAULT_MAX_PAGE_NUM_EACH_NODE,
+        max_token_num_each_node: int = DEFAULT_MAX_TOKEN_NUM_EACH_NODE,
+        max_recursion_depth: int = DEFAULT_MAX_RECURSION_DEPTH,
+    ) -> None:
+        self.client = client
+        self.group_max_tokens = group_max_tokens
+        self.overlap_page = overlap_page
+        self.max_page_num_each_node = max_page_num_each_node
+        self.max_token_num_each_node = max_token_num_each_node
+        self.max_recursion_depth = max_recursion_depth
+        self.metrics = PageIndexMetrics()
+
+    async def build_tree(self, pages: list[Page]) -> TreeNode:
+        self.metrics = PageIndexMetrics()
+        tree = await self._process_no_toc(
+            pages,
+            trace_method_prefix="page_index",
+        )
+        await self._split_large_nodes(tree, pages)
+        self._assign_stable_node_ids(tree)
+        self.metrics.max_depth = self._tree_depth(tree)
+        return tree
+
+    def page_list_to_group_text(self, pages: list[Page]) -> list[PageGroup]:
+        if not pages:
+            raise ValueError("pages must not be empty")
+
+        groups: list[PageGroup] = []
+        current: list[Page] = []
+        current_tokens = 0
+        for page in pages:
+            if current and current_tokens + page.token_count > self.group_max_tokens:
+                groups.append(self._page_group(current))
+                current = current[-self.overlap_page :] if self.overlap_page else []
+                current_tokens = sum(item.token_count for item in current)
+            current.append(page)
+            current_tokens += page.token_count
+
+        if current:
+            groups.append(self._page_group(current))
+        return groups
+
+    async def _process_no_toc(
+        self,
+        pages: list[Page],
+        *,
+        trace_method_prefix: str,
+    ) -> TreeNode:
+        groups = self.page_list_to_group_text(pages)
+        tree = await self._generate_toc_init(
+            groups[0],
+            allowed_pages=groups[0].pages,
+            trace_method=f"{trace_method_prefix}.init",
+        )
+        allowed_pages = list(groups[0].pages)
+        for group in groups[1:]:
+            allowed_pages = [*allowed_pages, *group.pages]
+            tree = await self._generate_toc_continue(
+                tree,
+                group,
+                allowed_pages=allowed_pages,
+                trace_method=f"{trace_method_prefix}.continue",
+            )
+        return tree
+
+    async def _generate_toc_init(
+        self,
+        group: PageGroup,
+        *,
+        allowed_pages: list[Page],
+        trace_method: str,
+    ) -> TreeNode:
+        self.metrics.init_calls += 1
+        data = await self.client.generate_json(
+            prompt=INIT_PROMPT.format(group_text=group.text),
+            system_prompt=PAGE_INDEX_SYSTEM_PROMPT,
+            response_json_schema=TREE_NODE_RESPONSE_JSON_SCHEMA,
+            trace_method=trace_method,
+        )
+        tree = TreeNode.model_validate(data)
+        self._reject_unknown_page_ranges(tree, allowed_pages)
+        return tree
+
+    async def _generate_toc_continue(
+        self,
+        tree: TreeNode,
+        group: PageGroup,
+        *,
+        allowed_pages: list[Page],
+        trace_method: str,
+    ) -> TreeNode:
+        self.metrics.continue_calls += 1
+        tree_json = json.dumps(tree.model_dump(mode="json"), ensure_ascii=False)
+        data = await self.client.generate_json(
+            prompt=CONTINUE_PROMPT.format(tree_json=tree_json, group_text=group.text),
+            system_prompt=PAGE_INDEX_SYSTEM_PROMPT,
+            response_json_schema=TREE_CONTINUATION_RESPONSE_JSON_SCHEMA,
+            trace_method=trace_method,
+        )
+        continuation = TreeContinuation.model_validate(data)
+        self._reject_unknown_continuation_ranges(continuation, allowed_pages)
+        self._merge_continuation(tree, continuation)
+        return tree
+
+    async def _split_large_nodes(self, tree: TreeNode, pages: list[Page]) -> None:
+        protected: set[int] = set()
+        while True:
+            violation = self._first_splittable_violation(
+                tree,
+                pages,
+                depth=1,
+                protected=protected,
+            )
+            if violation is None:
+                return
+
+            sub_pages = self._pages_in_range(pages, violation.node.page_range)
+            self.metrics.recursion_calls += 1
+            sub_tree = await self._process_no_toc(
+                sub_pages,
+                trace_method_prefix="page_index.large_node_recursion",
+            )
+            children = sub_tree.children or [sub_tree]
+            if not self._split_makes_progress(violation.node, children):
+                protected.add(id(violation.node))
+                self.metrics.no_progress_skips += 1
+                continue
+            violation.node.children = children
+            protected.add(id(violation.node))
+            self.metrics.nodes_split += 1
+
+    def _first_splittable_violation(
+        self,
+        node: TreeNode,
+        pages: list[Page],
+        *,
+        depth: int,
+        protected: set[int],
+    ) -> _Violation | None:
+        if self._node_exceeds_limits(node, pages) and id(node) not in protected:
+            sub_pages = self._pages_in_range(pages, node.page_range)
+            if depth >= self.max_recursion_depth:
+                protected.add(id(node))
+                self.metrics.max_depth_skips += 1
+            elif len(sub_pages) <= 1:
+                protected.add(id(node))
+                self.metrics.single_page_skips += 1
+            else:
+                return _Violation(node=node, depth=depth)
+
+        for child in node.children:
+            violation = self._first_splittable_violation(
+                child,
+                pages,
+                depth=depth + 1,
+                protected=protected,
+            )
+            if violation is not None:
+                return violation
+        return None
+
+    def _node_exceeds_limits(self, node: TreeNode, pages: list[Page]) -> bool:
+        sub_pages = self._pages_in_range(pages, node.page_range)
+        return (
+            len(sub_pages) > self.max_page_num_each_node
+            or sum(page.token_count for page in sub_pages)
+            > self.max_token_num_each_node
+        )
+
+    @staticmethod
+    def _pages_in_range(pages: list[Page], page_range: list[int]) -> list[Page]:
+        start, end = page_range
+        return [page for page in pages if start <= page.ordinal <= end]
+
+    @staticmethod
+    def _split_makes_progress(node: TreeNode, children: list[TreeNode]) -> bool:
+        if len(children) != 1:
+            return True
+        return children[0].page_range != node.page_range
+
+    @staticmethod
+    def _page_group(pages: list[Page]) -> PageGroup:
+        text = "\n\n".join(f"[ordinal {page.ordinal}]\n{page.text}" for page in pages)
+        return PageGroup(
+            pages=pages,
+            text=text,
+            token_count=sum(page.token_count for page in pages),
+        )
+
+    def _assign_stable_node_ids(self, node: TreeNode, prefix: str = "n") -> None:
+        node.node_id = prefix
+        for index, child in enumerate(node.children, start=1):
+            self._assign_stable_node_ids(child, prefix=f"{prefix}.{index}")
+
+    def _tree_depth(self, node: TreeNode) -> int:
+        if not node.children:
+            return 1
+        return 1 + max(self._tree_depth(child) for child in node.children)
+
+    def _reject_unknown_page_ranges(self, tree: TreeNode, pages: list[Page]) -> None:
+        self._reject_unknown_ranges(self._walk_nodes(tree), pages)
+
+    def _reject_unknown_continuation_ranges(
+        self,
+        continuation: TreeContinuation,
+        pages: list[Page],
+    ) -> None:
+        root = TreeNode(
+            node_id="continuation-root",
+            title=continuation.title,
+            page_range=continuation.page_range,
+            summary=continuation.summary,
+            children=continuation.children,
+        )
+        self._reject_unknown_page_ranges(root, pages)
+
+    def _reject_unknown_ranges(self, nodes: list[TreeNode], pages: list[Page]) -> None:
+        ordinals = {page.ordinal for page in pages}
+        min_ordinal = min(ordinals)
+        max_ordinal = max(ordinals)
+        for node in nodes:
+            start, end = node.page_range
+            if start < min_ordinal or end > max_ordinal:
+                raise ValueError(
+                    f"{node.node_id} page_range {node.page_range} is outside "
+                    f"known ordinals {min_ordinal}..{max_ordinal}"
+                )
+            if not any(start <= ordinal <= end for ordinal in ordinals):
+                raise ValueError(
+                    f"{node.node_id} page_range {node.page_range} does not overlap "
+                    "known ordinals"
+                )
+
+    def _walk_nodes(self, node: TreeNode) -> list[TreeNode]:
+        nodes = [node]
+        for child in node.children:
+            nodes.extend(self._walk_nodes(child))
+        return nodes
+
+    def _merge_continuation(
+        self,
+        tree: TreeNode,
+        continuation: TreeContinuation,
+    ) -> None:
+        tree.title = continuation.title or tree.title
+        tree.summary = continuation.summary or tree.summary
+        tree.page_range = [
+            min(tree.page_range[0], continuation.page_range[0]),
+            max(tree.page_range[1], continuation.page_range[1]),
+        ]
+        for child in continuation.children:
+            self._merge_child(tree.children, child)
+        tree.children.sort(key=lambda node: (node.page_range[0], node.page_range[1]))
+
+    def _merge_child(self, children: list[TreeNode], incoming: TreeNode) -> None:
+        for existing in children:
+            if not self._same_section(existing, incoming):
+                continue
+            existing.page_range = [
+                min(existing.page_range[0], incoming.page_range[0]),
+                max(existing.page_range[1], incoming.page_range[1]),
+            ]
+            existing.summary = incoming.summary or existing.summary
+            for grandchild in incoming.children:
+                self._merge_child(existing.children, grandchild)
+            existing.children.sort(
+                key=lambda node: (node.page_range[0], node.page_range[1])
+            )
+            return
+        children.append(incoming)
+
+    @staticmethod
+    def _same_section(left: TreeNode, right: TreeNode) -> bool:
+        left_title = " ".join(left.title.lower().split())
+        right_title = " ".join(right.title.lower().split())
+        if left_title != right_title:
+            return False
+        left_start, left_end = left.page_range
+        right_start, right_end = right.page_range
+        return right_start <= left_end + 1 and left_start <= right_end + 1

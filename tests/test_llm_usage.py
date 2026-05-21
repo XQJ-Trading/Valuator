@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from valuator.utils import llm_usage as llm_usage_module
-from valuator.utils.llm_usage import LLMUsage, TokenUsage
+from valuator.utils.llm_usage import LLMUsage, TokenUsage, get_model_price
 
 
 def test_token_usage_from_raw_splits_cached_prompt_and_thoughts() -> None:
@@ -51,6 +51,21 @@ def test_explicit_cache_request_cost_uses_only_uncached_prompt_tokens() -> None:
     assert details["prompt_cost_usd"] == pytest.approx(0.00001)
     assert details["output_cost_usd"] == pytest.approx(0.00003)
     assert row.cost_usd() == pytest.approx(0.00004)
+
+
+def test_gemini_31_flash_uses_text_pricing_without_changing_gemini_3() -> None:
+    gemini_3 = get_model_price("gemini-3-flash-preview")
+    gemini_31 = get_model_price("gemini-3.1-flash")
+
+    assert gemini_3 is not None
+    assert gemini_3.prompt_usd_per_1m == pytest.approx(0.50)
+    assert gemini_3.completion_usd_per_1m == pytest.approx(3.00)
+
+    assert gemini_31 is not None
+    assert gemini_31.prompt_usd_per_1m == pytest.approx(0.25)
+    assert gemini_31.completion_usd_per_1m == pytest.approx(1.50)
+    assert gemini_31.cache_write_usd_per_1m == pytest.approx(0.025)
+    assert gemini_31.cache_storage_usd_per_1m_hour == pytest.approx(1.00)
 
 
 def test_explicit_cache_create_cost_includes_write_and_storage() -> None:

@@ -13,13 +13,16 @@ import styles from "./ConfigView.module.css";
 
 type ModelPick =
   | "gemini-3-flash-preview"
+  | "gemini-3.5-flash"
   | "openrouter"
   | "saved_custom"
   | "add_model";
 
 function hasNonPresetModel(c: AgentConfig): boolean {
   return (
-    (c.llmBackend === "google_genai" && c.model !== "gemini-3-flash-preview") ||
+    (c.llmBackend === "google_genai" &&
+      c.model !== "gemini-3-flash-preview" &&
+      c.model !== "gemini-3.5-flash") ||
     (c.llmBackend === "openrouter" && c.model !== "openrouter/auto")
   );
 }
@@ -31,7 +34,10 @@ function deriveModelPick(c: AgentConfig): ModelPick {
   if (hasNonPresetModel(c)) {
     return "saved_custom";
   }
-  return c.llmBackend === "openrouter" ? "openrouter" : "gemini-3-flash-preview";
+  if (c.llmBackend === "openrouter") return "openrouter";
+  return c.model === "gemini-3.5-flash"
+    ? "gemini-3.5-flash"
+    : "gemini-3-flash-preview";
 }
 
 export default function ConfigView() {
@@ -206,13 +212,21 @@ export default function ConfigView() {
                         setDraft((d) => ({ ...d, customModelUiOpen: false }));
                         return;
                       }
-                      setModelPick(nextOption as "gemini-3-flash-preview" | "openrouter");
+                      setModelPick(
+                        nextOption as
+                          | "gemini-3-flash-preview"
+                          | "gemini-3.5-flash"
+                          | "openrouter",
+                      );
                       setDraft((current) => {
-                        if (nextOption === "gemini-3-flash-preview") {
+                        if (
+                          nextOption === "gemini-3-flash-preview" ||
+                          nextOption === "gemini-3.5-flash"
+                        ) {
                           return {
                             ...current,
                             llmBackend: "google_genai",
-                            model: "gemini-3-flash-preview",
+                            model: nextOption,
                             customModelUiOpen: false,
                           };
                         }
@@ -232,6 +246,7 @@ export default function ConfigView() {
                     <option value="gemini-3-flash-preview">
                       gemini-3-flash-preview
                     </option>
+                    <option value="gemini-3.5-flash">gemini-3.5-flash</option>
                     <option value="openrouter">OpenRouter</option>
                     {hasNonPresetModel(draft) ? (
                       <option value="saved_custom">{draft.model}</option>

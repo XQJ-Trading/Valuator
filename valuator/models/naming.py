@@ -4,9 +4,7 @@ from __future__ import annotations
 # OpenRouter (including openrouter/auto) passes strings through unchanged; no alias table.
 MODEL_ALIASES: dict[str, str] = {
     "gemini-2.5-flash": "gemini-3-flash-preview",
-    "gemini-flash-latest": "gemini-3-flash-preview",
     "gemini-2.5-pro": "gemini-3-pro-preview",
-    "gemini-pro-latest": "gemini-3-pro-preview",
     "google/gemini-3-flash-preview-20251217": "gemini-3-flash-preview",
 }
 

@@ -32,7 +32,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--doc-id", default="", help="Indexed document id.")
     parser.add_argument("--doc-hash", default="", help="Indexed document hash.")
-    parser.add_argument("--query", required=True, help="Retrieval query.")
+    parser.add_argument(
+        "--query",
+        action="append",
+        required=True,
+        help="Retrieval query. Repeat for a parallel query batch.",
+    )
     parser.add_argument(
         "--model",
         default="",
@@ -58,6 +63,12 @@ def parse_args() -> argparse.Namespace:
         "--unit-objective",
         default="",
         help="Evidence unit objective. Defaults to the query.",
+    )
+    parser.add_argument(
+        "--query-concurrency",
+        type=int,
+        default=1,
+        help="Bounded concurrency across repeated --query values. Default: 1",
     )
     return parser.parse_args()
 
@@ -199,15 +210,16 @@ def record_evidence(
     return rows
 
 
-async def run(args: argparse.Namespace) -> None:
-    store = IndexStore(resolve_path(args.db))
-    document = load_document(store, args)
-
+async def run_query(
+    args: argparse.Namespace,
+    *,
+    store: IndexStore,
+    document: Any,
+    query: str,
+    output_prefix: str,
+) -> dict[str, Any]:
     output_dir = resolve_path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_prefix = safe_output_prefix(
-        args.output_prefix or f"{document.doc_id}-retrieve"
-    )
     usage_path = output_dir / f"{output_prefix}-llm_usage.jsonl"
     llm_calls_path = output_dir / f"{output_prefix}-llm_calls.jsonl"
     output_path = output_dir / f"{output_prefix}-result.json"
@@ -223,7 +235,7 @@ async def run(args: argparse.Namespace) -> None:
     result = await retriever.retrieve(
         store=store,
         document=document,
-        sub_query=args.query,
+        sub_query=query,
     )
     trace_writer.append_total()
 
@@ -238,7 +250,7 @@ async def run(args: argparse.Namespace) -> None:
     payload["usage_path"] = str(usage_path)
     payload["llm_calls_path"] = str(llm_calls_path)
     text_path.write_text(
-        format_text_output(result, args.query),
+        format_text_output(result, query),
         encoding="utf-8",
     )
     payload["text_path"] = str(text_path)
@@ -247,6 +259,52 @@ async def run(args: argparse.Namespace) -> None:
         encoding="utf-8",
     )
     payload["output_path"] = str(output_path)
+    return payload
+
+
+async def gather_queries_limited(
+    items: list[tuple[int, str]],
+    *,
+    concurrency: int,
+    process: Any,
+) -> list[dict[str, Any]]:
+    if concurrency <= 0:
+        raise ValueError("query_concurrency must be > 0")
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def guarded(item: tuple[int, str]) -> dict[str, Any]:
+        async with semaphore:
+            return await process(item)
+
+    return list(await asyncio.gather(*(guarded(item) for item in items)))
+
+
+async def run(args: argparse.Namespace) -> None:
+    store = IndexStore(resolve_path(args.db))
+    document = load_document(store, args)
+    output_prefix = safe_output_prefix(
+        args.output_prefix or f"{document.doc_id}-retrieve"
+    )
+    queries = [(index, query) for index, query in enumerate(args.query, start=1)]
+
+    async def process(item: tuple[int, str]) -> dict[str, Any]:
+        index, query = item
+        prefix = output_prefix if len(queries) == 1 else f"{output_prefix}-q{index}"
+        return await run_query(
+            args,
+            store=store,
+            document=document,
+            query=query,
+            output_prefix=prefix,
+        )
+
+    results = await gather_queries_limited(
+        queries,
+        concurrency=args.query_concurrency,
+        process=process,
+    )
+    payload: dict[str, Any] | list[dict[str, Any]]
+    payload = results[0] if len(results) == 1 else results
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

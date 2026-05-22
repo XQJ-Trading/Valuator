@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import re
 from dataclasses import dataclass
 from re import Pattern
-from typing import Literal
+from typing import Any, Literal
 
 from .types import Page, RawDocument
 
 DEFAULT_TEXT_PAGE_TOKENS = 4_000
 TEXT_MIME_TYPES = {"text/plain", "text/markdown", "text/x-markdown"}
+PDF_MIME_TYPE = "application/pdf"
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,82 @@ class PageMarkerPattern:
     locator_kind: str = "marked_page"
     page_group: str | int = "page"
     boundary: Literal["end", "start"] = "end"
+
+
+@dataclass(frozen=True)
+class DocumentLoader:
+    name: Literal["token_text", "marked_text", "pdf"]
+    page_unit: str
+    unit_origin: Literal["token_window", "page_marker", "physical_page"]
+    text_page_tokens: int = DEFAULT_TEXT_PAGE_TOKENS
+    marker: PageMarkerPattern | None = None
+
+    def __post_init__(self) -> None:
+        if self.text_page_tokens <= 0:
+            raise ValueError("text_page_tokens must be > 0")
+        if self.name == "marked_text" and self.marker is None:
+            raise ValueError("marked_text loader requires a page marker")
+        if self.name != "marked_text" and self.marker is not None:
+            raise ValueError(f"{self.name} loader does not accept a page marker")
+
+    @classmethod
+    def token_text(
+        cls,
+        *,
+        text_page_tokens: int = DEFAULT_TEXT_PAGE_TOKENS,
+    ) -> DocumentLoader:
+        return cls(
+            name="token_text",
+            page_unit="token_window",
+            unit_origin="token_window",
+            text_page_tokens=text_page_tokens,
+        )
+
+    @classmethod
+    def marked_text(cls, *, marker: PageMarkerPattern) -> DocumentLoader:
+        return cls(
+            name="marked_text",
+            page_unit=marker.locator_kind,
+            unit_origin="page_marker",
+            marker=marker,
+        )
+
+    @classmethod
+    def pdf(cls) -> DocumentLoader:
+        return cls(
+            name="pdf",
+            page_unit="pdf_page",
+            unit_origin="physical_page",
+        )
+
+    def pages_from_raw(self, document: RawDocument) -> list[Page]:
+        ingest = DocumentIngest(text_page_tokens=self.text_page_tokens)
+        if self.name == "token_text":
+            return ingest.pages_from_raw(document)
+        if self.name == "pdf":
+            return ingest.pages_from_pdf(document)
+        if document.mime not in TEXT_MIME_TYPES:
+            raise NotImplementedError("marked text loader supports text inputs only")
+        if self.marker is None:
+            raise ValueError("marked_text loader requires a page marker")
+        return ingest.pages_from_marked_text(
+            doc_id=document.doc_id,
+            text=ingest._document_text(document),
+            source=document.source,
+            marker=self.marker,
+        )
+
+    def metadata(self) -> dict[str, Any]:
+        metadata = {
+            "loader": self.name,
+            "page_unit": self.page_unit,
+            "unit_origin": self.unit_origin,
+        }
+        if self.name == "token_text":
+            metadata["text_page_tokens"] = self.text_page_tokens
+        elif self.marker is not None:
+            metadata["marker_boundary"] = self.marker.boundary
+        return metadata
 
 
 def document_hash(document: RawDocument) -> str:
@@ -76,6 +154,37 @@ class DocumentIngest:
                     },
                 )
             )
+        return pages
+
+    def pages_from_pdf(self, document: RawDocument) -> list[Page]:
+        if document.mime != PDF_MIME_TYPE:
+            raise ValueError("pdf loader requires application/pdf mime")
+        raw = document.raw_bytes_or_text
+        if isinstance(raw, str):
+            raise ValueError("pdf loader requires bytes")
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:  # pragma: no cover - dependency guard
+            raise RuntimeError("pdf loader requires pypdf") from exc
+
+        reader = PdfReader(BytesIO(raw))
+        pages = [
+            Page(
+                doc_id=document.doc_id,
+                ordinal=index,
+                text=text,
+                token_count=self._token_count(text),
+                source_locator={
+                    "kind": "pdf_page",
+                    "source": document.source,
+                    "page": index,
+                },
+            )
+            for index, pdf_page in enumerate(reader.pages, start=1)
+            for text in [(pdf_page.extract_text() or "").strip()]
+        ]
+        if not pages:
+            raise ValueError("pdf document has no pages")
         return pages
 
     def pages_from_marked_text(

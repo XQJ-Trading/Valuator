@@ -1,18 +1,40 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from pathlib import Path
 
-from scripts.export_sec_10k_text import default_output_path, safe_ticker
-from scripts.run_page_index_retrieve_poc import page_text, result_payload
+import pytest
+
+from scripts.export_sec_10k_text import (
+    default_output_path,
+    page_index_manifest,
+    safe_ticker,
+)
+from scripts.run_page_index_retrieve_poc import (
+    gather_queries_limited,
+    page_text,
+    result_payload,
+)
 from scripts.run_page_index_poc import (
+    LoaderConfig,
     PageIndexTraceWriter,
     build_pages,
-    marker_boundary,
-    marker_group,
+    default_loader,
+    gather_limited,
+    input_mime,
+    load_manifest,
     safe_output_prefix,
 )
-from valuator.documents import NodeSelection, Page, RawDocument, RetrievedNode
+from valuator.documents import (
+    DocumentLoader,
+    NodeSelection,
+    Page,
+    PageMarkerPattern,
+    RawDocument,
+    RetrievedNode,
+)
 from valuator.documents import RetrievalResult
 from valuator.utils.llm_usage import TokenUsage
 
@@ -70,11 +92,12 @@ def test_page_index_poc_builds_pages_from_generic_markers() -> None:
 
     pages = build_pages(
         document=document,
-        text_page_tokens=100,
-        page_marker_regex=r"-- page (?P<page>\d+) --$",
-        page_marker_group="page",
-        page_marker_kind="source_page",
-        page_marker_boundary="end",
+        loader=DocumentLoader.marked_text(
+            marker=PageMarkerPattern(
+                pattern=re.compile(r"-- page (?P<page>\d+) --$"),
+                locator_kind="source_page",
+            )
+        ),
     )
 
     assert [page.ordinal for page in pages] == [7, 8]
@@ -83,10 +106,58 @@ def test_page_index_poc_builds_pages_from_generic_markers() -> None:
 
 
 def test_page_index_poc_helpers_are_generic() -> None:
-    assert marker_group("1") == 1
-    assert marker_group("page") == "page"
-    assert marker_boundary("start") == "start"
+    assert default_loader(Path("report.pdf")).metadata()["page_unit"] == "pdf_page"
+    assert default_loader(Path("report.txt")).metadata()["page_unit"] == "token_window"
+    assert input_mime(Path("report.pdf")) == "application/pdf"
+    assert input_mime(Path("report.md")) == "text/markdown"
+    assert input_mime(Path("report.txt")) == "text/plain"
     assert safe_output_prefix("annual report/fy 2024") == "annual-report-fy-2024"
+
+
+def test_page_index_manifest_loads_marked_text_document(tmp_path) -> None:
+    manifest_path = tmp_path / "page_index.json"
+    input_path = tmp_path / "report.txt"
+    input_path.write_text("page one\nPage 1\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "documents": [
+                    {
+                        "input_file": str(input_path),
+                        "doc_id": "report",
+                        "loader": {
+                            "kind": "marked_text",
+                            "marker": {
+                                "regex": r"Page (?P<page>\d+)$",
+                                "locator_kind": "source_page",
+                            },
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    documents = load_manifest(manifest_path)
+    pages = build_pages(
+        document=RawDocument(
+            doc_id=documents[0].doc_id,
+            source=documents[0].source,
+            raw_bytes_or_text=input_path.read_text(encoding="utf-8"),
+            mime=documents[0].mime,
+        ),
+        loader=documents[0].loader,
+    )
+
+    assert documents[0].output_prefix == "report"
+    assert documents[0].loader.metadata()["page_unit"] == "source_page"
+    assert [page.ordinal for page in pages] == [1]
+
+
+def test_marked_text_loader_config_requires_marker() -> None:
+    with pytest.raises(ValueError, match="requires loader.marker"):
+        LoaderConfig(kind="marked_text")
 
 
 def test_sec_export_helper_builds_stable_output_path() -> None:
@@ -96,6 +167,12 @@ def test_sec_export_helper_builds_stable_output_path() -> None:
         ticker="AAPL",
         year=2024,
     ) == Path("data/page_index/aapl-2024.txt")
+    manifest = page_index_manifest(
+        output_path=Path("data/page_index/aapl-2024.txt"),
+        doc_id="aapl-2024",
+        source="https://example.test/aapl",
+    )
+    assert manifest["documents"][0]["loader"]["kind"] == "marked_text"
 
 
 def test_retrieve_poc_payload_truncates_loaded_page_text() -> None:
@@ -135,3 +212,53 @@ def test_retrieve_poc_payload_truncates_loaded_page_text() -> None:
     assert payload["selected_node_ids"] == ["n.1"]
     assert payload["loaded_page_tokens"] == 2
     assert payload["selected_nodes"][0]["pages"][0]["text"] == "abcd\n...[truncated]"
+
+
+@pytest.mark.asyncio
+async def test_page_index_poc_batch_helper_limits_document_concurrency() -> None:
+    active = 0
+    max_active = 0
+
+    async def process(path: Path) -> dict[str, object]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {"path": str(path)}
+
+    results = await gather_limited(
+        [Path("a.txt"), Path("b.txt"), Path("c.txt")],
+        concurrency=2,
+        process=process,
+    )
+
+    assert max_active == 2
+    assert [row["path"] for row in results] == ["a.txt", "b.txt", "c.txt"]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_poc_batch_helper_limits_query_concurrency() -> None:
+    active = 0
+    max_active = 0
+
+    async def process(item: tuple[int, str]) -> dict[str, object]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {"item": item}
+
+    results = await gather_queries_limited(
+        [(1, "one"), (2, "two"), (3, "three")],
+        concurrency=2,
+        process=process,
+    )
+
+    assert max_active == 2
+    assert [row["item"] for row in results] == [
+        (1, "one"),
+        (2, "two"),
+        (3, "three"),
+    ]

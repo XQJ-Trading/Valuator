@@ -11,7 +11,7 @@
 | 파일 | 역할 |
 |------|-----|
 | [`/valuator/documents/types.py`](../../valuator/documents/types.py) (신규) | Pydantic 도메인 타입: `RawDocument`, `Page`, `TreeNode`, `IndexedDocument` |
-| [`/valuator/documents/ingest.py`](../../valuator/documents/ingest.py) (신규) | `RawDocument` → `list[Page]` 정규화. 토큰 윈도우 TXT/MD와 regex 기반 marked text 지원 |
+| [`/valuator/documents/ingest.py`](../../valuator/documents/ingest.py) (신규) | `RawDocument` → `list[Page]` 정규화. `DocumentLoader`가 PDF physical page, 토큰 윈도우 TXT/MD, regex 기반 marked text 파싱을 감춤 |
 | [`/valuator/documents/indexer.py`](../../valuator/documents/indexer.py) (신규) | `list[Page]` → `TreeNode`. PageIndex 알고리즘 차용 |
 | [`/valuator/documents/store.py`](../../valuator/documents/store.py) (신규) | `doc_hash → tree_json` SQLite 영속화 (`IndexStore`) |
 | [`/scripts/run_page_index_poc.py`](../../scripts/run_page_index_poc.py) | 로컬 문서 입력 CLI. SEC fetch 없음. tree/usage/llm_calls JSONL 출력 |
@@ -38,16 +38,39 @@ PageIndex 라이브러리를 의존성으로 도입하지 않고 핵심 알고�
 
 ## CLI 입력
 
-기본 실행:
+직접 입력 실행은 확장자로 기본 loader를 고른다. PDF는 physical page를 보존하고, plain TXT/MD는 token window로 정규화한다. `doc_id`는 필요할 때만 한 문서에 대해 명시하고, 기본값은 파일 stem이다.
 
 ```bash
 ./venv/bin/python scripts/run_page_index_poc.py \
-  --input-file data/page_index/aapl-2024.txt \
-  --doc-id aapl-2024 \
+  --input-file data/4Q24_IR_Book_KOR.pdf \
   --model gemini-3.1-flash
 ```
 
-SEC 10-K는 먼저 입력 파일로 export한 뒤 같은 CLI에 넘긴다. SEC fetch는 인덱서가 아니라 입력 어댑터 책임이다.
+문서 메타데이터와 parser 세부사항은 manifest로 넘긴다. marked text의 regex, marker boundary, source locator kind는 인덱싱 알고리즘 옵션이 아니므로 flat CLI 옵션으로 노출하지 않는다.
+
+```json
+{
+  "documents": [
+    {
+      "input_file": "data/page_index/report.txt",
+      "doc_id": "report",
+      "loader": {
+        "kind": "marked_text",
+        "marker": {
+          "regex": "Page (?P<page>\\d+)$",
+          "locator_kind": "source_page",
+          "page_group": "page",
+          "boundary": "end"
+        }
+      }
+    }
+  ]
+}
+```
+
+`marked_text` loader가 marker를 못 찾으면 token window로 조용히 fallback하지 않고 실패한다. 실제 페이지가 필요한 입력을 segment tree로 잘못 인덱싱하지 않기 위한 경계다.
+
+SEC 10-K는 먼저 입력 파일로 export한다. SEC fetch와 reader footer marker 설정은 인덱서가 아니라 입력 어댑터 책임이며, export 스크립트가 `.page_index.json` sidecar manifest를 같이 만든다.
 
 ```bash
 ./venv/bin/python scripts/export_sec_10k_text.py \
@@ -55,21 +78,26 @@ SEC 10-K는 먼저 입력 파일로 export한 뒤 같은 CLI에 넘긴다. SEC f
   --year 2024
 ```
 
-실제 페이지 마커가 있는 텍스트는 marker regex를 넘긴다. 이 경우 2000토큰 segment가 아니라 marker의 page number가 `Page.ordinal`이 된다.
-마커가 page footer면 기본값인 `--page-marker-boundary end`를 쓰고, page header면 `start`를 명시한다.
+```bash
+./venv/bin/python scripts/run_page_index_poc.py \
+  --manifest data/page_index/aapl-2024.page_index.json \
+  --model gemini-3.1-flash
+```
+
+여러 문서는 입력 파일 단위로 병렬 인덱싱할 수 있다. 각 문서는 독립 writer/client를 쓰며, 같은 SQLite `IndexStore`에 최종 결과만 기록한다.
 
 ```bash
 ./venv/bin/python scripts/run_page_index_poc.py \
-  --input-file data/page_index/aapl-2024.txt \
-  --doc-id aapl-2024 \
-  --output-prefix aapl-2024 \
-  --page-marker-regex '\|\s*\d{4}\s+Form\s+[A-Z0-9-]+\s+\|\s*(?P<page>\d+)\s*$' \
-  --page-marker-kind sec_filing_page \
-  --page-marker-boundary end \
+  --input-file data/4Q24_IR_Book_KOR.pdf \
+  --input-file data/20260219_company_200600000.pdf \
+  --input-file data/_Data_20244_11_menu01_ratingKB_763422.pdf \
+  --document-concurrency 2 \
   --model gemini-3.1-flash
 ```
 
 SEC/DART fetch는 이 스크립트 책임이 아니다. 외부 어댑터가 텍스트 파일이나 marked text를 만든 뒤 이 CLI에 넘긴다.
+
+`data/page_index/*.txt`처럼 `[page N]` header가 이미 들어간 PDF text export는 direct TXT 입력으로 넣지 않는다. direct TXT 입력은 전체 문서를 token window ordinal로 다시 자르므로 LLM이 source `[page N]`와 index ordinal을 혼동할 수 있다. 이런 파일은 `marked_text` manifest에서 `\\[page (?P<page>\\d+)\\]` header marker를 명시한다.
 
 ## 재귀 분할 (`process_large_node_recursively`)
 
@@ -86,9 +114,10 @@ leaf 노드부터 평가하지 않고 트리를 DFS 순회하면서 만나는 �
 ### 동작
 
 1. 위반 노드의 `page_range`로 원본 `Page` 슬라이스 확보
-2. 그 슬라이스에 `process_no_toc` 재호출 (`page_list_to_group_text` → `generate_toc_init` → delta형 `generate_toc_continue` 체인)
-3. 결과 자식 트리를 원래 노드의 `children`으로 교체
-4. 갱신된 트리 전체에서 위반 노드 재검색. 없으면 종료
+2. 같은 batch frontier에서 ancestor/descendant 관계가 없고 `page_range`가 겹치지 않는 위반 노드를 묶음
+3. 각 슬라이스에 `process_no_toc` 재호출 (`page_list_to_group_text` → `generate_toc_init` → delta형 `generate_toc_continue` 체인)
+4. batch 결과를 원래 노드의 `children`으로 deterministic 병합
+5. 갱신된 트리 전체에서 위반 노드 재검색. 없으면 종료
 
 ### 종료 조건과 보호 장치
 
@@ -97,6 +126,28 @@ PageIndex 원안에는 명시적 보호 장치가 없어 단일 페이지가 `ma
 - **재귀 깊이 한도**: `max_recursion_depth=4` (트리의 4번째 깊이까지만 자동 분할, 그 이상은 그대로 둠)
 - **단일 페이지 보호**: 한 페이지가 한도를 단독으로 넘기면 분할 시도 안 함 (그대로 leaf 유지). 한국어 PDF에서 발생 가능.
 - **진행 보장**: 재귀 결과가 원래 노드와 같은 단일 범위만 반환하면 해당 노드를 보호 목록에 넣고 재시도하지 않음.
+- **병렬 한도**: disjoint recursive split batch만 `recursion_concurrency`로 제한해 병렬 처리. 기본 4.
+
+## 병렬 처리 정책
+
+초기 tree build의 `generate_toc_init` → `generate_toc_continue` chain은 순차 유지한다. 다음 group이 이전 누적 tree를 context index로 받아 delta를 만들기 때문에 group을 독립 subtree로 병렬 처리하면 group 경계 섹션 merge 품질과 비용을 새로 검증해야 한다.
+
+Phase 1에서 병렬화하는 경계는 두 곳이다.
+
+| 경계 | 병렬화 | 이유 |
+|------|--------|------|
+| 문서 간 | `--document-concurrency` | 입력/트리/usage가 독립 |
+| 같은 tree의 large-node recursion | `--recursion-concurrency` | 현재 frontier의 disjoint page range만 독립 |
+| 한 문서의 group continue chain | 순차 | 누적 tree dependency 보존 |
+
+recursive split 동시성은 single-doc 명령에서도 조정할 수 있다.
+
+```bash
+./venv/bin/python scripts/run_page_index_poc.py \
+  --manifest data/page_index/aapl-2024.page_index.json \
+  --recursion-concurrency 4 \
+  --model gemini-3.1-flash
+```
 
 ### 비용 영향
 
@@ -119,6 +170,7 @@ PageIndex 원안에는 명시적 보호 장치가 없어 단일 페이지가 `ma
 - 인덱싱 wall-clock 시간
 - 트리 노드 수, 평균 깊이, 최대 깊이
 - **재귀 분할 발생 노드 수, 최대 재귀 깊이, 재귀가 차지하는 토큰 비용 비율**
+- **재귀 병렬 batch 수와 최대 동시 recursive split 수**
 - **보호 장치 발동 횟수** (`max_recursion_depth` 도달, 단일 페이지 한도 초과)
 - 핵심 섹션 누락 여부 (수동 대조 결과)
 - 동일 문서 재인덱싱 시 트리 일치율

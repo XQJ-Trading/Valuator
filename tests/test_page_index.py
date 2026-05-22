@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+from io import BytesIO
 import re
 from typing import Any
 
 import pytest
+from pypdf import PdfWriter
 
 from valuator.documents import (
     DocumentIngest,
+    DocumentLoader,
     IndexStore,
     IndexedDocument,
     Page,
@@ -133,6 +137,64 @@ class RetrieverLlmClient(FakeLlmClient):
         }
 
 
+class ParallelSplitLlmClient(FakeLlmClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_recursions = 0
+        self.max_active_recursions = 0
+
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        trace_method = str(kwargs["trace_method"])
+        self.calls.append(trace_method)
+        ordinals = [
+            int(value)
+            for value in re.findall(r"\[ordinal (\d+)\]", str(kwargs["prompt"]))
+        ]
+        start = min(ordinals)
+        end = max(ordinals)
+        if trace_method == "page_index.init":
+            return self._tree(start, end, [])
+
+        self.active_recursions += 1
+        self.max_active_recursions = max(
+            self.max_active_recursions,
+            self.active_recursions,
+        )
+        await asyncio.sleep(0)
+        try:
+            midpoint = (start + end) // 2
+            return self._tree(
+                start,
+                end,
+                [
+                    self._child("left", start, midpoint),
+                    self._child("right", midpoint + 1, end),
+                ],
+            )
+        finally:
+            self.active_recursions -= 1
+
+    @staticmethod
+    def _tree(start: int, end: int, children: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "node_id": f"root-{start}-{end}",
+            "title": f"Root {start}-{end}",
+            "page_range": [start, end],
+            "summary": "Parallel split tree",
+            "children": children,
+        }
+
+    @staticmethod
+    def _child(name: str, start: int, end: int) -> dict[str, Any]:
+        return {
+            "node_id": f"{name}-{start}-{end}",
+            "title": f"{name} {start}-{end}",
+            "page_range": [start, end],
+            "summary": "Child section",
+            "children": [],
+        }
+
+
 def test_text_ingest_splits_text_into_char_range_pages() -> None:
     document = RawDocument(
         doc_id="doc-1",
@@ -199,6 +261,45 @@ def test_start_marked_text_ingest_preserves_source_page_numbers() -> None:
     assert [page.ordinal for page in pages] == [10, 11]
     assert pages[0].text.startswith("Page 10")
     assert pages[1].text.startswith("Page 11")
+
+
+def test_marked_text_loader_fails_when_expected_markers_are_missing() -> None:
+    loader = DocumentLoader.marked_text(
+        marker=PageMarkerPattern(pattern=re.compile(r"Page (?P<page>\d+)$"))
+    )
+
+    with pytest.raises(ValueError, match="does not contain page markers"):
+        loader.pages_from_raw(
+            RawDocument(
+                doc_id="doc-1",
+                source="memory://doc-1",
+                raw_bytes_or_text="text without page markers",
+            )
+        )
+
+
+def test_pdf_loader_preserves_physical_pages() -> None:
+    raw_pdf = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.add_blank_page(width=100, height=100)
+    writer.write(raw_pdf)
+
+    pages = DocumentLoader.pdf().pages_from_raw(
+        RawDocument(
+            doc_id="pdf-doc",
+            source="memory://pdf-doc",
+            raw_bytes_or_text=raw_pdf.getvalue(),
+            mime="application/pdf",
+        )
+    )
+
+    assert [page.ordinal for page in pages] == [1, 2]
+    assert pages[0].source_locator == {
+        "kind": "pdf_page",
+        "source": "memory://pdf-doc",
+        "page": 1,
+    }
 
 
 def test_index_store_round_trips_document_and_pages(tmp_path) -> None:
@@ -269,6 +370,37 @@ async def test_page_indexer_recursively_splits_oversized_nodes() -> None:
     assert indexer.metrics.recursion_calls == 1
     assert indexer.metrics.nodes_split == 1
     assert indexer.metrics.max_depth == 2
+
+
+@pytest.mark.asyncio
+async def test_page_indexer_splits_disjoint_recursive_frontier_in_parallel() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=index,
+            text=f"page {index}",
+            token_count=2,
+            source_locator={"kind": "char_range", "start": index, "end": index + 1},
+        )
+        for index in range(8)
+    ]
+    client = ParallelSplitLlmClient()
+    indexer = PageIndexer(
+        client,
+        max_page_num_each_node=2,
+        max_token_num_each_node=100,
+        group_max_tokens=100,
+        recursion_concurrency=2,
+    )
+
+    tree = await indexer.build_tree(pages)
+
+    assert tree.page_range == [0, 7]
+    assert client.max_active_recursions == 2
+    assert indexer.metrics.recursion_calls == 3
+    assert indexer.metrics.recursion_batches == 2
+    assert indexer.metrics.max_parallel_recursions == 2
+    assert indexer.metrics.nodes_split == 3
 
 
 @pytest.mark.asyncio
@@ -391,6 +523,12 @@ async def test_tree_retriever_selects_nodes_and_lazy_loads_pages(tmp_path) -> No
         document=indexed,
         sub_query="Find the second section.",
     )
+    result_batch = await retriever.retrieve_many(
+        store=store,
+        document=indexed,
+        sub_queries=["Find the second section.", "Find it again."],
+        concurrency=2,
+    )
     loaded_pages = retriever.get_page_content(
         store=store,
         doc_hash="hash-1",
@@ -400,6 +538,10 @@ async def test_tree_retriever_selects_nodes_and_lazy_loads_pages(tmp_path) -> No
 
     assert selection.selected_node_ids == ["n.2"]
     assert result.selection.selected_node_ids == ["n.2"]
+    assert [item.selection.selected_node_ids for item in result_batch] == [
+        ["n.2"],
+        ["n.2"],
+    ]
     assert result.selected_nodes[0].node_id == "n.2"
     assert [page.ordinal for page in loaded_pages] == [2]
     assert loaded_pages[0].text == "second page raw text"

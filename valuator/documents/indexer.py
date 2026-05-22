@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 
@@ -13,6 +14,7 @@ DEFAULT_GROUP_TOKENS = 20_000
 DEFAULT_MAX_PAGE_NUM_EACH_NODE = 5
 DEFAULT_MAX_TOKEN_NUM_EACH_NODE = 20_000
 DEFAULT_MAX_RECURSION_DEPTH = 4
+DEFAULT_RECURSION_CONCURRENCY = 4
 
 PAGE_INDEX_SYSTEM_PROMPT = (
     "Return JSON only. Build a hierarchical document tree from the provided pages. "
@@ -128,6 +130,8 @@ class PageIndexMetrics:
     max_depth_skips: int = 0
     single_page_skips: int = 0
     max_depth: int = 0
+    recursion_batches: int = 0
+    max_parallel_recursions: int = 0
 
 
 @dataclass(frozen=True)
@@ -146,13 +150,17 @@ class PageIndexer:
         max_page_num_each_node: int = DEFAULT_MAX_PAGE_NUM_EACH_NODE,
         max_token_num_each_node: int = DEFAULT_MAX_TOKEN_NUM_EACH_NODE,
         max_recursion_depth: int = DEFAULT_MAX_RECURSION_DEPTH,
+        recursion_concurrency: int = DEFAULT_RECURSION_CONCURRENCY,
     ) -> None:
+        if recursion_concurrency <= 0:
+            raise ValueError("recursion_concurrency must be > 0")
         self.client = client
         self.group_max_tokens = group_max_tokens
         self.overlap_page = overlap_page
         self.max_page_num_each_node = max_page_num_each_node
         self.max_token_num_each_node = max_token_num_each_node
         self.max_recursion_depth = max_recursion_depth
+        self.recursion_concurrency = recursion_concurrency
         self.metrics = PageIndexMetrics()
 
     async def build_tree(self, pages: list[Page]) -> TreeNode:
@@ -250,38 +258,71 @@ class PageIndexer:
     async def _split_large_nodes(self, tree: TreeNode, pages: list[Page]) -> None:
         protected: set[int] = set()
         while True:
-            violation = self._first_splittable_violation(
+            violations = self._splittable_violation_frontier(
                 tree,
                 pages,
                 depth=1,
                 protected=protected,
             )
-            if violation is None:
+            violations = self._disjoint_violations(violations)
+            if not violations:
                 return
 
-            sub_pages = self._pages_in_range(pages, violation.node.page_range)
-            self.metrics.recursion_calls += 1
-            sub_tree = await self._process_no_toc(
-                sub_pages,
-                trace_method_prefix="page_index.large_node_recursion",
+            self.metrics.recursion_batches += 1
+            self.metrics.max_parallel_recursions = max(
+                self.metrics.max_parallel_recursions,
+                min(len(violations), self.recursion_concurrency),
             )
-            children = sub_tree.children or [sub_tree]
-            if not self._split_makes_progress(violation.node, children):
-                protected.add(id(violation.node))
-                self.metrics.no_progress_skips += 1
-                continue
-            violation.node.children = children
-            protected.add(id(violation.node))
-            self.metrics.nodes_split += 1
+            sub_trees = await self._process_violation_batch(violations, pages)
+            for violation, sub_tree in zip(violations, sub_trees):
+                self._merge_recursive_split(
+                    violation=violation,
+                    sub_tree=sub_tree,
+                    protected=protected,
+                )
 
-    def _first_splittable_violation(
+    async def _process_violation_batch(
+        self,
+        violations: list[_Violation],
+        pages: list[Page],
+    ) -> list[TreeNode]:
+        semaphore = asyncio.Semaphore(self.recursion_concurrency)
+
+        async def process(violation: _Violation) -> TreeNode:
+            async with semaphore:
+                sub_pages = self._pages_in_range(pages, violation.node.page_range)
+                self.metrics.recursion_calls += 1
+                return await self._process_no_toc(
+                    sub_pages,
+                    trace_method_prefix="page_index.large_node_recursion",
+                )
+
+        return list(await asyncio.gather(*(process(item) for item in violations)))
+
+    def _merge_recursive_split(
+        self,
+        *,
+        violation: _Violation,
+        sub_tree: TreeNode,
+        protected: set[int],
+    ) -> None:
+        children = sub_tree.children or [sub_tree]
+        if not self._split_makes_progress(violation.node, children):
+            protected.add(id(violation.node))
+            self.metrics.no_progress_skips += 1
+            return
+        violation.node.children = children
+        protected.add(id(violation.node))
+        self.metrics.nodes_split += 1
+
+    def _splittable_violation_frontier(
         self,
         node: TreeNode,
         pages: list[Page],
         *,
         depth: int,
         protected: set[int],
-    ) -> _Violation | None:
+    ) -> list[_Violation]:
         if self._node_exceeds_limits(node, pages) and id(node) not in protected:
             sub_pages = self._pages_in_range(pages, node.page_range)
             if depth >= self.max_recursion_depth:
@@ -291,18 +332,41 @@ class PageIndexer:
                 protected.add(id(node))
                 self.metrics.single_page_skips += 1
             else:
-                return _Violation(node=node, depth=depth)
+                return [_Violation(node=node, depth=depth)]
 
+        violations: list[_Violation] = []
         for child in node.children:
-            violation = self._first_splittable_violation(
-                child,
-                pages,
-                depth=depth + 1,
-                protected=protected,
+            violations.extend(
+                self._splittable_violation_frontier(
+                    child,
+                    pages,
+                    depth=depth + 1,
+                    protected=protected,
+                )
             )
-            if violation is not None:
-                return violation
-        return None
+        return violations
+
+    @staticmethod
+    def _disjoint_violations(violations: list[_Violation]) -> list[_Violation]:
+        selected: list[_Violation] = []
+        for violation in sorted(
+            violations,
+            key=lambda item: (item.node.page_range[0], item.node.page_range[1]),
+        ):
+            if any(
+                PageIndexer._ranges_overlap(
+                    violation.node.page_range,
+                    selected_item.node.page_range,
+                )
+                for selected_item in selected
+            ):
+                continue
+            selected.append(violation)
+        return selected
+
+    @staticmethod
+    def _ranges_overlap(left: list[int], right: list[int]) -> bool:
+        return left[0] <= right[1] and right[0] <= left[1]
 
     def _node_exceeds_limits(self, node: TreeNode, pages: list[Page]) -> bool:
         sub_pages = self._pages_in_range(pages, node.page_range)

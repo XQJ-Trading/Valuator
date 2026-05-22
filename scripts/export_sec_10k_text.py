@@ -16,6 +16,9 @@ if str(ROOT) not in sys.path:
 from valuator.tools.sec_tool import fetch_reader_lines, get_10k_html_link  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "page_index"
+SEC_READER_PAGE_MARKER_REGEX = (
+    r"\|\s*\d{4}\s+Form\s+[A-Z0-9-]+\s+\|\s*(?P<page>\d+)\s*$"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,6 +65,34 @@ def default_output_path(
     return output_dir / f"{safe_ticker(ticker)}-{year}.txt"
 
 
+def page_index_manifest(
+    *,
+    output_path: Path,
+    doc_id: str,
+    source: str,
+) -> dict[str, object]:
+    return {
+        "documents": [
+            {
+                "input_file": str(output_path),
+                "doc_id": doc_id,
+                "source": source,
+                "mime": "text/plain",
+                "output_prefix": doc_id,
+                "loader": {
+                    "kind": "marked_text",
+                    "marker": {
+                        "regex": SEC_READER_PAGE_MARKER_REGEX,
+                        "locator_kind": "sec_filing_page",
+                        "page_group": "page",
+                        "boundary": "end",
+                    },
+                },
+            }
+        ]
+    }
+
+
 def main() -> None:
     args = parse_args()
     output_dir = resolve_path(args.output_dir)
@@ -95,7 +126,30 @@ def main() -> None:
         json.dumps(metadata, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    print(json.dumps({**metadata, "metadata_file": str(metadata_path)}, indent=2))
+    doc_id = output_path.stem
+    manifest_path = output_path.with_suffix(".page_index.json")
+    manifest_path.write_text(
+        json.dumps(
+            page_index_manifest(
+                output_path=output_path,
+                doc_id=doc_id,
+                source=filing_url,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {
+                **metadata,
+                "metadata_file": str(metadata_path),
+                "page_index_manifest": str(manifest_path),
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

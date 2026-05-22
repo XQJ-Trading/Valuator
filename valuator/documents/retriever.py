@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -113,6 +114,28 @@ class TreeRetriever:
                 for node_id in selection.selected_node_ids
             ],
         )
+
+    async def retrieve_many(
+        self,
+        *,
+        store: IndexStore,
+        document: IndexedDocument,
+        sub_queries: list[str],
+        concurrency: int = 4,
+    ) -> list[RetrievalResult]:
+        if concurrency <= 0:
+            raise ValueError("concurrency must be > 0")
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def guarded(sub_query: str) -> RetrievalResult:
+            async with semaphore:
+                return await self.retrieve(
+                    store=store,
+                    document=document,
+                    sub_query=sub_query,
+                )
+
+        return list(await asyncio.gather(*(guarded(query) for query in sub_queries)))
 
     def get_document_structure(self, tree: TreeNode) -> dict[str, Any]:
         return {

@@ -38,10 +38,25 @@ Phase 1 인덱싱이 끝난 문서는 바로 retrieve smoke test를 할 수 있�
   --model gemini-3.1-flash-lite-preview
 ```
 
+같은 indexed document에 대한 query들은 서로 독립이므로 병렬 batch로 돌릴 수 있다.
+
+```bash
+./venv/bin/python scripts/run_page_index_retrieve_poc.py \
+  --db data/page_index.db \
+  --doc-id aapl-2024 \
+  --query "Where is revenue recognition discussed?" \
+  --query "Where are cash and marketable securities described?" \
+  --query "Where are supply chain risks discussed?" \
+  --query-concurrency 3 \
+  --model gemini-3.1-flash-lite-preview
+```
+
 출력 파일:
 - `{prefix}-result.json` — 전체 결과(selected_node_ids, reasoning, 선택 노드별 page range, page text snippet, source_locator, usage 경로). 페이지 텍스트는 `--max-page-chars`로 truncate.
 - `{prefix}-text.txt` — 선택 노드의 페이지 본문만 concat. truncate 없음. fact_extraction에 그대로 투입 가능한 plain text.
 - `{prefix}-llm_calls.jsonl` / `{prefix}-llm_usage.jsonl` — LLM 호출·사용량 추적.
+
+query batch 출력은 query별로 `-q1`, `-q2` suffix를 붙여 result/text/trace 파일을 분리한다. `TreeRetriever.retrieve_many(..., concurrency=N)`도 같은 경계를 라이브러리 API로 제공한다.
 
 `--evidence-db`, `--session-id`, `--task-id`를 넘기면 선택 노드별 evidence row도 기록한다.
 
@@ -67,6 +82,15 @@ class TreeRetriever:
         tree: TreeNode,
         node_id: str,
     ) -> list[Page]
+
+    async def retrieve_many(
+        self,
+        *,
+        store: IndexStore,
+        document: IndexedDocument,
+        sub_queries: list[str],
+        concurrency: int = 4,
+    ) -> list[RetrievalResult]
 ```
 
 - 트리 전체(요약 + 자식 ids)를 프롬프트에 포함
@@ -78,6 +102,8 @@ PageIndex의 `get_document_structure` / `get_page_content` tool 패턴은 Valuat
 - `get_page_content`: 선택된 `node_id`의 `page_range`로 `IndexStore.get_pages()`를 호출해 원문 페이지 텍스트만 가져온다.
 
 따라서 retrieval 단계에서 계속 주입되는 것은 "문서 전체 본문"이 아니라 "트리 구조 + 요약"이다. 본문은 선택된 범위만 늦게 들어온다.
+
+여러 query는 각각 같은 text-stripped tree를 보고 node selection을 수행하므로 병렬 처리 가능하다. 한 query 안에서 selected page load는 SQLite range read라 Phase 2에서는 동시화하지 않는다.
 
 ## 트리 navigation 정책 (재귀 깊이와의 트레이드오프)
 

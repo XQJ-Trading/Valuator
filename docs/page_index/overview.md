@@ -63,6 +63,17 @@ Fact Extraction → Evidence Store ({tree_node_id, page_range, fact})
 - 트리가 단일 도메인 객체로 존재 → SEC, DART, 일반 PDF/TXT/MD 모두 같은 추상으로 공유.
 - citation이 트리 노드 + source_locator로 명확.
 
+### 병렬 처리 경계
+
+| 경계 | 정책 |
+|------|------|
+| 한 문서의 page group continue chain | 순차. 이전 누적 tree가 다음 delta prompt의 입력 |
+| large-node recursive split | 같은 frontier의 disjoint page range만 bounded parallel |
+| 여러 문서 인덱싱 | 문서별 bounded parallel |
+| 같은 tree에 대한 여러 retrieve query | query별 bounded parallel |
+
+초기 page group을 독립 subtree로 병렬 생성하고 merge하는 map-reduce 방식은 group 경계 섹션 품질과 merge 비용을 별도로 검증해야 하므로 현재 구현 범위에서 제외한다.
+
 ---
 
 ## PageIndex 핵심 메커니즘
@@ -111,7 +122,7 @@ PageIndex의 실용성은 1+2만으로는 부족하다. 1+2는 "거친 목차"�
 
 | 컴포넌트 | 책임 | 위치 |
 |---------|-----|----------|
-| `DocumentIngest` (경계) | PDF/TXT/MD → `list[Page]` 정규화 | [`/valuator/documents/ingest.py`](../../valuator/documents/ingest.py) (신규) |
+| `DocumentLoader` / `DocumentIngest` (경계) | 입력 parser 정책 선택 + PDF/TXT/MD → `list[Page]` 정규화 | [`/valuator/documents/ingest.py`](../../valuator/documents/ingest.py) (신규) |
 | `PageIndexer` | `list[Page]` → `TreeNode`. LLM 호출 책임자 | [`/valuator/documents/indexer.py`](../../valuator/documents/indexer.py) (신규) |
 | `IndexStore` | `doc_hash → tree_json` 영속화 | [`/valuator/documents/store.py`](../../valuator/documents/store.py) (신규) |
 | `TreeRetriever` | 질의 + 트리 → 노드 선택. LLM 추론 | [`/valuator/documents/retriever.py`](../../valuator/documents/retriever.py) (신규) |
@@ -125,7 +136,7 @@ PageIndex의 실용성은 1+2만으로는 부족하다. 1+2는 "거친 목차"�
 
 경계는 두 곳:
 
-1. **`DocumentIngest`**: 외부 파일 → `list[Page]`. 여기서 포맷별 파싱/디코딩이 끝난다.
+1. **`DocumentLoader` + `DocumentIngest`**: 외부 파일 → `list[Page]`. loader가 입력별 parser 정책을 선택하고 ingest에서 포맷별 파싱/디코딩이 끝난다.
 2. **`PageIndexer.build_tree`**: `list[Page]` → `TreeNode`. 트리가 만들어지면 그 이후로는 트리 내부에서 isinstance/validate/normalize 금지.
 
 이후 단계(`TreeRetriever`, `fact_extraction`, `evidence_store`)는 모두 도메인 타입을 받고 도메인 타입을 반환하는 business logic.
@@ -142,7 +153,7 @@ Pydantic 도메인 타입:
 
 ## 포맷별 Parser 정책 (PDF / TXT / MD 통합)
 
-PageIndex 로직(트리 빌드, 검색)은 입력 포맷과 무관하다. 포맷별 차이는 Parser 계층(`DocumentIngest`)에서만 흡수하고, 그 이후 도메인은 통일된 `list[Page]` 추상만 다룬다.
+PageIndex 로직(트리 빌드, 검색)은 입력 포맷과 무관하다. 포맷별 차이는 Parser 계층(`DocumentLoader` + `DocumentIngest`)에서만 흡수하고, 그 이후 도메인은 통일된 `list[Page]` 추상만 다룬다. 직접 CLI 입력은 확장자로 PDF physical-page loader 또는 TXT/MD `token_text` loader를 고르고, marked text marker 규칙과 source metadata는 manifest나 입력 어댑터가 제공한다.
 
 | 포맷 | 분할 기준 | ordinal 의미 | source_locator |
 |------|---------|------------|---------------|
@@ -152,6 +163,8 @@ PageIndex 로직(트리 빌드, 검색)은 입력 포맷과 무관하다. 포맷
 | Marked text | 입력 어댑터가 제공한 page marker (`boundary=start/end`) | marker의 page number | `{kind: "...", page: int, start: int, end: int}` |
 
 MD를 헤딩 기반으로 안 나누는 이유: PageIndex 트리 빌드 단계의 LLM이 헤딩을 자체적으로 발견해 트리 구조에 반영한다. parser가 헤딩 기반 분할까지 하면 도메인이 갈라지고 알고리즘이 분기를 가져야 함. parser는 단순하게, 구조 발견은 LLM에게.
+
+`marked_text` loader는 marker를 찾지 못하면 실패한다. 실제 page marker를 기대한 입력을 token window로 묵시적 downgrade하면 tree metadata와 page range가 성공처럼 보이면서 다른 의미가 되기 때문이다.
 
 인용 시점: source_locator로 역참조 → 클라이언트가 포맷별 뷰로 점프 (PDF는 페이지, TXT/MD는 char offset 범위). 분기는 클라이언트 렌더링에서만, 도메인 로직에는 없음.
 

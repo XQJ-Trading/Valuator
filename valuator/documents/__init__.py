@@ -1,4 +1,4 @@
-from .ingest import DocumentIngest, PageMarkerPattern, document_hash
+from .ingest import DocumentIngest, DocumentLoader, PageMarkerPattern, document_hash
 from .indexer import PageIndexMetrics, PageIndexer
 from .retriever import TreeRetriever
 from .store import IndexStore
@@ -14,6 +14,7 @@ from .types import (
 
 __all__ = [
     "DocumentIngest",
+    "DocumentLoader",
     "IndexStore",
     "IndexedDocument",
     "NodeSelection",

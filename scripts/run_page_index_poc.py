@@ -9,7 +9,7 @@ import json
 import re
 import sys
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
@@ -17,8 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator  # noqa: E402
+
 from valuator.documents import (  # noqa: E402
-    DocumentIngest,
+    DocumentLoader,
     IndexStore,
     IndexedDocument,
     Page,
@@ -33,6 +35,76 @@ from valuator.utils.time_utils import kst_isoformat  # noqa: E402
 
 DEFAULT_DB_PATH = ROOT / "data" / "page_index.db"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "page_index"
+DEFAULT_TOKEN_TEXT_PAGE_TOKENS = 2_000
+
+
+class MarkerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    regex: str
+    locator_kind: str = "marked_page"
+    page_group: str | int = "page"
+    boundary: Literal["end", "start"] = "end"
+
+    def to_pattern(self) -> PageMarkerPattern:
+        return PageMarkerPattern(
+            pattern=re.compile(self.regex),
+            locator_kind=self.locator_kind,
+            page_group=self.page_group,
+            boundary=self.boundary,
+        )
+
+
+class LoaderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["token_text", "marked_text", "pdf"] = "token_text"
+    text_page_tokens: int = Field(default=DEFAULT_TOKEN_TEXT_PAGE_TOKENS, gt=0)
+    marker: MarkerConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_marker(self) -> LoaderConfig:
+        if self.kind == "marked_text" and self.marker is None:
+            raise ValueError("marked_text loader requires loader.marker")
+        if self.kind != "marked_text" and self.marker is not None:
+            raise ValueError(f"{self.kind} loader does not accept loader.marker")
+        return self
+
+    def to_loader(self) -> DocumentLoader:
+        if self.kind == "marked_text":
+            if self.marker is None:
+                raise ValueError("marked_text loader requires loader.marker")
+            return DocumentLoader.marked_text(marker=self.marker.to_pattern())
+        if self.kind == "pdf":
+            return DocumentLoader.pdf()
+        return DocumentLoader.token_text(text_page_tokens=self.text_page_tokens)
+
+
+class ManifestDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_file: Path
+    doc_id: str = ""
+    source: str = ""
+    mime: str = ""
+    output_prefix: str = ""
+    loader: LoaderConfig = Field(default_factory=LoaderConfig)
+
+
+class PageIndexManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    documents: list[ManifestDocument] = Field(min_length=1)
+
+
+@dataclass(frozen=True)
+class InputDocument:
+    input_path: Path
+    doc_id: str
+    source: str
+    mime: str
+    output_prefix: str
+    loader: DocumentLoader
 
 
 class PageIndexTraceWriter:
@@ -116,33 +188,27 @@ class PageIndexTraceWriter:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the Phase 1 PageIndex PoC against a local text document."
+        description="Run the Phase 1 PageIndex PoC against local PDF or text documents."
     )
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
         "--input-file",
         type=Path,
-        required=True,
-        help="Local text or markdown file to index.",
+        action="append",
+        help=(
+            "Local PDF, text, or markdown file to index with the default loader "
+            "for its extension. Repeat for a document batch."
+        ),
+    )
+    inputs.add_argument(
+        "--manifest",
+        type=Path,
+        help="JSON manifest for document metadata and loader-specific parsing.",
     )
     parser.add_argument(
         "--doc-id",
         default="",
-        help="Stable document id. Defaults to the input file stem.",
-    )
-    parser.add_argument(
-        "--source",
-        default="",
-        help="Logical source locator. Defaults to the resolved input file path.",
-    )
-    parser.add_argument(
-        "--mime",
-        default="text/plain",
-        help="Input MIME type. Phase 1 supports text/plain and markdown.",
-    )
-    parser.add_argument(
-        "--output-prefix",
-        default="",
-        help="Filename prefix for tree/usage/call outputs. Defaults to doc-id slug.",
+        help="Stable id for one direct --input-file. Defaults to the file stem.",
     )
     parser.add_argument(
         "--model",
@@ -160,36 +226,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
         help=f"JSON output directory. Default: {DEFAULT_OUTPUT_DIR.relative_to(ROOT)}",
-    )
-    parser.add_argument(
-        "--text-page-tokens",
-        type=int,
-        default=2_000,
-        help="Token window used by text ingest. Default: 2000",
-    )
-    parser.add_argument(
-        "--page-marker-regex",
-        default="",
-        help=(
-            "Optional line regex containing a page capture group. When provided, "
-            "marked source pages are used instead of token windows."
-        ),
-    )
-    parser.add_argument(
-        "--page-marker-group",
-        default="page",
-        help="Regex capture group name or index for page number. Default: page",
-    )
-    parser.add_argument(
-        "--page-marker-kind",
-        default="marked_page",
-        help="source_locator kind used for marked pages. Default: marked_page",
-    )
-    parser.add_argument(
-        "--page-marker-boundary",
-        choices=("end", "start"),
-        default="end",
-        help="Whether marker lines start or end a page. Default: end",
     )
     parser.add_argument(
         "--group-max-tokens",
@@ -215,6 +251,18 @@ def parse_args() -> argparse.Namespace:
         default=4,
         help="Maximum automatic recursive split depth. Default: 4",
     )
+    parser.add_argument(
+        "--recursion-concurrency",
+        type=int,
+        default=4,
+        help="Bounded concurrency for disjoint recursive splits. Default: 4",
+    )
+    parser.add_argument(
+        "--document-concurrency",
+        type=int,
+        default=1,
+        help="Bounded concurrency across input or manifest documents. Default: 1",
+    )
     return parser.parse_args()
 
 
@@ -225,73 +273,135 @@ def resolve_path(path: Path) -> Path:
     return (ROOT / expanded).resolve()
 
 
-def marker_group(value: str) -> str | int:
-    return int(value) if value.isdigit() else value
-
-
-def marker_boundary(value: str) -> Literal["end", "start"]:
-    if value not in {"end", "start"}:
-        raise ValueError("page marker boundary must be 'end' or 'start'")
-    return value
-
-
 def safe_output_prefix(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
     return normalized.strip("-._") or "document"
 
 
-def build_pages(
-    *,
-    document: RawDocument,
-    text_page_tokens: int,
-    page_marker_regex: str,
-    page_marker_group: str,
-    page_marker_kind: str,
-    page_marker_boundary: str,
-) -> list[Page]:
-    text = str(document.raw_bytes_or_text)
-    ingest = DocumentIngest(text_page_tokens=text_page_tokens)
-    if page_marker_regex:
-        return ingest.pages_from_marked_text(
-            doc_id=document.doc_id,
-            text=text,
-            source=document.source,
-            marker=PageMarkerPattern(
-                pattern=re.compile(page_marker_regex),
-                locator_kind=page_marker_kind,
-                page_group=marker_group(page_marker_group),
-                boundary=marker_boundary(page_marker_boundary),
-            ),
-        )
-    return ingest.pages_from_raw(document)
+def build_pages(*, document: RawDocument, loader: DocumentLoader) -> list[Page]:
+    return loader.pages_from_raw(document)
 
 
-async def run(args: argparse.Namespace) -> None:
-    input_path = resolve_path(args.input_file)
-    text = input_path.read_text(encoding="utf-8")
-    doc_id = args.doc_id.strip() or input_path.stem
-    source = args.source.strip() or str(input_path)
-    mime = args.mime.strip() or "text/plain"
-    raw_document = RawDocument(
+def input_mime(path: Path) -> str:
+    if path.suffix.lower() == ".pdf":
+        return "application/pdf"
+    if path.suffix.lower() in {".md", ".markdown"}:
+        return "text/markdown"
+    return "text/plain"
+
+
+def default_loader(path: Path) -> DocumentLoader:
+    if path.suffix.lower() == ".pdf":
+        return DocumentLoader.pdf()
+    return DocumentLoader.token_text(
+        text_page_tokens=DEFAULT_TOKEN_TEXT_PAGE_TOKENS
+    )
+
+
+def input_document_from_manifest(document: ManifestDocument) -> InputDocument:
+    input_path = resolve_path(document.input_file)
+    doc_id = document.doc_id.strip() or input_path.stem
+    source = document.source.strip() or str(input_path)
+    mime = document.mime.strip() or input_mime(input_path)
+    output_prefix = document.output_prefix.strip() or doc_id
+    return InputDocument(
+        input_path=input_path,
         doc_id=doc_id,
         source=source,
-        raw_bytes_or_text=text,
         mime=mime,
+        output_prefix=output_prefix,
+        loader=document.loader.to_loader(),
+    )
+
+
+def load_manifest(path: Path) -> list[InputDocument]:
+    manifest_path = resolve_path(path)
+    manifest = PageIndexManifest.model_validate_json(
+        manifest_path.read_text(encoding="utf-8")
+    )
+    return [
+        input_document_from_manifest(document)
+        for document in manifest.documents
+    ]
+
+
+def load_input_documents(args: argparse.Namespace) -> list[InputDocument]:
+    if args.document_concurrency <= 0:
+        raise ValueError("document_concurrency must be > 0")
+    if args.manifest is not None:
+        if args.doc_id.strip():
+            raise ValueError("--doc-id cannot be combined with --manifest")
+        documents = load_manifest(args.manifest)
+    else:
+        input_paths = [resolve_path(path) for path in args.input_file]
+        if len(input_paths) > 1 and args.doc_id.strip():
+            raise ValueError("--doc-id can only be used with one --input-file")
+        documents = [
+            InputDocument(
+                input_path=input_path,
+                doc_id=args.doc_id.strip() or input_path.stem,
+                source=str(input_path),
+                mime=input_mime(input_path),
+                output_prefix=args.doc_id.strip() or input_path.stem,
+                loader=default_loader(input_path),
+            )
+            for input_path in input_paths
+        ]
+
+    output_prefixes = [safe_output_prefix(document.output_prefix) for document in documents]
+    if len(set(output_prefixes)) != len(output_prefixes):
+        raise ValueError("document output prefixes must be unique")
+    doc_ids = [document.doc_id for document in documents]
+    if len(set(doc_ids)) != len(doc_ids):
+        raise ValueError("document doc ids must be unique")
+    return documents
+
+
+async def gather_limited(
+    items: list[Any],
+    *,
+    concurrency: int,
+    process: Any,
+) -> list[dict[str, Any]]:
+    if concurrency <= 0:
+        raise ValueError("document_concurrency must be > 0")
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def guarded(item: Any) -> dict[str, Any]:
+        async with semaphore:
+            return await process(item)
+
+    return list(await asyncio.gather(*(guarded(item) for item in items)))
+
+
+async def index_input_document(
+    args: argparse.Namespace,
+    *,
+    input_document: InputDocument,
+    store: IndexStore,
+    db_path: Path,
+) -> dict[str, Any]:
+    input_path = input_document.input_path
+    raw_input = (
+        input_path.read_bytes()
+        if input_document.mime == "application/pdf"
+        else input_path.read_text(encoding="utf-8")
+    )
+    raw_document = RawDocument(
+        doc_id=input_document.doc_id,
+        source=input_document.source,
+        raw_bytes_or_text=raw_input,
+        mime=input_document.mime,
     )
     doc_hash = document_hash(raw_document)
-    page_marker_kind = args.page_marker_kind.strip() or "marked_page"
     pages = build_pages(
         document=raw_document,
-        text_page_tokens=args.text_page_tokens,
-        page_marker_regex=args.page_marker_regex.strip(),
-        page_marker_group=args.page_marker_group.strip(),
-        page_marker_kind=page_marker_kind,
-        page_marker_boundary=args.page_marker_boundary,
+        loader=input_document.loader,
     )
 
     output_dir = resolve_path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_prefix = safe_output_prefix(args.output_prefix or raw_document.doc_id)
+    output_prefix = safe_output_prefix(input_document.output_prefix)
     usage_path = output_dir / f"{output_prefix}-llm_usage.jsonl"
     llm_calls_path = output_dir / f"{output_prefix}-llm_calls.jsonl"
     trace_writer = PageIndexTraceWriter(
@@ -306,6 +416,7 @@ async def run(args: argparse.Namespace) -> None:
         max_page_num_each_node=args.max_page_num_each_node,
         max_token_num_each_node=args.max_token_num_each_node,
         max_recursion_depth=args.max_recursion_depth,
+        recursion_concurrency=args.recursion_concurrency,
     )
     tree = await indexer.build_tree(pages)
     trace_writer.append_total()
@@ -319,12 +430,10 @@ async def run(args: argparse.Namespace) -> None:
             "input_file": str(input_path),
             "source": raw_document.source,
             "mime": raw_document.mime,
-            "page_unit": page_marker_kind if args.page_marker_regex else "token_window",
-            "text_page_tokens": args.text_page_tokens,
+            **input_document.loader.metadata(),
             "metrics": asdict(indexer.metrics),
         },
     )
-    store = IndexStore(resolve_path(args.db))
     store.record(indexed, pages)
 
     tree_path = output_dir / f"{output_prefix}-tree.json"
@@ -332,22 +441,39 @@ async def run(args: argparse.Namespace) -> None:
         json.dumps(indexed.model_dump(mode="json"), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    print(
-        json.dumps(
-            {
-                "doc_id": indexed.doc_id,
-                "doc_hash": indexed.doc_hash,
-                "page_count": indexed.page_count,
-                "tree_path": str(tree_path),
-                "usage_path": str(usage_path),
-                "llm_calls_path": str(llm_calls_path),
-                "db_path": str(resolve_path(args.db)),
-                "metrics": asdict(indexer.metrics),
-            },
-            ensure_ascii=False,
-            indent=2,
+    return {
+        "doc_id": indexed.doc_id,
+        "doc_hash": indexed.doc_hash,
+        "page_count": indexed.page_count,
+        "tree_path": str(tree_path),
+        "usage_path": str(usage_path),
+        "llm_calls_path": str(llm_calls_path),
+        "db_path": str(db_path),
+        "metrics": asdict(indexer.metrics),
+    }
+
+
+async def run(args: argparse.Namespace) -> None:
+    input_documents = load_input_documents(args)
+    db_path = resolve_path(args.db)
+    store = IndexStore(db_path)
+
+    async def process(input_document: InputDocument) -> dict[str, Any]:
+        return await index_input_document(
+            args,
+            input_document=input_document,
+            store=store,
+            db_path=db_path,
         )
+
+    results = await gather_limited(
+        input_documents,
+        concurrency=args.document_concurrency,
+        process=process,
     )
+    payload: dict[str, Any] | list[dict[str, Any]]
+    payload = results[0] if len(results) == 1 else results
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def main() -> None:

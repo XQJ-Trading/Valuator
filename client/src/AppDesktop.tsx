@@ -5,6 +5,7 @@ import { ChatSessionProvider } from "./ChatSessionContext";
 import { ToastProvider } from "./ToastContext";
 import ActivitySidebar from "./components/ActivitySidebar";
 import FileTree from "./components/FileTree";
+import UserSessionView from "./components/UserSessionView";
 import ContentView from "./components/ContentView";
 import ConfigView from "./components/ConfigView";
 import DeveloperView from "./components/DeveloperView";
@@ -22,6 +23,7 @@ export default function AppDesktop() {
   const [outlineFolderEnsureTick, setOutlineFolderEnsureTick] = useState(0);
   const [sessionExploreTarget, setSessionExploreTarget] = useState<string | null>(null);
   const [chatVisible, setChatVisible] = useState(true);
+  const [devMode, setDevMode] = useState(false);
 
   /** Latest session browse path for the tree — only when switching to Session view, not on every chat tick. */
   useEffect(() => {
@@ -62,6 +64,17 @@ export default function AppDesktop() {
       <div className="app">
         <div className="titlebar">
           <span className="titlebar-label">Research UI</span>
+          {activityView === "session" && (
+            <button
+              type="button"
+              className={`titlebar-devtoggle${devMode ? " titlebar-devtoggle-on" : ""}`}
+              onClick={() => setDevMode((v) => !v)}
+              title={devMode ? "Switch to User Mode" : "Switch to Dev Mode"}
+              aria-label="Toggle dev mode"
+            >
+              <span className="titlebar-devtoggle-thumb" />
+            </button>
+          )}
           <button
             className={`titlebar-icon-btn${chatVisible ? " active" : ""}`}
             onClick={() => setChatVisible((v) => !v)}
@@ -100,7 +113,7 @@ export default function AppDesktop() {
                             refreshToken={chatSyncVersion}
                             initialExpandDirectory={null}
                           />
-                        ) : (
+                        ) : devMode ? (
                           <Group orientation="vertical" style={{ height: "100%" }}>
                             <Panel defaultSize="50%" minSize="15%">
                               <FileTree
@@ -127,6 +140,31 @@ export default function AppDesktop() {
                                 outlineChatTick={outlineChatTick}
                                 outlineFolderEnsureTick={outlineFolderEnsureTick}
                                 onOpenTaskFile={setActivePath}
+                              />
+                            </Panel>
+                          </Group>
+                        ) : (
+                          <Group orientation="vertical" style={{ height: "100%" }}>
+                            <Panel defaultSize="40%" minSize="120px">
+                              <UserSessionView
+                                dataSource={activityView as "session" | "guide"}
+                                onSelectDirectory={setSelectedDirectoryPath}
+                                onUserSelectDirectory={() =>
+                                  setOutlineFolderEnsureTick((v) => v + 1)
+                                }
+                                onSelect={setActivePath}
+                              />
+                            </Panel>
+                            <Separator className="resize-handle resize-handle-row" />
+                            <Panel defaultSize="60%" minSize="15%">
+                              <TaskTreeOutline
+                                dataSource={activityView}
+                                enabled={true}
+                                selectedDirectoryPath={selectedDirectoryPath}
+                                outlineChatTick={outlineChatTick}
+                                outlineFolderEnsureTick={outlineFolderEnsureTick}
+                                onOpenTaskFile={setActivePath}
+                                variant="user"
                               />
                             </Panel>
                           </Group>

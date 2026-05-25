@@ -5,6 +5,7 @@ import { ChatSessionProvider } from "./ChatSessionContext";
 import { ToastProvider } from "./ToastContext";
 import ActivitySidebar from "./components/ActivitySidebar";
 import FileTree from "./components/FileTree";
+import UserSessionView from "./components/UserSessionView";
 import ContentView from "./components/ContentView";
 import ConfigView from "./components/ConfigView";
 import DeveloperView from "./components/DeveloperView";
@@ -22,6 +23,7 @@ export default function AppDesktop() {
   const [outlineFolderEnsureTick, setOutlineFolderEnsureTick] = useState(0);
   const [sessionExploreTarget, setSessionExploreTarget] = useState<string | null>(null);
   const [chatVisible, setChatVisible] = useState(true);
+  const [devMode, setDevMode] = useState(true);
 
   /** Latest session browse path for the tree — only when switching to Session view, not on every chat tick. */
   useEffect(() => {
@@ -87,39 +89,72 @@ export default function AppDesktop() {
                   <>
                     <Group orientation="horizontal" className="panels">
                       <Panel defaultSize="300px" minSize="150px" maxSize="40%">
-                        {activityView === "guide" ? (
-                          <FileTree
-                            key={activityView}
-                            dataSource={activityView}
-                            activePath={activePath}
-                            onSelect={setActivePath}
-                            onSelectDirectory={setSelectedDirectoryPath}
-                            onUserSelectDirectory={() =>
-                              setOutlineFolderEnsureTick((v) => v + 1)
-                            }
-                            refreshToken={chatSyncVersion}
-                            initialExpandDirectory={null}
-                          />
+                        {devMode ? (
+                          activityView === "guide" ? (
+                            <FileTree
+                              key={activityView}
+                              dataSource={activityView}
+                              activePath={activePath}
+                              onSelect={setActivePath}
+                              onSelectDirectory={setSelectedDirectoryPath}
+                              onUserSelectDirectory={() =>
+                                setOutlineFolderEnsureTick((v) => v + 1)
+                              }
+                              refreshToken={chatSyncVersion}
+                              initialExpandDirectory={null}
+                              devMode={devMode}
+                              onToggleDevMode={() => setDevMode(false)}
+                            />
+                          ) : (
+                            <Group orientation="vertical" style={{ height: "100%" }}>
+                              <Panel defaultSize="50%" minSize="15%">
+                                <FileTree
+                                  key={activityView}
+                                  dataSource={activityView}
+                                  activePath={activePath}
+                                  onSelect={setActivePath}
+                                  onSelectDirectory={setSelectedDirectoryPath}
+                                  onUserSelectDirectory={() =>
+                                    setOutlineFolderEnsureTick((v) => v + 1)
+                                  }
+                                  refreshToken={chatSyncVersion}
+                                  initialExpandDirectory={
+                                    activityView === "session" ? sessionExploreTarget : null
+                                  }
+                                  devMode={devMode}
+                                  onToggleDevMode={() => setDevMode(false)}
+                                />
+                              </Panel>
+                              <Separator className="resize-handle resize-handle-row" />
+                              <Panel defaultSize="50%" minSize="15%">
+                                <TaskTreeOutline
+                                  dataSource={activityView}
+                                  enabled={true}
+                                  selectedDirectoryPath={selectedDirectoryPath}
+                                  outlineChatTick={outlineChatTick}
+                                  outlineFolderEnsureTick={outlineFolderEnsureTick}
+                                  onOpenTaskFile={setActivePath}
+                                />
+                              </Panel>
+                            </Group>
+                          )
                         ) : (
                           <Group orientation="vertical" style={{ height: "100%" }}>
-                            <Panel defaultSize="50%" minSize="15%">
-                              <FileTree
-                                key={activityView}
-                                dataSource={activityView}
-                                activePath={activePath}
-                                onSelect={setActivePath}
+                            <Panel defaultSize="40%" minSize="120px">
+                              <UserSessionView
+                                dataSource={activityView as "session" | "guide"}
+                                devMode={devMode}
+                                onToggleDevMode={() => setDevMode(true)}
                                 onSelectDirectory={setSelectedDirectoryPath}
                                 onUserSelectDirectory={() =>
                                   setOutlineFolderEnsureTick((v) => v + 1)
                                 }
-                                refreshToken={chatSyncVersion}
-                                initialExpandDirectory={
-                                  activityView === "session" ? sessionExploreTarget : null
-                                }
+                                activePath={activePath}
+                                onSelect={setActivePath}
                               />
                             </Panel>
                             <Separator className="resize-handle resize-handle-row" />
-                            <Panel defaultSize="50%" minSize="15%">
+                            <Panel defaultSize="60%" minSize="15%">
                               <TaskTreeOutline
                                 dataSource={activityView}
                                 enabled={true}
@@ -127,6 +162,7 @@ export default function AppDesktop() {
                                 outlineChatTick={outlineChatTick}
                                 outlineFolderEnsureTick={outlineFolderEnsureTick}
                                 onOpenTaskFile={setActivePath}
+                                variant="user"
                               />
                             </Panel>
                           </Group>

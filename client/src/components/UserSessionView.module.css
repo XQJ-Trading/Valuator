@@ -1,0 +1,145 @@
+.sidebar {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+}
+
+.explorerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 0 12px;
+  height: 32px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.explorerTitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.devToggle {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.devToggle:hover {
+  background: var(--border);
+}
+
+.devToggleOn {
+  background: var(--primary-blue, #3b82f6);
+}
+
+.devToggleOn:hover {
+  background: var(--primary-blue-hover, #2563eb);
+}
+
+.devToggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  transition: left 150ms ease;
+  pointer-events: none;
+}
+
+.devToggleOn .devToggleThumb {
+  left: 14px;
+}
+
+.sectionHeader {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sessionList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px;
+  margin: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.sessionRow:hover {
+  background: var(--bg-hover);
+}
+
+.sessionRow.selected {
+  background: var(--bg-active, rgba(59, 130, 246, 0.1));
+}
+
+.folderIcon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.sessionName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionTime {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.loadingPlaceholder {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.errorMessage {
+  padding: 16px;
+  color: var(--text-error, #ef4444);
+  font-size: 12px;
+}
+
+.emptyMessage {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}

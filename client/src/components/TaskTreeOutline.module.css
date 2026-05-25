@@ -184,3 +184,43 @@
 .statusOther {
   color: var(--text-secondary);
 }
+
+/* User mode variant — cleaner, less technical appearance */
+.userVariant .header {
+  background: transparent;
+  border-bottom: none;
+  padding: 10px 12px 6px;
+}
+
+.userVariant .headerTitle {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.userVariant .headerSource {
+  display: none;
+}
+
+.userVariant .scroll {
+  padding: 6px 6px 12px;
+}
+
+.userVariant .row {
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.userVariant .browseTitle {
+  font-size: 13px;
+}
+
+.userVariant .browsePath {
+  display: none;
+}
+
+.userVariant .taskId {
+  display: none;
+}

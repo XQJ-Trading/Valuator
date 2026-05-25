@@ -40,6 +40,7 @@ export default function TaskTreeOutline({
   selectedDirectoryPath,
   outlineChatTick,
   outlineFolderEnsureTick,
+  variant,
 }: {
   dataSource: DataSource;
   enabled: boolean;
@@ -49,6 +50,7 @@ export default function TaskTreeOutline({
   outlineChatTick: number;
   /** Bumps when the user selects a folder in Explorer — may rebuild browse/ from tasks (can be slow). */
   outlineFolderEnsureTick: number;
+  variant?: "user";
 }) {
   const [browseRows, setBrowseRows] = useState<BrowseOutlineRow[] | null>(null);
   const [browseRootUsed, setBrowseRootUsed] = useState<string | null>(null);
@@ -144,7 +146,7 @@ export default function TaskTreeOutline({
 
   if (!enabled) {
     return (
-      <div className={styles.root}>
+      <div className={`${styles.root}${variant === "user" ? ` ${styles.userVariant}` : ""}`}>
         <div className={styles.header}>
           <span className={styles.headerTitle}>
             {browseTitle("Session", null)}
@@ -156,7 +158,7 @@ export default function TaskTreeOutline({
   }
 
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root}${variant === "user" ? ` ${styles.userVariant}` : ""}`}>
       <div className={styles.header}>
         <span className={styles.headerTitle}>
           {loading ? (

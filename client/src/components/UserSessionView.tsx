@@ -40,16 +40,12 @@ function formatRelativeTime(dateStr: string, timeStr: string): string {
 
 export default function UserSessionView({
   dataSource,
-  devMode,
-  onToggleDevMode,
   onSelectDirectory,
   onUserSelectDirectory,
   activePath,
   onSelect,
 }: {
   dataSource: DataSource;
-  devMode: boolean;
-  onToggleDevMode: () => void;
   onSelectDirectory: (path: string) => void;
   onUserSelectDirectory?: () => void;
   activePath: string | null;
@@ -103,15 +99,6 @@ export default function UserSessionView({
     <div className={styles.sidebar}>
       <div className={styles.explorerHeader}>
         <span className={styles.explorerTitle}>Explorer</span>
-        <button
-          type="button"
-          className={`${styles.devToggle} ${devMode ? styles.devToggleOn : ""}`}
-          onClick={onToggleDevMode}
-          title={devMode ? "Switch to User Mode" : "Switch to Dev Mode"}
-          aria-label="Toggle dev mode"
-        >
-          <span className={styles.devToggleThumb} />
-        </button>
       </div>
 
       <div className={styles.sectionHeader}>Threads</div>

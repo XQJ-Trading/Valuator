@@ -49,47 +49,6 @@
   color: var(--text-primary);
 }
 
-.devToggle {
-  position: relative;
-  width: 28px;
-  height: 16px;
-  padding: 0;
-  margin: 0 8px;
-  border: none;
-  border-radius: 8px;
-  background: var(--bg-hover);
-  cursor: pointer;
-  transition: background-color 150ms ease;
-}
-
-.devToggle:hover {
-  background: var(--border);
-}
-
-.devToggleOn {
-  background: var(--primary-blue, #3b82f6);
-}
-
-.devToggleOn:hover {
-  background: var(--primary-blue-hover, #2563eb);
-}
-
-.devToggleThumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: white;
-  transition: left 150ms ease;
-  pointer-events: none;
-}
-
-.devToggleOn .devToggleThumb {
-  left: 14px;
-}
-
 .treeScroll {
   flex: 1;
   overflow-y: auto;

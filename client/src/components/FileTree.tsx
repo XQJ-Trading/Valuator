@@ -318,8 +318,6 @@ export default function FileTree({
   onUserSelectDirectory,
   refreshToken,
   initialExpandDirectory,
-  devMode,
-  onToggleDevMode,
 }: {
   dataSource: DataSource;
   activePath: string | null;
@@ -330,8 +328,6 @@ export default function FileTree({
   refreshToken?: number;
   /** Expand and select this directory once (e.g. latest session / browse). */
   initialExpandDirectory?: string | null;
-  devMode?: boolean;
-  onToggleDevMode?: () => void;
 }) {
   const [roots, setRoots] = useState<TreeNodeData[]>([]);
   const rootsRef = useRef<TreeNodeData[]>([]);
@@ -700,17 +696,6 @@ export default function FileTree({
     <div className={styles.sidebar}>
       <div className={styles.explorerHeader}>
         <span className={styles.explorerTitle}>Explorer</span>
-        {onToggleDevMode !== undefined && (
-          <button
-            type="button"
-            className={`${styles.devToggle} ${devMode ? styles.devToggleOn : ""}`}
-            onClick={onToggleDevMode}
-            title={devMode ? "Switch to User Mode" : "Switch to Dev Mode"}
-            aria-label="Toggle dev mode"
-          >
-            <span className={styles.devToggleThumb} />
-          </button>
-        )}
         <div className={styles.explorerActions}>
           <button
             type="button"

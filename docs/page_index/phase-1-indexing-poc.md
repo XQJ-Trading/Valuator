@@ -211,8 +211,8 @@ SectionNode(title, structure_path, destination_page, anchor, content_span, child
 현재 상태:
 
 - resolver와 테스트는 구현 완료.
-- 기존 `PageIndexer`/`TreeRetriever`가 아직 `SectionNode.content_span`을 저장·검색 단위로 쓰지는 않는다.
-- 다음 단계는 `SectionNode`를 `IndexedDocument` metadata 또는 별도 section store에 기록하고, retrieval content load를 `page_range`에서 `content_span` slice로 옮기는 것이다.
+- TOC direct route는 `SectionNode.content_span`을 `TreeNode.content_span`으로 저장한다.
+- `TreeRetriever`는 `content_span`이 있으면 `page_range` 전체 page load 대신 span slice를 반환하고, span이 없는 no-TOC/fallback 노드는 기존 `page_range` 로딩을 사용한다.
 
 **`toc_guided process_no_toc` fallback**
 

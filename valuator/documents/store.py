@@ -88,7 +88,7 @@ class IndexStore:
                     document.doc_id,
                     document.page_count,
                     json.dumps(
-                        document.tree.model_dump(mode="json"),
+                        document.tree.model_dump(mode="json", exclude_none=True),
                         ensure_ascii=False,
                     ),
                     json.dumps(document.metadata, ensure_ascii=False, sort_keys=True),

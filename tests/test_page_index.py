@@ -143,6 +143,20 @@ class RetrieverLlmClient(FakeLlmClient):
         }
 
 
+class StaticSelectionLlmClient(FakeLlmClient):
+    def __init__(self, selected_node_ids: list[str]) -> None:
+        super().__init__()
+        self.selected_node_ids = selected_node_ids
+
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(str(kwargs["trace_method"]))
+        return {
+            "doc_id": "doc-1",
+            "selected_node_ids": self.selected_node_ids,
+            "reasoning": "Static test selection.",
+        }
+
+
 class ParallelSplitLlmClient(FakeLlmClient):
     def __init__(self) -> None:
         super().__init__()
@@ -629,6 +643,119 @@ async def test_page_indexer_builds_tree_directly_from_mapped_toc() -> None:
     assert indexer.metrics.tree_build_route == "toc_with_page_numbers"
     assert indexer.metrics.toc_direct_builds == 1
     assert indexer.metrics.toc_entries_mapped == 3
+
+
+@pytest.mark.asyncio
+async def test_toc_route_uses_content_spans_for_same_page_sections(tmp_path) -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=1,
+            text="Item 1A. Risk Factors\nRisk opening.\n",
+            token_count=5,
+            source_locator={
+                "kind": "source_page",
+                "ordinal_origin": "page_marker",
+                "page": 1,
+                "source": "memory://doc",
+            },
+        ),
+        Page(
+            doc_id="doc-1",
+            ordinal=2,
+            text="Risk middle.\n",
+            token_count=2,
+            source_locator={
+                "kind": "source_page",
+                "ordinal_origin": "page_marker",
+                "page": 2,
+                "source": "memory://doc",
+            },
+        ),
+        Page(
+            doc_id="doc-1",
+            ordinal=3,
+            text=(
+                "Risk tail on shared page.\n"
+                "Item 1B. Unresolved Staff Comments\n"
+                "None.\n"
+                "Item 1C. Cybersecurity\n"
+                "Cybersecurity body.\n"
+            ),
+            token_count=13,
+            source_locator={
+                "kind": "source_page",
+                "ordinal_origin": "page_marker",
+                "page": 3,
+                "source": "memory://doc",
+            },
+        ),
+    ]
+    client = FakeLlmClient()
+    indexer = PageIndexer(
+        client,
+        max_page_num_each_node=1,
+        max_token_num_each_node=1_000,
+    )
+
+    tree = await indexer.build_tree(
+        pages,
+        outlines=[
+            Outline(
+                title="Part I",
+                children=[
+                    Outline(title="Item 1A. Risk Factors", destination_page=1),
+                    Outline(
+                        title="Item 1B. Unresolved Staff Comments",
+                        destination_page=3,
+                    ),
+                    Outline(title="Item 1C. Cybersecurity", destination_page=3),
+                ],
+            )
+        ],
+    )
+
+    assert client.calls == []
+    assert indexer.metrics.recursion_calls == 0
+    part_i = tree.children[0]
+    assert [child.title for child in part_i.children] == [
+        "Item 1A. Risk Factors",
+        "Item 1B. Unresolved Staff Comments",
+        "Item 1C. Cybersecurity",
+    ]
+    assert [child.page_range for child in part_i.children] == [
+        [1, 3],
+        [3, 3],
+        [3, 3],
+    ]
+    assert all(child.content_span is not None for child in part_i.children)
+
+    indexed = IndexedDocument(
+        doc_id="doc-1",
+        doc_hash="hash-1",
+        page_count=3,
+        tree=tree,
+        metadata={},
+    )
+    store = IndexStore(tmp_path / "page_index.db")
+    store.record(indexed, pages)
+    loaded = store.get("hash-1")
+    assert loaded is not None
+    retriever = TreeRetriever(StaticSelectionLlmClient(["n.1.1", "n.1.3"]))
+
+    result = await retriever.retrieve(
+        store=store,
+        document=loaded,
+        sub_query="Risk and cybersecurity.",
+    )
+
+    risk_text = "\n".join(page.text for page in result.selected_nodes[0].pages)
+    cyber_text = "\n".join(page.text for page in result.selected_nodes[1].pages)
+    assert "Risk tail on shared page" in risk_text
+    assert "Item 1B. Unresolved Staff Comments" not in risk_text
+    assert "Risk tail on shared page" not in cyber_text
+    assert "Item 1C. Cybersecurity" in cyber_text
+    assert "Cybersecurity body" in cyber_text
 
 
 @pytest.mark.asyncio

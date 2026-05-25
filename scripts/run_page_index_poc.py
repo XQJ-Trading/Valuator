@@ -464,7 +464,11 @@ async def index_input_document(
 
     tree_path = output_dir / f"{output_prefix}-tree.json"
     tree_path.write_text(
-        json.dumps(indexed.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        json.dumps(
+            indexed.model_dump(mode="json", exclude_none=True),
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
     return {

@@ -92,6 +92,28 @@ class Outline(BaseModel):
 TOCEntry = Outline
 
 
+class ContentPosition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_ordinal: int
+    local_offset: int
+    source_offset: int | None = None
+
+
+class ContentSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: ContentPosition
+    end: ContentPosition
+    page_range: list[int] = Field(min_length=2, max_length=2)
+
+    @model_validator(mode="after")
+    def _page_range_is_ordered(self) -> ContentSpan:
+        if self.page_range[0] > self.page_range[1]:
+            raise ValueError("page_range start must be <= end")
+        return self
+
+
 class TreeNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -99,6 +121,7 @@ class TreeNode(BaseModel):
     title: str
     page_range: list[int] = Field(min_length=2, max_length=2)
     summary: str
+    content_span: ContentSpan | None = None
     children: list[TreeNode] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -133,6 +156,7 @@ class RetrievedNode(BaseModel):
     title: str
     page_range: list[int] = Field(min_length=2, max_length=2)
     summary: str
+    content_span: ContentSpan | None = None
     pages: list[Page] = Field(default_factory=list)
 
 

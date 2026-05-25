@@ -20,6 +20,7 @@ from .sections import (
     SectionNode,
     SectionSpan,
     resolve_toc_section_tree,
+    section_pages,
     section_text,
 )
 from .store import IndexStore
@@ -33,6 +34,8 @@ from .toc import (
     transform_toc,
 )
 from .types import (
+    ContentPosition,
+    ContentSpan,
     DetectedTOC,
     IndexedDocument,
     NodeSelection,
@@ -48,6 +51,8 @@ from .types import (
 __all__ = [
     "DocumentIngest",
     "DocumentLoader",
+    "ContentPosition",
+    "ContentSpan",
     "DetectedTOC",
     "DocumentPosition",
     "HeadingAnchorMatch",
@@ -80,6 +85,7 @@ __all__ = [
     "pages_have_mappable_page_ordinals",
     "remove_detected_toc_from_pages",
     "resolve_toc_section_tree",
+    "section_pages",
     "section_text",
     "toc_guidance_text",
     "transform_toc",

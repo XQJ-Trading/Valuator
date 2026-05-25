@@ -9,8 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from valuator.models.protocol import LlmClient
 
 from .ingest import pages_have_mappable_page_ordinals
+from .sections import SectionNode, SectionSpan, resolve_toc_section_tree
 from .toc import remove_detected_toc_from_pages, toc_guidance_text
-from .types import DetectedTOC, Outline, Page, TreeNode
+from .types import ContentPosition, ContentSpan, DetectedTOC, Outline, Page, TreeNode
 
 DEFAULT_GROUP_TOKENS = 20_000
 DEFAULT_MAX_PAGE_NUM_EACH_NODE = 5
@@ -222,9 +223,14 @@ class PageIndexer:
             trace_method_prefix = "page_index.toc_guided"
             toc_text = toc_guidance_text(detected_toc)
 
-        tree = self._tree_from_outlines(outlines, build_pages)
+        tree = self._tree_from_outlines(
+            outlines,
+            build_pages,
+            detected_toc=detected_toc,
+        )
         if tree is not None:
-            await self._split_large_nodes(tree, build_pages)
+            if not self._tree_has_content_spans(tree):
+                await self._split_large_nodes(tree, build_pages)
             self._assign_stable_node_ids(tree)
             self.metrics.max_depth = self._tree_depth(tree)
             return tree
@@ -252,6 +258,8 @@ class PageIndexer:
         self,
         outlines: list[Outline] | None,
         pages: list[Page],
+        *,
+        detected_toc: DetectedTOC | None = None,
     ) -> TreeNode | None:
         if not outlines:
             return None
@@ -265,8 +273,14 @@ class PageIndexer:
         )
         start = min(page.ordinal for page in pages)
         end = max(page.ordinal for page in pages)
+        sections = resolve_toc_section_tree(
+            outlines,
+            pages,
+            detected_toc=detected_toc,
+        )
         children = self._outline_nodes(
             outlines,
+            sections=sections,
             parent_start=start,
             parent_end=end,
             page_ordinals=page_ordinals,
@@ -289,47 +303,83 @@ class PageIndexer:
         self,
         outlines: list[Outline],
         *,
+        sections: tuple[SectionNode, ...] = (),
         parent_start: int,
         parent_end: int,
         page_ordinals: set[int],
     ) -> list[TreeNode]:
         resolved = [
-            (outline, start)
-            for outline in outlines
+            (outline, self._section_at(sections, index), start)
+            for index, outline in enumerate(outlines)
             for start in [self._outline_start(outline, page_ordinals)]
             if start is not None and parent_start <= start <= parent_end
         ]
-        resolved.sort(key=lambda item: item[1])
+        resolved.sort(key=lambda item: item[2])
 
         nodes: list[TreeNode] = []
-        for index, (outline, start) in enumerate(resolved):
+        for index, (outline, section, start) in enumerate(resolved):
             next_start = next(
                 (
                     later_start
-                    for _, later_start in resolved[index + 1 :]
+                    for _, _, later_start in resolved[index + 1 :]
                     if later_start > start
                 ),
                 None,
             )
             end = parent_end if next_start is None else min(parent_end, next_start - 1)
-            if index + 1 < len(resolved) and resolved[index + 1][1] == start:
+            if index + 1 < len(resolved) and resolved[index + 1][2] == start:
                 end = start
             children = self._outline_nodes(
                 outline.children,
+                sections=section.children if section is not None else (),
                 parent_start=start,
                 parent_end=max(start, end),
                 page_ordinals=page_ordinals,
+            )
+            content_span = (
+                self._content_span_from_section_span(section.content_span)
+                if section is not None and section.content_span is not None
+                else None
+            )
+            page_range = (
+                content_span.page_range
+                if content_span is not None
+                else [start, max(start, end)]
             )
             nodes.append(
                 TreeNode(
                     node_id=f"toc-{len(nodes) + 1}",
                     title=outline.title,
-                    page_range=[start, max(start, end)],
+                    page_range=page_range,
                     summary=f"{outline.title} section from the detected table of contents.",
+                    content_span=content_span,
                     children=children,
                 )
             )
         return nodes
+
+    @staticmethod
+    def _section_at(
+        sections: tuple[SectionNode, ...],
+        index: int,
+    ) -> SectionNode | None:
+        return sections[index] if index < len(sections) else None
+
+    @staticmethod
+    def _content_span_from_section_span(span: SectionSpan) -> ContentSpan:
+        return ContentSpan(
+            start=ContentPosition(
+                page_ordinal=span.start.page_ordinal,
+                local_offset=span.start.local_offset,
+                source_offset=span.start.source_offset,
+            ),
+            end=ContentPosition(
+                page_ordinal=span.end.page_ordinal,
+                local_offset=span.end.local_offset,
+                source_offset=span.end.source_offset,
+            ),
+            page_range=[span.page_range[0], span.page_range[1]],
+        )
 
     @classmethod
     def _outline_start(cls, outline: Outline, page_ordinals: set[int]) -> int | None:
@@ -440,7 +490,10 @@ class PageIndexer:
         toc_text: str = "",
     ) -> TreeNode:
         self.metrics.continue_calls += 1
-        tree_json = json.dumps(tree.model_dump(mode="json"), ensure_ascii=False)
+        tree_json = json.dumps(
+            tree.model_dump(mode="json", exclude_none=True),
+            ensure_ascii=False,
+        )
         prompt = (
             TOC_GUIDED_CONTINUE_PROMPT.format(
                 toc_text=toc_text,
@@ -705,6 +758,11 @@ class PageIndexer:
         if not node.children:
             return 1
         return 1 + max(self._tree_depth(child) for child in node.children)
+
+    def _tree_has_content_spans(self, node: TreeNode) -> bool:
+        return node.content_span is not None or any(
+            self._tree_has_content_spans(child) for child in node.children
+        )
 
     def _reject_unknown_page_ranges(self, tree: TreeNode, pages: list[Page]) -> None:
         self._reject_unknown_ranges(self._walk_nodes(tree), pages)

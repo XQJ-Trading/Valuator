@@ -137,6 +137,11 @@ def result_payload(result: RetrievalResult, *, max_page_chars: int) -> dict[str,
                 "node_id": node.node_id,
                 "title": node.title,
                 "page_range": node.page_range,
+                "content_span": (
+                    node.content_span.model_dump(mode="json")
+                    if node.content_span is not None
+                    else None
+                ),
                 "summary": node.summary,
                 "page_count": len(node.pages),
                 "token_count": sum(page.token_count for page in node.pages),

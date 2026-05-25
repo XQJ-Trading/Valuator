@@ -6,8 +6,10 @@ from typing import Any
 
 from valuator.models.protocol import LlmClient
 
+from .sections import DocumentPosition, SectionSpan, section_pages
 from .store import IndexStore
 from .types import (
+    ContentSpan,
     IndexedDocument,
     NodeSelection,
     Page,
@@ -157,6 +159,15 @@ class TreeRetriever:
         node_id: str,
     ) -> list[Page]:
         node = self.find_node(tree, node_id)
+        if node.content_span is not None:
+            return section_pages(
+                self._section_span_from_content_span(node.content_span),
+                store.get_pages(
+                    doc_hash,
+                    start=node.content_span.page_range[0],
+                    end=node.content_span.page_range[1],
+                ),
+            )
         return store.get_pages(
             doc_hash,
             start=node.page_range[0],
@@ -177,6 +188,7 @@ class TreeRetriever:
             title=node.title,
             page_range=node.page_range,
             summary=node.summary,
+            content_span=node.content_span,
             pages=self.get_page_content(
                 store=store,
                 doc_hash=doc_hash,
@@ -190,6 +202,22 @@ class TreeRetriever:
             if node.node_id == node_id:
                 return node
         raise ValueError(f"unknown node_id: {node_id}")
+
+    @staticmethod
+    def _section_span_from_content_span(span: ContentSpan) -> SectionSpan:
+        return SectionSpan(
+            start=DocumentPosition(
+                page_ordinal=span.start.page_ordinal,
+                local_offset=span.start.local_offset,
+                source_offset=span.start.source_offset,
+            ),
+            end=DocumentPosition(
+                page_ordinal=span.end.page_ordinal,
+                local_offset=span.end.local_offset,
+                source_offset=span.end.source_offset,
+            ),
+            page_range=(span.page_range[0], span.page_range[1]),
+        )
 
     def _walk_nodes(self, node: TreeNode) -> list[TreeNode]:
         nodes = [node]

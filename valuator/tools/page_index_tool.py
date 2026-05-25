@@ -87,6 +87,11 @@ def retrieval_payload(
                 "node_id": node.node_id,
                 "title": node.title,
                 "page_range": node.page_range,
+                "content_span": (
+                    node.content_span.model_dump(mode="json")
+                    if node.content_span is not None
+                    else None
+                ),
                 "summary": node.summary,
                 "pages": [
                     {

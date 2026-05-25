@@ -76,7 +76,7 @@ Fact Extraction → Evidence Store ({tree_node_id, page_range, fact})
 
 그 다음 `transform_toc`가 raw TOC를 `Outline` 트리로 변환한다. PDF physical page 또는 marked-text `page_marker`처럼 TOC destination page가 `Page.ordinal`과 매핑 가능한 입력이면 `PageIndexer`가 LLM 트리 생성 없이 `process_toc_with_page_numbers`로 `TreeNode.page_range`를 직접 만든다. destination page가 매핑 불가능한 입력은 감지된 TOC를 guide로 넣는 `toc_guided process_no_toc`로 강등되고, TOC 자체가 없으면 plain `process_no_toc`로 간다.
 
-추가로 anchor/section 레이어가 생겼다. 이 레이어는 `Outline` hierarchy를 유지하되 TOC destination page를 곧바로 `page_range`로 쓰지 않고, 해당 page 주변에서 실제 body heading anchor를 찾은 뒤 anchor-to-anchor `content_span`을 계산한다. 현재 구현은 `SectionNode` resolver까지이며, 기존 `TreeNode/page_range` 기반 indexer와 retriever를 완전히 교체한 상태는 아니다.
+추가로 anchor/section 레이어가 생겼다. 이 레이어는 `Outline` hierarchy를 유지하되 TOC destination page를 곧바로 `page_range`로 쓰지 않고, 해당 page 주변에서 실제 body heading anchor를 찾은 뒤 anchor-to-anchor `content_span`을 계산한다. TOC direct route는 계산된 `content_span`을 `TreeNode`에 저장하고, retrieval은 span이 있으면 `page_range` 전체가 아니라 해당 문자 범위만 로드한다. span이 없는 no-TOC/fallback 경로는 기존 `page_range` 로딩을 유지한다.
 
 ### 병렬 처리 경계
 
@@ -237,7 +237,7 @@ MD를 헤딩 기반으로 안 나누는 이유: PageIndex 트리 빌드 단계�
 |------|------|
 | PoC 대상 문서 | 로컬 PDF/TXT/MD/marked text. Apple FY24 10-K와 한국 사업보고서가 메인 |
 | 알고리즘 차용 범위 | 현재 runtime은 TOC 감지 + TOC 변환 + `process_toc_with_page_numbers` + toc-guided/no-TOC fallback + 재귀 분할 + 검색 |
-| anchor/section 레이어 | `resolve_toc_section_tree` 구현 완료. 기존 `TreeNode/page_range` indexer 교체 전 단계 |
+| anchor/section 레이어 | TOC direct route에서 `TreeNode.content_span` 저장. `TreeRetriever`는 span 우선 content load, 없으면 `page_range` fallback |
 | 경로 분기 위치 | `run_page_index_poc.py`가 `TOCDetector`와 `transform_toc`를 호출하고 `PageIndexer.build_tree(..., detected_toc=..., outlines=...)`에 전달 |
 | 인덱싱·검색 LLM | Gemini 3.1 Flash (전 단계 통일, `response_json_schema` 적용) |
 | 트리 저장 위치 | `/valuator/documents/store.py` 신설 (`IndexStore` 컴포넌트) |

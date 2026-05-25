@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 
 from .heading_anchor import (
@@ -124,6 +125,47 @@ def section_text(span: SectionSpan, pages: list[Page]) -> str:
         if page is not None and span.start.local_offset < span.end.local_offset:
             return page.text[span.start.local_offset : span.end.local_offset]
     return "\n".join(chunk.strip() for chunk in chunks if chunk.strip())
+
+
+def section_pages(span: SectionSpan, pages: list[Page]) -> list[Page]:
+    """Return per-page text slices covered by a section span."""
+    ordered_pages = [
+        page
+        for page in sorted(pages, key=lambda page: page.ordinal)
+        if span.page_range[0] <= page.ordinal <= span.page_range[1]
+    ]
+    sliced: list[Page] = []
+    for page in ordered_pages:
+        start = span.start.local_offset if page.ordinal == span.start.page_ordinal else 0
+        end = span.end.local_offset if page.ordinal == span.end.page_ordinal else len(page.text)
+        start = max(0, min(start, len(page.text)))
+        end = max(0, min(end, len(page.text)))
+        if start >= end:
+            continue
+        text = page.text[start:end]
+        source_locator = dict(page.source_locator)
+        source_locator["content_slice"] = {
+            "start_page": span.start.page_ordinal,
+            "start_offset": span.start.local_offset,
+            "end_page": span.end.page_ordinal,
+            "end_offset": span.end.local_offset,
+            "page_start_offset": start,
+            "page_end_offset": end,
+        }
+        source_start = source_locator.get("start")
+        if isinstance(source_start, int):
+            source_locator["start"] = source_start + start
+            source_locator["end"] = source_start + end
+        sliced.append(
+            page.model_copy(
+                update={
+                    "text": text,
+                    "token_count": _token_count(text),
+                    "source_locator": source_locator,
+                }
+            )
+        )
+    return sliced
 
 
 def _resolve_entry(
@@ -326,6 +368,10 @@ def _previous_page_ordinal(
         return None
     by_index = {value: key for key, value in page_order.items()}
     return by_index.get(index - 1)
+
+
+def _token_count(text: str) -> int:
+    return sum(1 for _ in re.finditer(r"\S+", text))
 
 
 def _position_before(

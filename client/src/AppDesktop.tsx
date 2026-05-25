@@ -152,7 +152,6 @@ export default function AppDesktop() {
                                 onUserSelectDirectory={() =>
                                   setOutlineFolderEnsureTick((v) => v + 1)
                                 }
-                                activePath={activePath}
                                 onSelect={setActivePath}
                               />
                             </Panel>

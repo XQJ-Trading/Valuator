@@ -42,13 +42,11 @@ export default function UserSessionView({
   dataSource,
   onSelectDirectory,
   onUserSelectDirectory,
-  activePath,
   onSelect,
 }: {
   dataSource: DataSource;
   onSelectDirectory: (path: string) => void;
   onUserSelectDirectory?: () => void;
-  activePath: string | null;
   onSelect: (path: string | null) => void;
 }) {
   const [sessions, setSessions] = useState<SessionItem[]>([]);

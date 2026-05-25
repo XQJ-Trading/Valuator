@@ -23,7 +23,7 @@ export default function AppDesktop() {
   const [outlineFolderEnsureTick, setOutlineFolderEnsureTick] = useState(0);
   const [sessionExploreTarget, setSessionExploreTarget] = useState<string | null>(null);
   const [chatVisible, setChatVisible] = useState(true);
-  const [devMode, setDevMode] = useState(true);
+  const [devMode, setDevMode] = useState(false);
 
   /** Latest session browse path for the tree — only when switching to Session view, not on every chat tick. */
   useEffect(() => {

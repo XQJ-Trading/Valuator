@@ -9,17 +9,23 @@ import pytest
 from pypdf import PdfWriter
 
 from valuator.documents import (
+    DetectedTOC,
     DocumentIngest,
     DocumentLoader,
     IndexStore,
     IndexedDocument,
+    Outline,
     Page,
     PageMarkerPattern,
     PageIndexer,
     RawDocument,
     TreeRetriever,
     TreeNode,
+    TOCDetector,
     document_hash,
+    pages_have_mappable_page_ordinals,
+    remove_detected_toc_from_pages,
+    transform_toc,
 )
 from valuator.tools.page_index_tool import PageIndexRetrieveTool
 
@@ -195,6 +201,123 @@ class ParallelSplitLlmClient(FakeLlmClient):
         }
 
 
+class TOCDetectorLlmClient(FakeLlmClient):
+    def __init__(
+        self,
+        *,
+        chunk_decision: dict[str, Any],
+    ) -> None:
+        super().__init__()
+        self.chunk_decision = chunk_decision
+
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        trace_method = str(kwargs["trace_method"])
+        self.calls.append(trace_method)
+        if trace_method == "page_index.toc.detect.chunk":
+            return self.chunk_decision
+        return await super().generate_json(**kwargs)
+
+
+class TOCGuidedIndexerLlmClient(FakeLlmClient):
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        trace_method = str(kwargs["trace_method"])
+        self.calls.append(trace_method)
+        if trace_method == "page_index.toc_guided.init":
+            prompt = str(kwargs["prompt"])
+            assert "Detected table-of-contents text" in prompt
+            guidance_text = prompt.split("Document pages:", maxsplit=1)[0]
+            assert "[detected TOC page]" in guidance_text
+            assert "[ordinal 1]" not in guidance_text
+            assert "Contents" in prompt
+            document_pages = prompt.split("Document pages:", maxsplit=1)[1]
+            assert "[ordinal 1]" in document_pages
+            assert "[ordinal 2]" in document_pages
+            return {
+                "node_id": "root",
+                "title": "Annual report",
+                "page_range": [0, 3],
+                "summary": "TOC-guided body tree",
+                "children": [
+                    {
+                        "node_id": "out-of-range",
+                        "title": "Out of range",
+                        "page_range": [0, 0],
+                        "summary": "Out-of-range node that should be dropped",
+                        "children": [],
+                    },
+                    {
+                        "node_id": "revenue",
+                        "title": "Revenue",
+                        "page_range": [0, 2],
+                        "summary": "Revenue discussion",
+                        "children": [],
+                    },
+                    {
+                        "node_id": "risk",
+                        "title": "Risk Factors",
+                        "page_range": [3, 3],
+                        "summary": "Risk discussion",
+                        "children": [],
+                    },
+                ],
+            }
+        return await super().generate_json(**kwargs)
+
+
+class TOCTransformLlmClient(FakeLlmClient):
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        trace_method = str(kwargs["trace_method"])
+        self.calls.append(trace_method)
+        if trace_method == "page_index.toc.transform":
+            return {
+                "entries": [
+                    {
+                        "title": "Part I",
+                        "page_number": None,
+                        "children": [
+                            {
+                                "title": "Item 1. Business",
+                                "page_number": 1,
+                                "children": [],
+                            },
+                            {
+                                "title": "Item 1A. Risk Factors",
+                                "page_number": 5,
+                                "children": [],
+                            },
+                        ],
+                    },
+                    {
+                        "title": "Part II",
+                        "page_number": None,
+                        "children": [
+                            {
+                                "title": "Item 7. MD&A",
+                                "page_number": 10,
+                                "children": [],
+                            }
+                        ],
+                    },
+                ],
+                "confidence": 0.93,
+                "reasoning": "Usable TOC.",
+            }
+        return await super().generate_json(**kwargs)
+
+
+def pages_for_toc_detection(count: int) -> list[Page]:
+    return [
+        Page(
+            doc_id="doc-1",
+            ordinal=index,
+            text=f"page {index} text " * 3,
+            token_count=9,
+            source_locator={"kind": "pdf_page", "page": index},
+        )
+        for index in range(count)
+    ]
+
+
 def test_text_ingest_splits_text_into_char_range_pages() -> None:
     document = RawDocument(
         doc_id="doc-1",
@@ -207,9 +330,11 @@ def test_text_ingest_splits_text_into_char_range_pages() -> None:
     assert pages[1].source_locator == {
         "kind": "char_range",
         "source": "memory://doc-1",
+        "ordinal_origin": "token_window",
         "start": 11,
         "end": 22,
     }
+    assert not pages_have_mappable_page_ordinals(pages)
     assert document_hash(document) == document_hash(document)
 
 
@@ -234,8 +359,10 @@ def test_marked_text_ingest_preserves_source_page_numbers() -> None:
 
     assert [page.ordinal for page in pages] == [1, 2]
     assert pages[0].source_locator["kind"] == "source_page"
+    assert pages[0].source_locator["ordinal_origin"] == "page_marker"
     assert pages[0].source_locator["page"] == 1
     assert pages[1].text.startswith("Risk factors")
+    assert pages_have_mappable_page_ordinals(pages)
 
 
 def test_start_marked_text_ingest_preserves_source_page_numbers() -> None:
@@ -261,6 +388,7 @@ def test_start_marked_text_ingest_preserves_source_page_numbers() -> None:
     assert [page.ordinal for page in pages] == [10, 11]
     assert pages[0].text.startswith("Page 10")
     assert pages[1].text.startswith("Page 11")
+    assert pages_have_mappable_page_ordinals(pages)
 
 
 def test_marked_text_loader_fails_when_expected_markers_are_missing() -> None:
@@ -298,8 +426,316 @@ def test_pdf_loader_preserves_physical_pages() -> None:
     assert pages[0].source_locator == {
         "kind": "pdf_page",
         "source": "memory://pdf-doc",
+        "ordinal_origin": "physical_page",
         "page": 1,
     }
+    assert pages_have_mappable_page_ordinals(pages)
+
+
+@pytest.mark.asyncio
+async def test_toc_detector_extracts_toc_pages_from_first_chunk() -> None:
+    client = TOCDetectorLlmClient(
+        chunk_decision={
+            "has_toc": True,
+            "toc_page_ordinals": [1, 2],
+            "toc_text": "Contents\nRevenue 2\nRisk Factors 3",
+            "confidence": 0.94,
+            "reasoning": "Pages 1 and 2 contain TOC entries.",
+        }
+    )
+
+    detected = await TOCDetector(
+        client,
+        toc_check_page_num=4,
+    ).detect(pages_for_toc_detection(4))
+
+    assert detected is not None
+    assert detected.toc_pages == [1, 2]
+    assert detected.raw_text == "Contents\nRevenue 2\nRisk Factors 3"
+    assert client.calls == ["page_index.toc.detect.chunk"]
+
+
+@pytest.mark.asyncio
+async def test_toc_detector_rejects_low_confidence_chunk_candidate() -> None:
+    client = TOCDetectorLlmClient(
+        chunk_decision={
+            "has_toc": True,
+            "toc_page_ordinals": [1],
+            "toc_text": "Weak table of contents",
+            "confidence": 0.50,
+            "reasoning": "Weak signal.",
+        }
+    )
+    detector = TOCDetector(client, toc_check_page_num=3)
+
+    detected = await detector.detect(pages_for_toc_detection(3))
+
+    assert detected is None
+    assert detector.metrics.chunk_scan_calls == 1
+    assert detector.metrics.no_toc_reason == "low_confidence"
+
+
+@pytest.mark.asyncio
+async def test_toc_detector_chooses_longest_contiguous_span_and_marks_truncation() -> None:
+    client = TOCDetectorLlmClient(
+        chunk_decision={
+            "has_toc": True,
+            "toc_page_ordinals": [0, 2, 3],
+            "toc_text": "Contents\nSection A 2\nSection B 3",
+            "confidence": 0.91,
+            "reasoning": "Two candidate spans, second one is longer.",
+        }
+    )
+    detector = TOCDetector(
+        client,
+        toc_check_page_num=4,
+    )
+
+    detected = await detector.detect(pages_for_toc_detection(6))
+
+    assert detected is not None
+    assert detected.toc_pages == [2, 3]
+    assert detector.metrics.candidate_span_count == 2
+    assert detector.metrics.toc_maybe_truncated is True
+
+
+def test_remove_detected_toc_from_pages_keeps_body_on_same_page() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=1,
+            text=(
+                "Cover text\n"
+                "TABLE OF CONTENTS\n"
+                "Item 1. Business\n"
+                "1\n"
+                "Item 1A. Risk Factors\n"
+                "5\n"
+                "Forward-looking statement\n"
+                "PART I\n"
+                "Item 1. Business\n"
+                "Business body"
+            ),
+            token_count=20,
+            source_locator={"kind": "pdf_page", "page": 1},
+        )
+    ]
+    cleaned = remove_detected_toc_from_pages(
+        pages,
+        DetectedTOC(
+            toc_pages=[1],
+            raw_text=(
+                "TABLE OF CONTENTS\n"
+                "Item 1. Business\n"
+                "1\n"
+                "Item 1A. Risk Factors\n"
+                "5"
+            ),
+        ),
+    )
+
+    assert "TABLE OF CONTENTS" not in cleaned[0].text
+    assert "Forward-looking statement" in cleaned[0].text
+    assert "Business body" in cleaned[0].text
+    assert cleaned[0].source_locator["toc_removed"] is True
+
+
+@pytest.mark.asyncio
+async def test_transform_toc_returns_entries_and_metrics() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=ordinal,
+            text={
+                1: "Item 1. Business",
+                5: "Item 1A. Risk Factors",
+                10: "Item 7. MD&A",
+            }.get(ordinal, f"page {ordinal}"),
+            token_count=2,
+            source_locator={
+                "kind": "pdf_page",
+                "ordinal_origin": "physical_page",
+                "page": ordinal,
+            },
+        )
+        for ordinal in range(1, 11)
+    ]
+    client = TOCTransformLlmClient()
+
+    outlines, metrics = await transform_toc(
+        client,
+        DetectedTOC(toc_pages=[1], raw_text="TABLE OF CONTENTS"),
+        pages,
+    )
+
+    assert outlines is not None
+    assert [entry.title for entry in outlines] == ["Part I", "Part II"]
+    assert metrics.entry_count == 5
+    assert metrics.entries_with_page_numbers == 3
+    assert metrics.has_page_numbers is True
+    assert client.calls == ["page_index.toc.transform"]
+
+
+@pytest.mark.asyncio
+async def test_page_indexer_builds_tree_directly_from_mapped_toc() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=ordinal,
+            text={
+                1: "Item 1. Business",
+                5: "Item 1A. Risk Factors",
+                10: "Item 7. MD&A",
+            }.get(ordinal, f"page {ordinal}"),
+            token_count=2,
+            source_locator={
+                "kind": "pdf_page",
+                "ordinal_origin": "physical_page",
+                "page": ordinal,
+            },
+        )
+        for ordinal in range(1, 11)
+    ]
+    indexer = PageIndexer(
+        FakeLlmClient(),
+        max_page_num_each_node=100,
+        max_token_num_each_node=1_000,
+    )
+
+    tree = await indexer.build_tree(
+        pages,
+        outlines=[
+            Outline(
+                title="Part I",
+                children=[
+                    Outline(title="Item 1. Business", destination_page=1),
+                    Outline(title="Item 1A. Risk Factors", destination_page=5),
+                ],
+            ),
+            Outline(
+                title="Part II",
+                children=[Outline(title="Item 7. MD&A", destination_page=10)],
+            ),
+        ],
+    )
+
+    assert tree.page_range == [1, 10]
+    assert [child.title for child in tree.children] == ["Part I", "Part II"]
+    assert [child.page_range for child in tree.children] == [[1, 9], [10, 10]]
+    assert [child.page_range for child in tree.children[0].children] == [
+        [1, 4],
+        [5, 9],
+    ]
+    assert indexer.metrics.tree_build_route == "toc_with_page_numbers"
+    assert indexer.metrics.toc_direct_builds == 1
+    assert indexer.metrics.toc_entries_mapped == 3
+
+
+@pytest.mark.asyncio
+async def test_page_indexer_falls_back_from_unmapped_toc_to_guided_build() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=1,
+            text="Contents\nRevenue 2",
+            token_count=3,
+            source_locator={"kind": "pdf_page", "page": 1},
+        ),
+        Page(
+            doc_id="doc-1",
+            ordinal=2,
+            text="Revenue body",
+            token_count=2,
+            source_locator={"kind": "pdf_page", "page": 2},
+        ),
+    ]
+    indexer = PageIndexer(
+        TOCGuidedIndexerLlmClient(),
+        max_page_num_each_node=100,
+        max_token_num_each_node=1_000,
+    )
+
+    tree = await indexer.build_tree(
+        pages,
+        detected_toc=DetectedTOC(
+            toc_pages=[1],
+            raw_text="[ordinal 1]\nContents\nRevenue 20",
+        ),
+        outlines=[Outline(title="Missing section", destination_page=20)],
+    )
+
+    assert tree.page_range == [1, 2]
+    assert indexer.metrics.toc_route_fallbacks == 1
+    assert indexer.metrics.tree_build_route == "toc_guided"
+
+
+@pytest.mark.asyncio
+async def test_page_indexer_uses_detected_toc_as_build_guidance() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=1,
+            text="Contents\nRevenue 2\nRisk Factors 3",
+            token_count=5,
+            source_locator={"kind": "pdf_page", "page": 1},
+        ),
+        Page(
+            doc_id="doc-1",
+            ordinal=2,
+            text="Revenue body",
+            token_count=2,
+            source_locator={"kind": "pdf_page", "page": 2},
+        ),
+        Page(
+            doc_id="doc-1",
+            ordinal=3,
+            text="Risk Factors body",
+            token_count=3,
+            source_locator={"kind": "pdf_page", "page": 3},
+        ),
+    ]
+    indexer = PageIndexer(
+        TOCGuidedIndexerLlmClient(),
+        group_max_tokens=100,
+        max_page_num_each_node=100,
+        max_token_num_each_node=1_000,
+    )
+
+    tree = await indexer.build_tree(
+        pages,
+        detected_toc=DetectedTOC(
+            toc_pages=[1],
+            raw_text="[ordinal 1]\nContents\nRevenue 2\nRisk Factors 3",
+        ),
+    )
+
+    assert tree.page_range == [1, 3]
+    assert [child.title for child in tree.children] == ["Revenue", "Risk Factors"]
+    assert [child.page_range for child in tree.children] == [[1, 2], [3, 3]]
+    assert indexer.metrics.toc_guided_builds == 1
+    assert indexer.metrics.toc_pages_used == 1
+    assert indexer.metrics.toc_range_adjustments == 2
+    assert indexer.metrics.toc_out_of_range_nodes_dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_page_indexer_rejects_unknown_detected_toc_pages() -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=1,
+            text="Only page",
+            token_count=2,
+            source_locator={"kind": "pdf_page", "page": 1},
+        )
+    ]
+    indexer = PageIndexer(FakeLlmClient())
+
+    with pytest.raises(ValueError, match="unknown page ordinals"):
+        await indexer.build_tree(
+            pages,
+            detected_toc=DetectedTOC(toc_pages=[2], raw_text="[ordinal 2]\nTOC"),
+        )
 
 
 def test_index_store_round_trips_document_and_pages(tmp_path) -> None:

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class RawDocument(BaseModel):
@@ -36,6 +43,53 @@ class Page(BaseModel):
         if value < 0:
             raise ValueError("token_count must be >= 0")
         return value
+
+
+class DetectedTOC(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    toc_pages: list[int] = Field(min_length=1)
+    raw_text: str
+
+    @field_validator("toc_pages")
+    @classmethod
+    def _toc_pages_are_unique(cls, value: list[int]) -> list[int]:
+        if len(value) != len(set(value)):
+            raise ValueError("toc_pages must be unique")
+        return value
+
+
+class Outline(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    destination_page: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("destination_page", "page_number"),
+    )
+    children: list[Outline] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def _title_is_not_blank(cls, value: str) -> str:
+        title = " ".join(value.strip().split())
+        if not title:
+            raise ValueError("title must not be blank")
+        return title
+
+    @field_validator("destination_page")
+    @classmethod
+    def _destination_page_is_non_negative(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("destination_page must be >= 0")
+        return value
+
+    @property
+    def page_number(self) -> int | None:
+        return self.destination_page
+
+
+TOCEntry = Outline
 
 
 class TreeNode(BaseModel):

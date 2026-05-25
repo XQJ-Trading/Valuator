@@ -27,7 +27,10 @@ from valuator.documents import (  # noqa: E402
     PageMarkerPattern,
     PageIndexer,
     RawDocument,
+    TOCDetector,
     document_hash,
+    remove_detected_toc_from_pages,
+    transform_toc,
 )
 from valuator.models.factory import create_llm_client  # noqa: E402
 from valuator.utils.llm_usage import LLMUsageWriter, TokenUsage  # noqa: E402
@@ -410,6 +413,17 @@ async def index_input_document(
         session_started_at=kst_isoformat(),
     )
     client = create_llm_client(model=args.model or None, usage_writer=trace_writer)
+    toc_detector = TOCDetector(client)
+    detected_toc = await toc_detector.detect(pages)
+    index_pages = remove_detected_toc_from_pages(pages, detected_toc)
+    toc_text_removed_pages = sum(
+        1 for page in index_pages if page.source_locator.get("toc_removed")
+    )
+    outlines, toc_transform_metrics = await transform_toc(
+        client,
+        detected_toc,
+        index_pages,
+    )
     indexer = PageIndexer(
         client,
         group_max_tokens=args.group_max_tokens,
@@ -418,23 +432,35 @@ async def index_input_document(
         max_recursion_depth=args.max_recursion_depth,
         recursion_concurrency=args.recursion_concurrency,
     )
-    tree = await indexer.build_tree(pages)
+    tree = await indexer.build_tree(
+        index_pages,
+        detected_toc=detected_toc,
+        outlines=outlines,
+    )
     trace_writer.append_total()
 
     indexed = IndexedDocument(
         doc_id=raw_document.doc_id,
         doc_hash=doc_hash,
-        page_count=len(pages),
+        page_count=len(index_pages),
         tree=tree,
         metadata={
             "input_file": str(input_path),
             "source": raw_document.source,
             "mime": raw_document.mime,
+            "raw_page_count": len(pages),
+            "toc_text_removed_pages": toc_text_removed_pages,
             **input_document.loader.metadata(),
+            "detected_toc_pages": detected_toc.toc_pages if detected_toc else [],
+            "toc_detection_metrics": asdict(toc_detector.metrics),
+            "toc_transform_metrics": asdict(toc_transform_metrics),
+            "toc_entry_count": toc_transform_metrics.entry_count,
+            "toc_has_page_numbers": toc_transform_metrics.has_page_numbers,
+            "tree_build_route": indexer.metrics.tree_build_route,
             "metrics": asdict(indexer.metrics),
         },
     )
-    store.record(indexed, pages)
+    store.record(indexed, index_pages)
 
     tree_path = output_dir / f"{output_prefix}-tree.json"
     tree_path.write_text(
@@ -449,6 +475,13 @@ async def index_input_document(
         "usage_path": str(usage_path),
         "llm_calls_path": str(llm_calls_path),
         "db_path": str(db_path),
+        "detected_toc_pages": indexed.metadata["detected_toc_pages"],
+        "toc_detection_metrics": indexed.metadata["toc_detection_metrics"],
+        "toc_transform_metrics": indexed.metadata["toc_transform_metrics"],
+        "toc_text_removed_pages": indexed.metadata["toc_text_removed_pages"],
+        "toc_entry_count": indexed.metadata["toc_entry_count"],
+        "toc_has_page_numbers": indexed.metadata["toc_has_page_numbers"],
+        "tree_build_route": indexed.metadata["tree_build_route"],
         "metrics": asdict(indexer.metrics),
     }
 

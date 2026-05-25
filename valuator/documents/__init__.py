@@ -1,23 +1,60 @@
-from .ingest import DocumentIngest, DocumentLoader, PageMarkerPattern, document_hash
+from .ingest import (
+    DocumentIngest,
+    DocumentLoader,
+    PageMarkerPattern,
+    document_hash,
+    pages_have_mappable_page_ordinals,
+)
+from .heading_anchor import (
+    HeadingAnchorMatch,
+    find_heading_anchor,
+    find_heading_anchor_in_pages,
+    heading_appears_near_page_start,
+    heading_similarity,
+)
 from .indexer import PageIndexMetrics, PageIndexer
 from .retriever import TreeRetriever
+from .sections import (
+    DocumentPosition,
+    SectionAnchor,
+    SectionNode,
+    SectionSpan,
+    resolve_toc_section_tree,
+    section_text,
+)
 from .store import IndexStore
+from .toc import (
+    TOCDetectionMetrics,
+    TOCDetector,
+    TOCTransformMetrics,
+    detected_toc_line_numbers_by_page,
+    remove_detected_toc_from_pages,
+    toc_guidance_text,
+    transform_toc,
+)
 from .types import (
+    DetectedTOC,
     IndexedDocument,
     NodeSelection,
+    Outline,
     Page,
     RawDocument,
     RetrievedNode,
     RetrievalResult,
+    TOCEntry,
     TreeNode,
 )
 
 __all__ = [
     "DocumentIngest",
     "DocumentLoader",
+    "DetectedTOC",
+    "DocumentPosition",
+    "HeadingAnchorMatch",
     "IndexStore",
     "IndexedDocument",
     "NodeSelection",
+    "Outline",
     "Page",
     "PageMarkerPattern",
     "PageIndexMetrics",
@@ -25,7 +62,25 @@ __all__ = [
     "RawDocument",
     "RetrievedNode",
     "RetrievalResult",
+    "SectionAnchor",
+    "SectionNode",
+    "SectionSpan",
+    "TOCDetectionMetrics",
+    "TOCDetector",
+    "TOCEntry",
+    "TOCTransformMetrics",
     "TreeNode",
     "TreeRetriever",
+    "detected_toc_line_numbers_by_page",
     "document_hash",
+    "find_heading_anchor",
+    "find_heading_anchor_in_pages",
+    "heading_appears_near_page_start",
+    "heading_similarity",
+    "pages_have_mappable_page_ordinals",
+    "remove_detected_toc_from_pages",
+    "resolve_toc_section_tree",
+    "section_text",
+    "toc_guidance_text",
+    "transform_toc",
 ]

@@ -12,6 +12,7 @@ from .types import Page, RawDocument
 DEFAULT_TEXT_PAGE_TOKENS = 4_000
 TEXT_MIME_TYPES = {"text/plain", "text/markdown", "text/x-markdown"}
 PDF_MIME_TYPE = "application/pdf"
+MAPPABLE_PAGE_ORDINAL_ORIGINS = frozenset({"page_marker", "physical_page"})
 
 
 @dataclass(frozen=True)
@@ -90,12 +91,34 @@ class DocumentLoader:
             "loader": self.name,
             "page_unit": self.page_unit,
             "unit_origin": self.unit_origin,
+            "toc_page_numbers_mappable": self.toc_page_numbers_mappable,
         }
         if self.name == "token_text":
             metadata["text_page_tokens"] = self.text_page_tokens
         elif self.marker is not None:
             metadata["marker_boundary"] = self.marker.boundary
         return metadata
+
+    @property
+    def toc_page_numbers_mappable(self) -> bool:
+        return self.unit_origin in MAPPABLE_PAGE_ORDINAL_ORIGINS
+
+
+def pages_have_mappable_page_ordinals(pages: list[Page]) -> bool:
+    if not pages:
+        return False
+
+    ordinals: set[int] = set()
+    for page in pages:
+        locator = page.source_locator
+        if locator.get("ordinal_origin") not in MAPPABLE_PAGE_ORDINAL_ORIGINS:
+            return False
+        if locator.get("page") != page.ordinal:
+            return False
+        if page.ordinal in ordinals:
+            return False
+        ordinals.add(page.ordinal)
+    return True
 
 
 def document_hash(document: RawDocument) -> str:
@@ -149,6 +172,7 @@ class DocumentIngest:
                     source_locator={
                         "kind": "char_range",
                         "source": source,
+                        "ordinal_origin": "token_window",
                         "start": start,
                         "end": end,
                     },
@@ -177,6 +201,7 @@ class DocumentIngest:
                 source_locator={
                     "kind": "pdf_page",
                     "source": document.source,
+                    "ordinal_origin": "physical_page",
                     "page": index,
                 },
             )
@@ -225,6 +250,7 @@ class DocumentIngest:
                     source_locator={
                         "kind": marker.locator_kind,
                         "source": source,
+                        "ordinal_origin": "page_marker",
                         "page": page_number,
                         "start": page_start,
                         "end": cursor,
@@ -317,6 +343,7 @@ class DocumentIngest:
                 source_locator={
                     "kind": marker.locator_kind,
                     "source": source,
+                    "ordinal_origin": "page_marker",
                     "page": page_number,
                     "start": page_start,
                     "end": page_end,

@@ -25,6 +25,7 @@ from scripts.run_page_index_poc import (
     gather_limited,
     input_mime,
     load_manifest,
+    parse_args,
     safe_output_prefix,
 )
 from valuator.documents import (
@@ -102,16 +103,33 @@ def test_page_index_poc_builds_pages_from_generic_markers() -> None:
 
     assert [page.ordinal for page in pages] == [7, 8]
     assert pages[0].source_locator["kind"] == "source_page"
+    assert pages[0].source_locator["ordinal_origin"] == "page_marker"
     assert pages[1].text.startswith("second page")
 
 
 def test_page_index_poc_helpers_are_generic() -> None:
     assert default_loader(Path("report.pdf")).metadata()["page_unit"] == "pdf_page"
+    assert default_loader(Path("report.pdf")).metadata()["toc_page_numbers_mappable"]
     assert default_loader(Path("report.txt")).metadata()["page_unit"] == "token_window"
+    assert not default_loader(Path("report.txt")).metadata()["toc_page_numbers_mappable"]
     assert input_mime(Path("report.pdf")) == "application/pdf"
     assert input_mime(Path("report.md")) == "text/markdown"
     assert input_mime(Path("report.txt")) == "text/plain"
     assert safe_output_prefix("annual report/fy 2024") == "annual-report-fy-2024"
+
+
+def test_page_index_poc_parser_keeps_toc_detector_out_of_runtime_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_page_index_poc.py", "--input-file", "report.pdf"],
+    )
+
+    args = parse_args()
+
+    assert "toc_scan_max_tokens" not in vars(args)
+    assert "toc_min_confidence" not in vars(args)
 
 
 def test_page_index_manifest_loads_marked_text_document(tmp_path) -> None:
@@ -152,6 +170,7 @@ def test_page_index_manifest_loads_marked_text_document(tmp_path) -> None:
 
     assert documents[0].output_prefix == "report"
     assert documents[0].loader.metadata()["page_unit"] == "source_page"
+    assert documents[0].loader.metadata()["toc_page_numbers_mappable"]
     assert [page.ordinal for page in pages] == [1]
 
 

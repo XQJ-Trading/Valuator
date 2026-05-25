@@ -167,7 +167,7 @@ export default function TaskTreeOutline({
               목차 불러오는 중…
             </span>
           ) : (
-            headerTitle
+            "목차"
           )}
         </span>
         {showTaskTreeSource ? (

@@ -9,6 +9,7 @@ import UserSessionView from "./components/UserSessionView";
 import ContentView from "./components/ContentView";
 import ConfigView from "./components/ConfigView";
 import DeveloperView from "./components/DeveloperView";
+import PdfView from "./components/PdfView";
 import AgentChatPanel from "./components/AgentChatPanel";
 import CenterSessionBar from "./components/CenterSessionBar";
 import TaskTreeOutline from "./components/TaskTreeOutline";
@@ -96,6 +97,8 @@ export default function AppDesktop() {
                   <ConfigView />
                 ) : activityView === "developer" ? (
                   <DeveloperView />
+                ) : activityView === "pdf" ? (
+                  <PdfView />
                 ) : (
                   <>
                     <Group orientation="horizontal" className="panels">

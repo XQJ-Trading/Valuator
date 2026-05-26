@@ -6,7 +6,7 @@ import {
 
 export type DataSource = "session" | "guide";
 
-export type ActivityView = DataSource | "config" | "developer";
+export type ActivityView = DataSource | "config" | "developer" | "pdf";
 
 export interface TreeEntry {
   name: string;
@@ -347,4 +347,105 @@ export function copyEntry(
   targetDirPath: string,
 ): Promise<FsMutationResult> {
   return postFs("/api/fs/copy", source, { path, targetDirPath });
+}
+
+export interface PdfItem {
+  doc_id: string;
+  filename: string;
+  size_bytes: number;
+  indexed: boolean;
+  doc_hash?: string | null;
+  page_count?: number | null;
+}
+
+export interface PdfUploadResponse {
+  doc_id: string;
+  filename: string;
+  size_bytes: number;
+  indexed: boolean;
+}
+
+export interface PdfIndexResponse {
+  doc_id: string;
+  doc_hash: string;
+  page_count: number;
+}
+
+export interface PdfDeleteResponse {
+  doc_id: string;
+  deleted_index_rows: number;
+}
+
+export interface PdfCitation {
+  node_id: string;
+  page_range: [number, number];
+  snippet: string;
+}
+
+export interface PdfRetrievedNode {
+  node_id: string;
+  title: string;
+  page_range: [number, number];
+  page_count: number;
+}
+
+export interface PdfQueryResponse {
+  doc_id: string;
+  doc_hash: string;
+  query: string;
+  answer: string;
+  citations: PdfCitation[];
+  used_node_ids: string[];
+  retrieved_nodes: PdfRetrievedNode[];
+  reasoning: string;
+}
+
+export async function listPdfs(): Promise<PdfItem[]> {
+  const res = await fetch("/api/pdf", { headers: authHeaders() });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  const data = (await res.json()) as { items: PdfItem[] };
+  return data.items;
+}
+
+export async function uploadPdf(file: File): Promise<PdfUploadResponse> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await fetch("/api/pdf/upload", {
+    method: "POST",
+    headers: authHeaders(),
+    body: form,
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<PdfUploadResponse>;
+}
+
+export async function indexPdf(docId: string): Promise<PdfIndexResponse> {
+  const res = await fetch(`/api/pdf/${encodeURIComponent(docId)}/index`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<PdfIndexResponse>;
+}
+
+export async function queryPdf(
+  docId: string,
+  query: string,
+): Promise<PdfQueryResponse> {
+  const res = await fetch(`/api/pdf/${encodeURIComponent(docId)}/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<PdfQueryResponse>;
+}
+
+export async function deletePdf(docId: string): Promise<PdfDeleteResponse> {
+  const res = await fetch(`/api/pdf/${encodeURIComponent(docId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await parseErrorBody(res));
+  return res.json() as Promise<PdfDeleteResponse>;
 }

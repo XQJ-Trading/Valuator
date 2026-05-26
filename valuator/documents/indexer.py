@@ -229,8 +229,7 @@ class PageIndexer:
             detected_toc=detected_toc,
         )
         if tree is not None:
-            if not self._tree_has_content_spans(tree):
-                await self._split_large_nodes(tree, build_pages)
+            await self._split_large_nodes(tree, build_pages)
             self._assign_stable_node_ids(tree)
             self.metrics.max_depth = self._tree_depth(tree)
             return tree
@@ -758,11 +757,6 @@ class PageIndexer:
         if not node.children:
             return 1
         return 1 + max(self._tree_depth(child) for child in node.children)
-
-    def _tree_has_content_spans(self, node: TreeNode) -> bool:
-        return node.content_span is not None or any(
-            self._tree_has_content_spans(child) for child in node.children
-        )
 
     def _reject_unknown_page_ranges(self, tree: TreeNode, pages: list[Page]) -> None:
         self._reject_unknown_ranges(self._walk_nodes(tree), pages)

@@ -185,9 +185,9 @@ def test_sec_export_helper_builds_stable_output_path() -> None:
         output_dir=Path("data/page_index"),
         ticker="AAPL",
         year=2024,
-    ) == Path("data/page_index/aapl-2024.txt")
+    ) == Path("data/page_index/aapl-2024/source.txt")
     manifest = page_index_manifest(
-        output_path=Path("data/page_index/aapl-2024.txt"),
+        output_path=Path("data/page_index/aapl-2024/source.txt"),
         doc_id="aapl-2024",
         source="https://example.test/aapl",
     )

@@ -1,3 +1,4 @@
+from .generator import AnswerGenerator
 from .ingest import (
     DocumentIngest,
     DocumentLoader,
@@ -34,6 +35,8 @@ from .toc import (
     transform_toc,
 )
 from .types import (
+    Answer,
+    AnswerCitation,
     ContentPosition,
     ContentSpan,
     DetectedTOC,
@@ -49,6 +52,8 @@ from .types import (
 )
 
 __all__ = [
+    "Answer",
+    "AnswerCitation",
     "DocumentIngest",
     "DocumentLoader",
     "ContentPosition",
@@ -74,6 +79,7 @@ __all__ = [
     "TOCDetector",
     "TOCEntry",
     "TOCTransformMetrics",
+    "AnswerGenerator",
     "TreeNode",
     "TreeRetriever",
     "detected_toc_line_numbers_by_page",

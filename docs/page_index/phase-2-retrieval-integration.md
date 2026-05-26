@@ -4,7 +4,7 @@
 
 ## 목표
 
-Phase 1에서 생성된 트리를 실제 질의 흐름에 끼워 넣는다. PageIndex 원안처럼 먼저 구조만 보여주고, LLM이 필요한 노드/페이지를 고른 뒤 본문을 lazy load한다. 선택된 노드 텍스트는 기존 `fact_extraction` 파이프라인에 연결하고, evidence_store에는 트리 노드 기반 인용 정보를 추가한다.
+Phase 1에서 생성된 트리를 실제 질의 흐름에 끼워 넣는다. PageIndex 원안처럼 먼저 구조만 보여주고, LLM이 필요한 노드/페이지를 고른 뒤 본문을 lazy load한다. 단, routing 단계에서 큰 부모 노드가 선택되더라도 그 부모의 전체 `page_range`를 바로 evidence로 사용하지 않는다. 큰 노드는 하위 노드를 고르는 길찾기 단위로만 쓰고, 답변 프롬프트에는 작고 충분한 evidence 노드의 본문만 넣는다.
 
 ## 변경 파일
 
@@ -21,10 +21,12 @@ Phase 1에서 생성된 트리를 실제 질의 흐름에 끼워 넣는다. Page
 1. 입력 어댑터(SEC/DART/PDF/TXT)가 문서 fetch/parse → `RawDocument` + `doc_hash` 계산
 2. `IndexStore.get(doc_hash)` 조회. 캐시 미스면 인덱싱 트리거 (Phase 1 경로)
 3. `TreeRetriever.get_document_structure(tree)` 등가 view 생성: 본문 없이 `{node_id,title,page_range,summary,children}`만 전달
-4. `TreeRetriever.select(doc_id, tree, sub_query)` → `NodeSelection{selected_node_ids, reasoning}`
-5. 선택된 노드의 텍스트 lazy load (`IndexStore.get_pages(doc_hash, start, end)`). 필요하면 노드 텍스트를 `ExplicitGeminiCache`에 올림
-6. 기존 `fact_extraction` 파이프라인에 입력
-7. `evidence_store`에 `{doc_id, tree_node_id, page_range, fact}` 저장
+4. `TreeRetriever.select(doc_id, tree, sub_query)` → routing 후보 `NodeSelection{selected_node_ids, reasoning}`
+5. 선택된 routing 후보가 evidence 제한을 넘고 children을 가지면, 해당 subtree 안에서 다시 `select`를 호출해 더 작은 descendant 후보로 내려간다.
+6. 최종 evidence 후보는 노드별 page/token 제한을 만족하거나 더 내려갈 children이 없는 노드다. 작은 sibling들이 모두 선택됐고 parent도 제한 안에 있으면 parent로 병합할 수 있다.
+7. 최종 evidence 노드의 텍스트만 lazy load (`IndexStore.get_pages(doc_hash, start, end)`). 필요하면 노드 텍스트를 `ExplicitGeminiCache`에 올림
+8. 기존 `fact_extraction` 파이프라인에 입력
+9. `evidence_store`에 `{doc_id, tree_node_id, page_range, fact}` 저장
 
 ## CLI smoke test
 
@@ -64,6 +66,15 @@ query batch 출력은 query별로 `-q1`, `-q2` suffix를 붙여 result/text/trac
 
 ```
 class TreeRetriever:
+    def __init__(
+        self,
+        client: LlmClient,
+        *,
+        max_evidence_pages_per_node: int = 5,
+        max_evidence_tokens_per_node: int = 20_000,
+        max_refinement_depth: int = 6,
+    ) -> None
+
     async def select(
         self,
         *,
@@ -95,13 +106,32 @@ class TreeRetriever:
 
 - 트리 전체(요약 + 자식 ids)를 프롬프트에 포함
 - LLM은 관련 `node_id` 리스트와 선택 근거를 JSON으로 반환 (`response_json_schema`)
+- `select()`는 순수 routing 선택이다. `retrieve()`는 이 결과를 받아 evidence 제한을 넘는 부모 노드를 재귀적으로 더 작은 descendant 노드로 refine한다.
 
 PageIndex의 `get_document_structure` / `get_page_content` tool 패턴은 Valuator에서는 다음 두 책임으로 나눈다.
 
 - `get_document_structure`: `TreeNode`를 text-stripped JSON으로 직렬화. 본문은 절대 포함하지 않는다.
 - `get_page_content`: 선택된 `node_id`의 `page_range`로 `IndexStore.get_pages()`를 호출해 원문 페이지 텍스트만 가져온다.
 
-따라서 retrieval 단계에서 계속 주입되는 것은 "문서 전체 본문"이 아니라 "트리 구조 + 요약"이다. 본문은 선택된 범위만 늦게 들어온다.
+따라서 retrieval 단계에서 계속 주입되는 것은 "문서 전체 본문"이 아니라 "트리 구조 + 요약"이다. 본문은 refine이 끝난 작은 evidence 범위만 늦게 들어온다.
+
+## Minimal evidence refinement 정책
+
+Retrieval은 routing node와 evidence node를 분리한다.
+
+- **Routing node**: tree search에서 방향을 잡는 노드. 큰 section, item, note parent가 선택될 수 있다.
+- **Evidence node**: answer/fact extraction에 원문을 제공하는 노드. 기본적으로 `max_evidence_pages_per_node`와 `max_evidence_tokens_per_node` 안에 있어야 한다.
+
+`retrieve()`는 다음 규칙을 적용한다.
+
+1. 최초 `select()`는 전체 text-stripped tree에서 관련 routing node를 고른다.
+2. 선택된 노드가 evidence 제한 안에 있거나 leaf면 그대로 evidence로 채택한다.
+3. 선택된 노드가 크고 children이 있으면 그 subtree만 다시 보여주고 더 작은 관련 노드를 고르게 한다.
+4. LLM이 같은 큰 부모를 다시 고르거나 빈 결과를 내면, 직접 children을 후보로 삼아 계속 내려간다. 이 fallback은 큰 부모 원문을 그대로 넣는 실패 모드를 막기 위한 안전장치다.
+5. 중복 descendant와 ancestor가 함께 선택되면 더 구체적인 descendant를 우선한다.
+6. 선택된 sibling들이 parent 전체를 사실상 덮고 parent도 evidence 제한 안에 있으면 parent로 병합한다.
+
+이 정책의 목표는 PageIndex의 "structure first, tight page fetch" 패턴을 서버 내부 API에서도 강제하는 것이다. 프롬프트가 부모 노드를 골라도 코드가 바로 전체 page range를 로드하지 않으므로, `Item 8`처럼 30쪽이 넘는 부모 섹션이 answer prompt를 지배하는 상황을 피한다.
 
 여러 query는 각각 같은 text-stripped tree를 보고 node selection을 수행하므로 병렬 처리 가능하다. 한 query 안에서 selected page load는 SQLite range read라 Phase 2에서는 동시화하지 않는다.
 

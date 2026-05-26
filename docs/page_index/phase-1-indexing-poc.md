@@ -108,7 +108,7 @@ fallback도 같은 경계 위에서 표현된다 — TOC direct route가 실패�
 {
   "documents": [
     {
-      "input_file": "data/page_index/report.txt",
+      "input_file": "data/page_index/report/source.txt",
       "doc_id": "report",
       "loader": {
         "kind": "marked_text",
@@ -126,12 +126,12 @@ fallback도 같은 경계 위에서 표현된다 — TOC direct route가 실패�
 
 `marked_text` loader가 marker를 못 찾으면 token window로 조용히 fallback하지 않고 실패한다. 실제 페이지가 필요한 입력을 segment tree로 잘못 인덱싱하지 않기 위한 경계다.
 
-SEC 10-K는 먼저 입력 파일로 export한다. SEC fetch와 reader footer marker 설정은 인덱서가 아니라 입력 어댑터 책임이며, export 스크립트가 `.page_index.json` sidecar manifest를 같이 만든다.
+SEC 10-K는 먼저 입력 파일로 export한다. SEC fetch와 reader footer marker 설정은 인덱서가 아니라 입력 어댑터 책임이며, export 스크립트가 `<doc_id>/manifest.json` sidecar manifest를 같이 만든다.
 
 ```bash
 ./venv/bin/python scripts/export_sec_10k_text.py --ticker AAPL --year 2024
 ./venv/bin/python scripts/run_page_index_poc.py \
-  --manifest data/page_index/aapl-2024.page_index.json \
+  --manifest data/page_index/aapl-2024/manifest.json \
   --model gemini-3.1-flash
 ```
 

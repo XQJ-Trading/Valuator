@@ -403,10 +403,17 @@ async def index_input_document(
     )
 
     output_dir = resolve_path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     output_prefix = safe_output_prefix(input_document.output_prefix)
-    usage_path = output_dir / f"{output_prefix}-llm_usage.jsonl"
-    llm_calls_path = output_dir / f"{output_prefix}-llm_calls.jsonl"
+    doc_dir = output_dir / output_prefix
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    source_path = doc_dir / f"source{input_path.suffix}"
+    if input_path.resolve() != source_path.resolve():
+        if isinstance(raw_input, bytes):
+            source_path.write_bytes(raw_input)
+        else:
+            source_path.write_text(raw_input, encoding="utf-8")
+    usage_path = doc_dir / "llm_usage.jsonl"
+    llm_calls_path = doc_dir / "llm_calls.jsonl"
     trace_writer = PageIndexTraceWriter(
         usage_path=usage_path,
         llm_calls_path=llm_calls_path,
@@ -462,7 +469,7 @@ async def index_input_document(
     )
     store.record(indexed, index_pages)
 
-    tree_path = output_dir / f"{output_prefix}-tree.json"
+    tree_path = doc_dir / "tree.json"
     tree_path.write_text(
         json.dumps(
             indexed.model_dump(mode="json", exclude_none=True),

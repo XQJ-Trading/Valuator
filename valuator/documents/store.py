@@ -183,6 +183,27 @@ class IndexStore:
             metadata=json.loads(str(row["metadata_json"])),
         )
 
+    def delete_by_doc_id(self, doc_id: str) -> int:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT doc_hash FROM page_index_documents WHERE doc_id = ?",
+                (doc_id,),
+            ).fetchall()
+            hashes = [str(row["doc_hash"]) for row in rows]
+            if not hashes:
+                return 0
+            placeholders = ",".join("?" * len(hashes))
+            self._conn.execute(
+                f"DELETE FROM page_index_pages WHERE doc_hash IN ({placeholders})",
+                hashes,
+            )
+            self._conn.execute(
+                "DELETE FROM page_index_documents WHERE doc_id = ?",
+                (doc_id,),
+            )
+            self._conn.commit()
+            return len(hashes)
+
     def get_pages(
         self,
         doc_hash: str,

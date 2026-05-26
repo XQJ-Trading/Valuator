@@ -168,3 +168,28 @@ class RetrievalResult(BaseModel):
     query: str
     selection: NodeSelection
     selected_nodes: list[RetrievedNode] = Field(default_factory=list)
+
+
+class AnswerCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    page_range: list[int] = Field(min_length=2, max_length=2)
+    snippet: str
+
+    @model_validator(mode="after")
+    def _page_range_is_ordered(self) -> AnswerCitation:
+        if self.page_range[0] > self.page_range[1]:
+            raise ValueError("page_range start must be <= end")
+        return self
+
+
+class Answer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    doc_id: str
+    doc_hash: str
+    query: str
+    answer: str
+    citations: list[AnswerCitation] = Field(default_factory=list)
+    used_node_ids: list[str] = Field(default_factory=list)

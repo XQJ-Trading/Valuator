@@ -221,14 +221,15 @@ async def run_query(
     store: IndexStore,
     document: Any,
     query: str,
-    output_prefix: str,
+    folder_name: str,
+    file_prefix: str,
 ) -> dict[str, Any]:
-    output_dir = resolve_path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    usage_path = output_dir / f"{output_prefix}-llm_usage.jsonl"
-    llm_calls_path = output_dir / f"{output_prefix}-llm_calls.jsonl"
-    output_path = output_dir / f"{output_prefix}-result.json"
-    text_path = output_dir / f"{output_prefix}-text.txt"
+    doc_dir = resolve_path(args.output_dir) / folder_name
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    usage_path = doc_dir / f"{file_prefix}-llm_usage.jsonl"
+    llm_calls_path = doc_dir / f"{file_prefix}-llm_calls.jsonl"
+    output_path = doc_dir / f"{file_prefix}-result.json"
+    text_path = doc_dir / f"{file_prefix}-text.txt"
 
     trace_writer = PageIndexTraceWriter(
         usage_path=usage_path,
@@ -287,20 +288,19 @@ async def gather_queries_limited(
 async def run(args: argparse.Namespace) -> None:
     store = IndexStore(resolve_path(args.db))
     document = load_document(store, args)
-    output_prefix = safe_output_prefix(
-        args.output_prefix or f"{document.doc_id}-retrieve"
-    )
+    folder_name = safe_output_prefix(args.output_prefix or document.doc_id)
     queries = [(index, query) for index, query in enumerate(args.query, start=1)]
 
     async def process(item: tuple[int, str]) -> dict[str, Any]:
         index, query = item
-        prefix = output_prefix if len(queries) == 1 else f"{output_prefix}-q{index}"
+        file_prefix = "retrieve" if len(queries) == 1 else f"retrieve-q{index}"
         return await run_query(
             args,
             store=store,
             document=document,
             query=query,
-            output_prefix=prefix,
+            folder_name=folder_name,
+            file_prefix=file_prefix,
         )
 
     results = await gather_queries_limited(

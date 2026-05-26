@@ -62,7 +62,7 @@ def default_output_path(
     ticker: str,
     year: int,
 ) -> Path:
-    return output_dir / f"{safe_ticker(ticker)}-{year}.txt"
+    return output_dir / f"{safe_ticker(ticker)}-{year}" / "source.txt"
 
 
 def page_index_manifest(
@@ -121,13 +121,13 @@ def main() -> None:
         "line_count": len(lines),
         "output_file": str(output_path),
     }
-    metadata_path = output_path.with_suffix(".metadata.json")
+    metadata_path = output_path.parent / "metadata.json"
     metadata_path.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    doc_id = output_path.stem
-    manifest_path = output_path.with_suffix(".page_index.json")
+    doc_id = output_path.parent.name
+    manifest_path = output_path.parent / "manifest.json"
     manifest_path.write_text(
         json.dumps(
             page_index_manifest(

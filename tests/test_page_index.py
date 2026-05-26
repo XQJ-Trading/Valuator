@@ -157,6 +157,35 @@ class StaticSelectionLlmClient(FakeLlmClient):
         }
 
 
+class ParentThenChildSelectionLlmClient(FakeLlmClient):
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        trace_method = str(kwargs["trace_method"])
+        self.calls.append(trace_method)
+        assert "page 4 raw text" not in kwargs["prompt"]
+        if trace_method == "page_index.retrieve.refine":
+            return {
+                "doc_id": "doc-1",
+                "selected_node_ids": ["n.1.2"],
+                "reasoning": "The child node has the specific evidence.",
+            }
+        return {
+            "doc_id": "doc-1",
+            "selected_node_ids": ["n.1"],
+            "reasoning": "The parent section is relevant.",
+        }
+
+
+class ParentReselectingLlmClient(FakeLlmClient):
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        trace_method = str(kwargs["trace_method"])
+        self.calls.append(trace_method)
+        return {
+            "doc_id": "doc-1",
+            "selected_node_ids": ["n.1"],
+            "reasoning": "The parent section is relevant.",
+        }
+
+
 class ParallelSplitLlmClient(FakeLlmClient):
     def __init__(self) -> None:
         super().__init__()
@@ -694,7 +723,7 @@ async def test_toc_route_uses_content_spans_for_same_page_sections(tmp_path) -> 
     client = FakeLlmClient()
     indexer = PageIndexer(
         client,
-        max_page_num_each_node=1,
+        max_page_num_each_node=100,
         max_token_num_each_node=1_000,
     )
 
@@ -1108,6 +1137,145 @@ async def test_tree_retriever_selects_nodes_and_lazy_loads_pages(tmp_path) -> No
     assert result.selected_nodes[0].node_id == "n.2"
     assert [page.ordinal for page in loaded_pages] == [2]
     assert loaded_pages[0].text == "second page raw text"
+
+
+@pytest.mark.asyncio
+async def test_tree_retriever_refines_large_parent_to_specific_child(tmp_path) -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=ordinal,
+            text=f"page {ordinal} raw text",
+            token_count=1,
+            source_locator={"kind": "source_page", "page": ordinal},
+        )
+        for ordinal in range(1, 7)
+    ]
+    tree = TreeNode(
+        node_id="n",
+        title="Root",
+        page_range=[1, 6],
+        summary="Root summary",
+        children=[
+            TreeNode(
+                node_id="n.1",
+                title="Large parent",
+                page_range=[1, 6],
+                summary="Large parent summary",
+                children=[
+                    TreeNode(
+                        node_id="n.1.1",
+                        title="First child",
+                        page_range=[1, 3],
+                        summary="First child summary",
+                        children=[],
+                    ),
+                    TreeNode(
+                        node_id="n.1.2",
+                        title="Specific child",
+                        page_range=[4, 4],
+                        summary="Specific child summary",
+                        children=[],
+                    ),
+                ],
+            )
+        ],
+    )
+    indexed = IndexedDocument(
+        doc_id="doc-1",
+        doc_hash="hash-1",
+        page_count=6,
+        tree=tree,
+        metadata={},
+    )
+    store = IndexStore(tmp_path / "page_index.db")
+    store.record(indexed, pages)
+    client = ParentThenChildSelectionLlmClient()
+    retriever = TreeRetriever(client, max_evidence_pages_per_node=2)
+
+    result = await retriever.retrieve(
+        store=store,
+        document=indexed,
+        sub_query="Find the specific child.",
+    )
+
+    assert client.calls == [
+        "page_index.retrieve.select",
+        "page_index.retrieve.refine",
+    ]
+    assert result.selection.selected_node_ids == ["n.1.2"]
+    assert result.selected_nodes[0].node_id == "n.1.2"
+    assert [page.ordinal for page in result.selected_nodes[0].pages] == [4]
+    assert "Refined large routing nodes" in result.selection.reasoning
+
+
+@pytest.mark.asyncio
+async def test_tree_retriever_falls_back_to_children_when_parent_is_reselected(
+    tmp_path,
+) -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=ordinal,
+            text=f"page {ordinal} raw text",
+            token_count=1,
+            source_locator={"kind": "source_page", "page": ordinal},
+        )
+        for ordinal in range(1, 3)
+    ]
+    tree = TreeNode(
+        node_id="n",
+        title="Root",
+        page_range=[1, 2],
+        summary="Root summary",
+        children=[
+            TreeNode(
+                node_id="n.1",
+                title="Large parent",
+                page_range=[1, 2],
+                summary="Large parent summary",
+                children=[
+                    TreeNode(
+                        node_id="n.1.1",
+                        title="First child",
+                        page_range=[1, 1],
+                        summary="First child summary",
+                        children=[],
+                    ),
+                    TreeNode(
+                        node_id="n.1.2",
+                        title="Second child",
+                        page_range=[2, 2],
+                        summary="Second child summary",
+                        children=[],
+                    ),
+                ],
+            )
+        ],
+    )
+    indexed = IndexedDocument(
+        doc_id="doc-1",
+        doc_hash="hash-1",
+        page_count=2,
+        tree=tree,
+        metadata={},
+    )
+    store = IndexStore(tmp_path / "page_index.db")
+    store.record(indexed, pages)
+    retriever = TreeRetriever(
+        ParentReselectingLlmClient(),
+        max_evidence_pages_per_node=1,
+    )
+
+    result = await retriever.retrieve(
+        store=store,
+        document=indexed,
+        sub_query="Find the parent section.",
+    )
+
+    assert result.selection.selected_node_ids == ["n.1.1", "n.1.2"]
+    assert [node.node_id for node in result.selected_nodes] == ["n.1.1", "n.1.2"]
+    assert [node.pages[0].ordinal for node in result.selected_nodes] == [1, 2]
 
 
 @pytest.mark.asyncio

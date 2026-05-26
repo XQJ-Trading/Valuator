@@ -10,6 +10,7 @@ from valuator.utils.logger import logger
 
 from .auth import verify_auth
 from .chat_api import router as chat_router
+from .pdf_api import router as pdf_router
 from .session_viewer_api import ensure_viewer_roots, router as session_viewer_router
 
 
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(session_viewer_router)
     app.include_router(chat_router)
+    app.include_router(pdf_router)
 
     @app.get("/health")
     async def health():

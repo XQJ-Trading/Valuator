@@ -18,6 +18,7 @@ from scripts.run_page_index_retrieve_poc import (
     result_payload,
 )
 from scripts.run_page_index_poc import (
+    DEFAULT_PAGE_INDEX_MODEL,
     LoaderConfig,
     PageIndexTraceWriter,
     build_pages,
@@ -25,7 +26,9 @@ from scripts.run_page_index_poc import (
     gather_limited,
     input_mime,
     load_manifest,
+    load_llm_usage_total_cost,
     parse_args,
+    retrieval_budget_from_indexing_cost,
     safe_output_prefix,
 )
 from valuator.documents import (
@@ -84,6 +87,27 @@ def test_page_index_trace_writer_records_usage_and_llm_calls(tmp_path) -> None:
     assert call_rows[0]["error"] is None
 
 
+def test_retrieval_budget_uses_indexing_total_cost(tmp_path) -> None:
+    usage_path = tmp_path / "llm_usage.jsonl"
+    usage_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"method": "page_index.init", "cost_usd": 0.05}),
+                json.dumps({"method": "TOTAL", "cost_usd": 0.24}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_llm_usage_total_cost(usage_path) == pytest.approx(0.24)
+    assert retrieval_budget_from_indexing_cost(0.24, divisor=12) == pytest.approx(
+        0.02
+    )
+    assert retrieval_budget_from_indexing_cost(None, fallback_usd=0.10) == pytest.approx(
+        0.10
+    )
+
+
 def test_page_index_poc_builds_pages_from_generic_markers() -> None:
     document = RawDocument(
         doc_id="generic-doc",
@@ -128,6 +152,7 @@ def test_page_index_poc_parser_keeps_toc_detector_out_of_runtime_options(
 
     args = parse_args()
 
+    assert args.model == DEFAULT_PAGE_INDEX_MODEL
     assert "toc_scan_max_tokens" not in vars(args)
     assert "toc_min_confidence" not in vars(args)
 

@@ -162,7 +162,7 @@ class ParentThenChildSelectionLlmClient(FakeLlmClient):
         trace_method = str(kwargs["trace_method"])
         self.calls.append(trace_method)
         assert "page 4 raw text" not in kwargs["prompt"]
-        if trace_method == "page_index.retrieve.refine":
+        if trace_method == "page_index.retrieve.tree_select":
             return {
                 "doc_id": "doc-1",
                 "selected_node_ids": ["n.1.2"],
@@ -184,6 +184,14 @@ class ParentReselectingLlmClient(FakeLlmClient):
             "selected_node_ids": ["n.1"],
             "reasoning": "The parent section is relevant.",
         }
+
+
+class BudgetBlockedLlmClient(FakeLlmClient):
+    model = "gemini-3-flash-preview"
+
+    async def generate_json(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(str(kwargs["trace_method"]))
+        raise AssertionError("retrieval budget should block LLM selection")
 
 
 class ParallelSplitLlmClient(FakeLlmClient):
@@ -1201,12 +1209,12 @@ async def test_tree_retriever_refines_large_parent_to_specific_child(tmp_path) -
 
     assert client.calls == [
         "page_index.retrieve.select",
-        "page_index.retrieve.refine",
+        "page_index.retrieve.tree_select",
     ]
     assert result.selection.selected_node_ids == ["n.1.2"]
     assert result.selected_nodes[0].node_id == "n.1.2"
     assert [page.ordinal for page in result.selected_nodes[0].pages] == [4]
-    assert "Refined large routing nodes" in result.selection.reasoning
+    assert "retrieval_cost_budget=$0.1000" in result.selection.reasoning
 
 
 @pytest.mark.asyncio
@@ -1276,6 +1284,65 @@ async def test_tree_retriever_falls_back_to_children_when_parent_is_reselected(
     assert result.selection.selected_node_ids == ["n.1.1", "n.1.2"]
     assert [node.node_id for node in result.selected_nodes] == ["n.1.1", "n.1.2"]
     assert [node.pages[0].ordinal for node in result.selected_nodes] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_tree_retriever_blocks_llm_calls_when_retrieval_budget_is_spent(
+    tmp_path,
+) -> None:
+    pages = [
+        Page(
+            doc_id="doc-1",
+            ordinal=ordinal,
+            text=f"page {ordinal} raw text",
+            token_count=1,
+            source_locator={"kind": "source_page", "page": ordinal},
+        )
+        for ordinal in range(1, 3)
+    ]
+    tree = TreeNode(
+        node_id="n",
+        title="Root",
+        page_range=[1, 2],
+        summary="Root summary",
+        children=[
+            TreeNode(
+                node_id="n.1",
+                title="First section",
+                page_range=[1, 1],
+                summary="First summary",
+                children=[],
+            ),
+            TreeNode(
+                node_id="n.2",
+                title="Second section",
+                page_range=[2, 2],
+                summary="Second summary",
+                children=[],
+            ),
+        ],
+    )
+    indexed = IndexedDocument(
+        doc_id="doc-1",
+        doc_hash="hash-1",
+        page_count=2,
+        tree=tree,
+        metadata={},
+    )
+    store = IndexStore(tmp_path / "page_index.db")
+    store.record(indexed, pages)
+    client = BudgetBlockedLlmClient()
+    retriever = TreeRetriever(client, retrieval_cost_budget_usd=0.000001)
+
+    result = await retriever.retrieve(
+        store=store,
+        document=indexed,
+        sub_query="Find the relevant section.",
+    )
+
+    assert client.calls == []
+    assert result.selection.selected_node_ids == ["n"]
+    assert "budget_exhausted=True" in result.selection.reasoning
 
 
 @pytest.mark.asyncio

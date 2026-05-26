@@ -15,7 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.run_page_index_poc import PageIndexTraceWriter, safe_output_prefix
+from scripts.run_page_index_poc import (
+    DEFAULT_PAGE_INDEX_MODEL,
+    DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR,
+    PageIndexTraceWriter,
+    retrieval_budget_from_indexing_cost,
+    safe_output_prefix,
+)
 from valuator.documents import IndexStore, RetrievalResult, TreeRetriever
 from valuator.evidence import EvidenceRow, SqliteEvidenceStore, stable_args_hash
 from valuator.models.factory import create_llm_client
@@ -23,6 +29,7 @@ from valuator.utils.time_utils import kst_isoformat
 
 DEFAULT_DB_PATH = ROOT / "data" / "page_index.db"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "page_index"
+DEFAULT_RETRIEVER_MODEL = DEFAULT_PAGE_INDEX_MODEL
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,8 +47,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        default="",
-        help="Override model name. Defaults to AGENT_MODEL / project config.",
+        default=DEFAULT_RETRIEVER_MODEL,
+        help=f"Override retriever model name. Default: {DEFAULT_RETRIEVER_MODEL}.",
+    )
+    parser.add_argument(
+        "--retrieval-budget-indexing-cost-divisor",
+        type=float,
+        default=DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR,
+        help=(
+            "Set retrieval search budget to indexing_cost_usd / divisor. "
+            f"Default: {DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR:g}."
+        ),
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--output-prefix", default="")
@@ -236,8 +252,16 @@ async def run_query(
         llm_calls_path=llm_calls_path,
         session_started_at=kst_isoformat(),
     )
-    client = create_llm_client(model=args.model or None, usage_writer=trace_writer)
-    retriever = TreeRetriever(client)
+    indexing_cost_usd = document.metadata.get("indexing_cost_usd")
+    retrieval_cost_budget_usd = retrieval_budget_from_indexing_cost(
+        indexing_cost_usd,
+        divisor=args.retrieval_budget_indexing_cost_divisor,
+    )
+    client = create_llm_client(model=args.model, usage_writer=trace_writer)
+    retriever = TreeRetriever(
+        client,
+        retrieval_cost_budget_usd=retrieval_cost_budget_usd,
+    )
     result = await retriever.retrieve(
         store=store,
         document=document,
@@ -246,6 +270,11 @@ async def run_query(
     trace_writer.append_total()
 
     payload = result_payload(result, max_page_chars=args.max_page_chars)
+    payload["indexing_cost_usd"] = indexing_cost_usd
+    payload["retrieval_cost_budget_usd"] = retrieval_cost_budget_usd
+    payload["retrieval_budget_indexing_cost_divisor"] = (
+        args.retrieval_budget_indexing_cost_divisor
+    )
     evidence_rows = record_evidence(
         args=args,
         payload=payload,

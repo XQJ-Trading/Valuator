@@ -39,6 +39,9 @@ from valuator.utils.time_utils import kst_isoformat  # noqa: E402
 DEFAULT_DB_PATH = ROOT / "data" / "page_index.db"
 DEFAULT_OUTPUT_DIR = ROOT / "data" / "page_index"
 DEFAULT_TOKEN_TEXT_PAGE_TOKENS = 2_000
+DEFAULT_PAGE_INDEX_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR = 10.0
+DEFAULT_RETRIEVAL_COST_BUDGET_USD = 0.10
 
 
 class MarkerConfig(BaseModel):
@@ -189,6 +192,37 @@ class PageIndexTraceWriter:
                 file_obj.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def load_llm_usage_total_cost(usage_path: Path) -> float | None:
+    if not usage_path.exists():
+        return None
+    total_cost: float | None = None
+    for line in usage_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("method") == "TOTAL":
+            total_cost = float(row.get("cost_usd", 0.0) or 0.0)
+    return total_cost
+
+
+def retrieval_budget_from_indexing_cost(
+    indexing_cost_usd: float | int | None,
+    *,
+    divisor: float = DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR,
+    fallback_usd: float = DEFAULT_RETRIEVAL_COST_BUDGET_USD,
+) -> float:
+    if divisor <= 0:
+        raise ValueError("divisor must be > 0")
+    if fallback_usd <= 0:
+        raise ValueError("fallback_usd must be > 0")
+    if indexing_cost_usd is None:
+        return fallback_usd
+    cost = float(indexing_cost_usd)
+    if cost <= 0:
+        return fallback_usd
+    return cost / divisor
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the Phase 1 PageIndex PoC against local PDF or text documents."
@@ -215,8 +249,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        default="",
-        help="Override model name. Defaults to AGENT_MODEL / project config.",
+        default=DEFAULT_PAGE_INDEX_MODEL,
+        help=f"Override indexing model name. Default: {DEFAULT_PAGE_INDEX_MODEL}.",
     )
     parser.add_argument(
         "--db",
@@ -419,7 +453,7 @@ async def index_input_document(
         llm_calls_path=llm_calls_path,
         session_started_at=kst_isoformat(),
     )
-    client = create_llm_client(model=args.model or None, usage_writer=trace_writer)
+    client = create_llm_client(model=args.model, usage_writer=trace_writer)
     toc_detector = TOCDetector(client)
     detected_toc = await toc_detector.detect(pages)
     index_pages = remove_detected_toc_from_pages(pages, detected_toc)
@@ -445,6 +479,7 @@ async def index_input_document(
         outlines=outlines,
     )
     trace_writer.append_total()
+    indexing_cost_usd = load_llm_usage_total_cost(usage_path)
 
     indexed = IndexedDocument(
         doc_id=raw_document.doc_id,
@@ -464,6 +499,7 @@ async def index_input_document(
             "toc_entry_count": toc_transform_metrics.entry_count,
             "toc_has_page_numbers": toc_transform_metrics.has_page_numbers,
             "tree_build_route": indexer.metrics.tree_build_route,
+            "indexing_cost_usd": indexing_cost_usd,
             "metrics": asdict(indexer.metrics),
         },
     )

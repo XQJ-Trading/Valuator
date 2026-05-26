@@ -11,7 +11,7 @@ from .ingest import pages_have_mappable_page_ordinals
 from .types import DetectedTOC, Outline, Page
 
 DEFAULT_TOC_CHECK_PAGE_NUM = 20
-DEFAULT_TOC_SCAN_MAX_TOKENS = 20_000
+DEFAULT_TOC_SCAN_MAX_TOKENS = 10_000
 DEFAULT_TOC_MIN_CONFIDENCE = 0.70
 
 TOC_DETECT_SYSTEM_PROMPT = (
@@ -28,7 +28,7 @@ TOC_CHUNK_PROMPT = (
     "contents. Also return toc_text as the exact table-of-contents listing text "
     "only, preserving the original line breaks: exclude cover text, filing "
     "headers, forward-looking statements, and body section content. Return "
-    "has_toc=false, an empty list, and toc_text=\"\" if there is no TOC."
+    'has_toc=false, an empty list, and toc_text="" if there is no TOC.'
 )
 
 TOC_TRANSFORM_SYSTEM_PROMPT = (
@@ -43,10 +43,10 @@ TOC_TRANSFORM_PROMPT = (
     "Rules:\n"
     "- Return only navigation entries, not cover/header/body prose.\n"
     "- Merge split labels and titles into one entry title, for example "
-    "\"Item 1.\" plus \"Business\" becomes \"Item 1. Business\".\n"
+    '"Item 1." plus "Business" becomes "Item 1. Business".\n'
     "- Put an integer in destination_page only when the TOC explicitly gives a "
     "destination page number for that entry. Use null for headings such as "
-    "\"Part I\" when no destination page is shown.\n"
+    '"Part I" when no destination page is shown.\n'
     "- Preserve hierarchy such as Part -> Item -> subsection when visible.\n"
     "- If the text is not a usable TOC, return entries=[] and confidence=0.\n"
 )
@@ -296,9 +296,7 @@ def remove_detected_toc_from_pages(
 
     toc_ordinals = set(detected_toc.toc_pages)
     return [
-        _page_without_toc(page, toc_lines)
-        if page.ordinal in toc_ordinals
-        else page
+        _page_without_toc(page, toc_lines) if page.ordinal in toc_ordinals else page
         for page in pages
     ]
 

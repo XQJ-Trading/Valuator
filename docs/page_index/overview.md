@@ -239,7 +239,7 @@ MD를 헤딩 기반으로 안 나누는 이유: PageIndex 트리 빌드 단계�
 | 알고리즘 차용 범위 | 현재 runtime은 TOC 감지 + TOC 변환 + `process_toc_with_page_numbers` + toc-guided/no-TOC fallback + 재귀 분할 + 검색 |
 | anchor/section 레이어 | TOC direct route에서 `TreeNode.content_span` 저장. `TreeRetriever`는 span 우선 content load, 없으면 `page_range` fallback |
 | 경로 분기 위치 | `run_page_index_poc.py`가 `TOCDetector`와 `transform_toc`를 호출하고 `PageIndexer.build_tree(..., detected_toc=..., outlines=...)`에 전달 |
-| 인덱싱·검색 LLM | Gemini 3.1 Flash (전 단계 통일, `response_json_schema` 적용) |
+| 인덱싱·검색 LLM | Gemini 3.1 Flash Lite (`gemini-3.1-flash-lite`, 전 단계 통일, `response_json_schema` 적용) |
 | 트리 저장 위치 | `/valuator/documents/store.py` 신설 (`IndexStore` 컴포넌트) |
 
 ---

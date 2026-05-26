@@ -37,7 +37,7 @@ Phase 1 인덱싱이 끝난 문서는 바로 retrieve smoke test를 할 수 있�
   --db data/page_index.db \
   --doc-id aapl-2024 \
   --query "Where is revenue recognition discussed?" \
-  --model gemini-3.1-flash-lite-preview
+  --model gemini-3.1-flash-lite
 ```
 
 같은 indexed document에 대한 query들은 서로 독립이므로 병렬 batch로 돌릴 수 있다.
@@ -50,7 +50,7 @@ Phase 1 인덱싱이 끝난 문서는 바로 retrieve smoke test를 할 수 있�
   --query "Where are cash and marketable securities described?" \
   --query "Where are supply chain risks discussed?" \
   --query-concurrency 3 \
-  --model gemini-3.1-flash-lite-preview
+  --model gemini-3.1-flash-lite
 ```
 
 출력 파일:
@@ -73,6 +73,7 @@ class TreeRetriever:
         max_evidence_pages_per_node: int = 5,
         max_evidence_tokens_per_node: int = 20_000,
         max_refinement_depth: int = 6,
+        retrieval_cost_budget_usd: float = 0.10,
     ) -> None
 
     async def select(
@@ -106,7 +107,7 @@ class TreeRetriever:
 
 - 트리 전체(요약 + 자식 ids)를 프롬프트에 포함
 - LLM은 관련 `node_id` 리스트와 선택 근거를 JSON으로 반환 (`response_json_schema`)
-- `select()`는 순수 routing 선택이다. `retrieve()`는 이 결과를 받아 evidence 제한을 넘는 부모 노드를 재귀적으로 더 작은 descendant 노드로 refine한다.
+- `select()`는 기존 호환용 global routing 선택이다. `retrieve()`는 기본적으로 전체 트리를 한 번에 넣지 않고 budgeted top-down tree search로 evidence 노드를 찾는다.
 
 PageIndex의 `get_document_structure` / `get_page_content` tool 패턴은 Valuator에서는 다음 두 책임으로 나눈다.
 
@@ -124,12 +125,46 @@ Retrieval은 routing node와 evidence node를 분리한다.
 
 `retrieve()`는 다음 규칙을 적용한다.
 
-1. 최초 `select()`는 전체 text-stripped tree에서 관련 routing node를 고른다.
-2. 선택된 노드가 evidence 제한 안에 있거나 leaf면 그대로 evidence로 채택한다.
-3. 선택된 노드가 크고 children이 있으면 그 subtree만 다시 보여주고 더 작은 관련 노드를 고르게 한다.
-4. LLM이 같은 큰 부모를 다시 고르거나 빈 결과를 내면, 직접 children을 후보로 삼아 계속 내려간다. 이 fallback은 큰 부모 원문을 그대로 넣는 실패 모드를 막기 위한 안전장치다.
-5. 중복 descendant와 ancestor가 함께 선택되면 더 구체적인 descendant를 우선한다.
-6. 선택된 sibling들이 parent 전체를 사실상 덮고 parent도 evidence 제한 안에 있으면 parent로 병합한다.
+1. 문서 root에서는 전체 descendant tree를 보여주지 않고, 현재 노드와 immediate children 요약만 보여준다.
+2. LLM이 inspect할 child node들을 고르면, 각 child에 대해 같은 절차를 반복한다.
+3. 선택된 노드가 evidence 제한 안에 있거나 leaf면 그대로 evidence로 채택한다.
+4. 선택된 노드가 크고 children이 있으면 그 subtree의 immediate children만 다시 보여주고 더 작은 descendant 후보로 내려간다.
+5. LLM이 같은 큰 부모를 다시 고르거나 빈 결과를 내면, 직접 children을 후보로 삼아 계속 내려간다. 이 fallback은 큰 부모 원문을 그대로 넣는 실패 모드를 막기 위한 안전장치다.
+6. 중복 descendant와 ancestor가 함께 선택되면 더 구체적인 descendant를 우선한다.
+7. 선택된 sibling들이 parent 전체를 사실상 덮고 parent도 evidence 제한 안에 있으면 parent로 병합한다.
+
+## Retrieval search budget
+
+PDF index/query 경로의 indexing, retrieval, answer 모델은 `gemini-3.1-flash-lite`를 기본으로 사용한다. 단, retrieval search budget은 indexing/answer 생성 비용과 분리한다.
+
+`TreeRetriever`의 fallback search budget은 `retrieval_cost_budget_usd=0.10`이다. 실제 PDF/CLI query 경로에서는 문서별 indexing 비용을 알 수 있으면 `indexing_cost_usd / N`을 search budget으로 사용한다. 현재 기본 `N`은 `10`이다. 문서가 클수록 indexing 비용이 커지고, 그에 따라 retrieval tree search budget도 자연스럽게 커진다.
+
+이 예산은 retrieval 단계의 tree navigation LLM 호출에만 적용한다. 이후 `AnswerGenerator`가 수행하는 답변 생성 비용은 별도 단계로 추적한다.
+
+Budget enforcement는 호출 전 추정 방식이다.
+
+- 모델 가격은 `valuator.utils.llm_usage.get_model_price(client.model)`에서 가져온다.
+- indexing 직후에는 `llm_usage.jsonl`의 `TOTAL.cost_usd`를 `IndexedDocument.metadata["indexing_cost_usd"]`에 저장한다.
+- query 경로는 metadata의 `indexing_cost_usd`만 budget source로 사용한다. 이 값이 없으면 stale usage 파일을 재해석하지 않고 fallback budget을 쓴다.
+- prompt/system/schema 길이를 대략 4 chars/token으로 추정한다.
+- selection 응답은 `max_output_tokens=512`로 제한하고, 해당 output token 비용을 예산에 반영한다.
+- 다음 selection 호출의 추정 비용이 남은 budget을 넘으면 LLM 호출을 건너뛰고 deterministic child fallback으로 내려간다.
+- 가격 정보를 모르는 모델은 budget 추정 비용을 0으로 보고 기존 동작을 유지한다.
+
+이 방식은 실제 provider usage와 1:1로 일치하는 과금 회계가 아니라, retrieval search가 runaway 호출로 번지는 것을 막기 위한 사전 차단 장치다. 실제 비용 기록은 기존 `llm_usage.jsonl`이 담당한다.
+
+## MCTS-style top-down search
+
+레퍼런스 PageIndex 문서는 dashboard/API에서 LLM tree search와 value-function 기반 MCTS를 조합한다고 설명하지만, 공개 repo의 retrieval 코드는 `get_document_structure` / `get_page_content` tool만 제공한다. Valuator의 Phase 2 구현은 공개 구현과 호환되는 쪽으로, 우선 **budgeted top-down tree search**를 서버 내부에 넣는다.
+
+현재 구현은 완전한 rollout/backpropagation MCTS가 아니라 다음 성질을 가진 MCTS-style 탐색이다.
+
+- 한 번에 전체 tree를 보지 않고 현재 node의 children만 평가한다.
+- budget 안에서 여러 branch를 선택해 병렬 evidence 후보처럼 유지한다.
+- branch가 크면 계속 내려가고, 작으면 terminal evidence node로 채택한다.
+- budget이 소진되면 value call을 멈추고 deterministic fallback으로 종료 가능한 evidence set을 만든다.
+
+이 단계의 목적은 prompt token을 줄이고 “큰 parent 선택 = 큰 원문 로드” 연결을 끊는 것이다. 필요하면 Phase 5에서 value score, visit count, UCB selection, rollout/backpropagation을 추가해 full MCTS로 확장한다.
 
 이 정책의 목표는 PageIndex의 "structure first, tight page fetch" 패턴을 서버 내부 API에서도 강제하는 것이다. 프롬프트가 부모 노드를 골라도 코드가 바로 전체 page range를 로드하지 않으므로, `Item 8`처럼 30쪽이 넘는 부모 섹션이 answer prompt를 지배하는 상황을 피한다.
 

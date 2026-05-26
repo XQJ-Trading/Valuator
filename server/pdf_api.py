@@ -26,7 +26,13 @@ from valuator.documents import (
 from valuator.models.factory import create_llm_client
 from valuator.utils.time_utils import kst_isoformat
 
-from scripts.run_page_index_poc import PageIndexTraceWriter
+from scripts.run_page_index_poc import (
+    DEFAULT_PAGE_INDEX_MODEL,
+    DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR,
+    PageIndexTraceWriter,
+    load_llm_usage_total_cost,
+    retrieval_budget_from_indexing_cost,
+)
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
 
@@ -37,6 +43,9 @@ DB_PATH = ROOT / "data" / "page_index.db"
 
 PDF_MIME = "application/pdf"
 MAX_PDF_BYTES = 50 * 1024 * 1024
+PDF_INDEX_MODEL = DEFAULT_PAGE_INDEX_MODEL
+PDF_RETRIEVER_MODEL = DEFAULT_PAGE_INDEX_MODEL
+PDF_ANSWER_MODEL = DEFAULT_PAGE_INDEX_MODEL
 
 
 class PdfItem(BaseModel):
@@ -210,7 +219,10 @@ async def _build_index(doc_id: str) -> IndexedDocument:
         llm_calls_path=llm_calls_path,
         session_started_at=kst_isoformat(),
     )
-    client = create_llm_client(usage_writer=trace_writer)
+    client = create_llm_client(
+        model=PDF_INDEX_MODEL,
+        usage_writer=trace_writer,
+    )
 
     toc_detector = TOCDetector(client)
     detected_toc = await toc_detector.detect(pages)
@@ -230,6 +242,7 @@ async def _build_index(doc_id: str) -> IndexedDocument:
         outlines=outlines,
     )
     trace_writer.append_total()
+    indexing_cost_usd = load_llm_usage_total_cost(usage_path)
 
     indexed = IndexedDocument(
         doc_id=doc_id,
@@ -249,6 +262,7 @@ async def _build_index(doc_id: str) -> IndexedDocument:
             "toc_entry_count": toc_transform_metrics.entry_count,
             "toc_has_page_numbers": toc_transform_metrics.has_page_numbers,
             "tree_build_route": indexer.metrics.tree_build_route,
+            "indexing_cost_usd": indexing_cost_usd,
             "metrics": asdict(indexer.metrics),
         },
     )
@@ -312,13 +326,23 @@ async def query_pdf(doc_id: str, body: QueryRequest) -> QueryResponse:
         llm_calls_path=llm_calls_path,
         session_started_at=kst_isoformat(),
     )
-    retriever_client = create_llm_client(usage_writer=trace_writer)
+    retrieval_cost_budget_usd = retrieval_budget_from_indexing_cost(
+        document.metadata.get("indexing_cost_usd"),
+        divisor=DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR,
+    )
+    retriever_client = create_llm_client(
+        model=PDF_RETRIEVER_MODEL,
+        usage_writer=trace_writer,
+    )
     generator_client = create_llm_client(
-        model="gemini-3.1-flash-lite",
+        model=PDF_ANSWER_MODEL,
         usage_writer=trace_writer,
     )
 
-    retrieval = await TreeRetriever(retriever_client).retrieve(
+    retrieval = await TreeRetriever(
+        retriever_client,
+        retrieval_cost_budget_usd=retrieval_cost_budget_usd,
+    ).retrieve(
         store=store,
         document=document,
         sub_query=query,

@@ -37,7 +37,7 @@
 ## 차이점 (원안 대비)
 
 - LLM 호출은 `gemini_direct.generate_json(..., response_json_schema=...)` — litellm 제거, 출력 JSON 유효성을 schema로 강제해 형식 검증 부담을 줄임.
-- 모델 ID는 exact string 우선. `gemini-3.1-flash`는 `gemini-3-flash-preview`로 정규화하지 않고 가격도 별도 계산.
+- 모델 ID는 exact string 우선. 기본 인덱싱 모델은 `gemini-3.1-flash-lite`이며, `gemini-3.1-flash`와 별도 모델로 가격을 계산한다.
 - LLM 프롬프트의 page header는 `[ordinal N]`만 넣고 `source_locator`는 저장소에만 둠 (프롬프트 토큰 절약).
 - `generate_toc_continue` 응답은 full tree가 아닌 delta — 누적 트리 사라짐 위험과 출력 토큰 폭증을 회피.
 - 저장은 완성 트리 기준. 그룹/재귀/TOC detection 중간 체크포인트는 두지 않는다.
@@ -90,7 +90,7 @@ fallback도 같은 경계 위에서 표현된다 — TOC direct route가 실패�
 | [`/valuator/documents/store.py`](../../valuator/documents/store.py) (신규) | `doc_hash → tree_json` SQLite 영속화 (`IndexStore`) |
 | [`/scripts/run_page_index_poc.py`](../../scripts/run_page_index_poc.py) | 로컬 문서 입력 CLI. SEC fetch 없음. tree/usage/llm_calls JSONL 출력 |
 | [`/scripts/export_sec_10k_text.py`](../../scripts/export_sec_10k_text.py) | 선택적 SEC 입력 어댑터. 10-K를 로컬 marked text로 저장 |
-| [`/valuator/utils/llm_usage.py`](../../valuator/utils/llm_usage.py) | Gemini 3.1 Flash 가격을 Gemini 3과 별도 모델로 계산 |
+| [`/valuator/utils/llm_usage.py`](../../valuator/utils/llm_usage.py) | Gemini 3.1 Flash / Flash Lite 가격을 Gemini 3과 별도 모델로 계산 |
 
 ## CLI 입력
 
@@ -99,7 +99,7 @@ fallback도 같은 경계 위에서 표현된다 — TOC direct route가 실패�
 ```bash
 ./venv/bin/python scripts/run_page_index_poc.py \
   --input-file data/4Q24_IR_Book_KOR.pdf \
-  --model gemini-3.1-flash
+  --model gemini-3.1-flash-lite
 ```
 
 문서 메타데이터와 parser 세부사항은 manifest로 넘긴다. marked text의 regex, marker boundary, source locator kind는 인덱싱 알고리즘 옵션이 아니므로 flat CLI 옵션으로 노출하지 않는다.
@@ -132,7 +132,7 @@ SEC 10-K는 먼저 입력 파일로 export한다. SEC fetch와 reader footer mar
 ./venv/bin/python scripts/export_sec_10k_text.py --ticker AAPL --year 2024
 ./venv/bin/python scripts/run_page_index_poc.py \
   --manifest data/page_index/aapl-2024/manifest.json \
-  --model gemini-3.1-flash
+  --model gemini-3.1-flash-lite
 ```
 
 여러 문서는 입력 파일 단위로 병렬 인덱싱할 수 있다. 각 문서는 독립 writer/client를 쓰며, 같은 SQLite `IndexStore`에 최종 결과만 기록한다.
@@ -142,7 +142,7 @@ SEC 10-K는 먼저 입력 파일로 export한다. SEC fetch와 reader footer mar
   --input-file data/4Q24_IR_Book_KOR.pdf \
   --input-file data/20260219_company_200600000.pdf \
   --document-concurrency 2 \
-  --model gemini-3.1-flash
+  --model gemini-3.1-flash-lite
 ```
 
 `data/page_index/*.txt`처럼 `[page N]` header가 들어간 PDF text export는 direct TXT 입력으로 넣지 않는다. token window ordinal과 source `[page N]`을 LLM이 혼동할 수 있다. 이런 파일은 `marked_text` manifest에서 `\\[page (?P<page>\\d+)\\]` header marker를 명시한다.

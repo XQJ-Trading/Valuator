@@ -94,7 +94,7 @@ class AnswerGenerator:
 
 ### LLM 선택
 
-[overview.md](overview.md)의 "결정 사항" 표에 따라 indexing/retrieval과 동일하게 **Gemini 3.1 Flash**를 사용한다. `create_llm_client()`를 그대로 호출한다.
+[overview.md](overview.md)의 "결정 사항" 표에 따라 indexing/retrieval과 동일하게 **Gemini 3.1 Flash Lite**를 사용한다.
 
 ### 토큰 예산
 

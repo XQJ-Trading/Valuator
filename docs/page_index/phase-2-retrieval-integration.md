@@ -139,6 +139,8 @@ PDF index/query 경로의 indexing, retrieval, answer 모델은 `gemini-3.1-flas
 
 `TreeRetriever`의 fallback search budget은 `retrieval_cost_budget_usd=0.10`이다. 실제 PDF/CLI query 경로에서는 문서별 indexing 비용을 알 수 있으면 `indexing_cost_usd / N`을 search budget으로 사용한다. 현재 기본 `N`은 `10`이다. 문서가 클수록 indexing 비용이 커지고, 그에 따라 retrieval tree search budget도 자연스럽게 커진다.
 
+이 값은 문서 크기 기반 baseline budget이다. 같은 문서라도 query 난이도에 따라 필요한 탐색량은 달라진다. 예를 들어 "revenue recognition policy"처럼 특정 회계 note를 찾는 질의는 좁은 path 몇 개로 끝날 수 있지만, "AI capex가 향후 margin에 미치는 영향"처럼 여러 섹션의 capex, depreciation, segment commentary, risk factor를 종합해야 하는 질의는 더 많은 branch를 봐야 한다.
+
 이 예산은 retrieval 단계의 tree navigation LLM 호출에만 적용한다. 이후 `AnswerGenerator`가 수행하는 답변 생성 비용은 별도 단계로 추적한다.
 
 Budget enforcement는 호출 전 추정 방식이다.
@@ -153,16 +155,234 @@ Budget enforcement는 호출 전 추정 방식이다.
 
 이 방식은 실제 provider usage와 1:1로 일치하는 과금 회계가 아니라, retrieval search가 runaway 호출로 번지는 것을 막기 위한 사전 차단 장치다. 실제 비용 기록은 기존 `llm_usage.jsonl`이 담당한다.
 
+### Task difficulty multiplier
+
+Full MCTS로 확장할 때는 document budget에 query 난이도 multiplier를 곱해 최종 search budget을 정해야 한다.
+
+```text
+base_budget = indexing_cost_usd / document_divisor
+difficulty_multiplier = f(query, planner_context, early_tree_uncertainty)
+retrieval_budget = clamp(
+    base_budget * difficulty_multiplier,
+    min_budget,
+    max_budget,
+)
+```
+
+난이도는 query 실행 전에 한 번만 정할 수도 있고, 탐색 중 관측되는 uncertainty로 갱신할 수도 있다.
+
+사전 난이도 신호:
+
+- 질의가 단일 fact lookup인지, 여러 섹션을 종합해야 하는지
+- 질의에 비교, 추세, 원인, 영향, 리스크처럼 synthesis 단어가 있는지
+- planner가 생성한 sub-query 수
+- 필요한 evidence type 수 (financial statement, footnote, MD&A, risk factor 등)
+- 사용자가 요구한 citation granularity
+
+탐색 중 난이도 신호:
+
+- 상위 node selection confidence가 낮거나 여러 sibling에 분산되는지
+- 서로 다른 branch가 비슷한 value score를 받는지
+- terminal evidence 후보가 없고 계속 큰 parent만 선택되는지
+- 같은 질의에 필요한 evidence가 여러 top-level section에 걸치는지
+- early answerability check가 "insufficient evidence"를 반환하는지
+
+예시 정책:
+
+```text
+simple lookup      multiplier 0.5 ~ 1.0
+normal retrieval   multiplier 1.0
+multi-hop lookup   multiplier 1.5 ~ 2.0
+synthesis query    multiplier 2.0 ~ 4.0
+```
+
+이 multiplier는 무제한 증액이 아니라 `max_budget`으로 상한을 둔다. 어려운 query일수록 더 많은 탐색 예산을 받을 수 있지만, budget을 넘으면 best-so-far evidence와 "충분하지 않음" 판단을 반환해야 한다.
+
 ## MCTS-style top-down search
 
 레퍼런스 PageIndex 문서는 dashboard/API에서 LLM tree search와 value-function 기반 MCTS를 조합한다고 설명하지만, 공개 repo의 retrieval 코드는 `get_document_structure` / `get_page_content` tool만 제공한다. Valuator의 Phase 2 구현은 공개 구현과 호환되는 쪽으로, 우선 **budgeted top-down tree search**를 서버 내부에 넣는다.
 
-현재 구현은 완전한 rollout/backpropagation MCTS가 아니라 다음 성질을 가진 MCTS-style 탐색이다.
+MCTS가 한정된 예산 안에서 탐색한다는 말은 모든 노드를 균등하게 평가하지 않고, 지금까지의 평가 통계를 바탕으로 가장 유망한 가지에 다음 LLM 호출 예산을 배분한다는 뜻이다. 문서 retrieval에 맞추면 다음 구성이다.
+
+**State**
+
+현재 탐색 위치 또는 지금까지 선택한 경로다.
+ 
+```text
+root
+└── Item 8
+    └── Notes to Consolidated Financial Statements
+        └── Revenue Recognition
+```
+
+하나의 state는 보통 현재 보고 있는 `TreeNode`이거나, root부터 현재 노드까지의 path다.
+
+**Action**
+
+현재 노드에서 다음에 inspect할 child를 고르는 것이다.
+
+```text
+현재 노드: Item 8
+가능한 action:
+- Consolidated Statements
+- Notes
+- Controls
+- Revenue Recognition
+```
+
+retrieval에서는 action이 "이 child subtree를 더 본다"가 된다.
+
+**Budget**
+
+예산은 다음 형태로 제한할 수 있다.
+
+- 최대 LLM 호출 수
+- 최대 예상 비용 USD
+- 최대 prompt/output token
+- 최대 탐색 깊이
+- 최대 wall time
+
+Valuator의 현재 구현은 `retrieval_cost_budget_usd`를 주 예산으로 쓴다. 예를 들어 indexing 비용이 `$0.80`이고 `N=10`이면 retrieval tree search budget은 `$0.08`이다.
+
+Full MCTS에서는 이 정적 budget에 task difficulty multiplier를 반영한다. 쉬운 lookup은 baseline보다 작은 budget으로 조기 종료하고, synthesis query는 더 큰 budget 안에서 여러 branch를 반복 탐색한다.
+
+**Selection**
+
+Full MCTS에서는 매 iteration마다 UCB/UCT 같은 점수로 다음 탐색 대상을 고른다.
+
+```text
+UCT = Q(node) / N(node)
+      + c * sqrt(log(N(parent)) / N(node))
+```
+
+- `Q(node)`: 지금까지 이 노드가 유용하다고 평가된 점수 합
+- `N(node)`: 이 노드를 방문한 횟수
+- `c`: exploration 강도
+
+이 식은 exploitation과 exploration을 같이 다룬다. 이미 좋아 보인 노드에는 더 많은 예산을 쓰되, 아직 덜 본 노드에도 일부 예산을 배정한다. 예를 들어 revenue recognition 질문에서 `Item 8 → Notes`가 유망해 보이면 더 깊게 내려가지만, 아직 평가하지 않은 `Risk Factors`도 질문과 관련 있어 보이면 예산 일부를 받을 수 있다.
+
+**Expansion**
+
+선택된 node가 아직 충분히 평가되지 않았다면 child 목록을 펼친다. 이때 전체 tree를 한 번에 보여주지 않고 현재 node와 immediate children만 보여준다.
+
+```text
+질문: Amazon의 revenue recognition 정책은 어디에 있는가?
+
+현재 노드:
+Item 8. Financial Statements
+
+Children:
+1. Consolidated Statements
+2. Notes
+3. Revenue Recognition
+4. Segment Information
+
+관련 child를 고르시오.
+```
+
+이 lazy child view가 prompt budget 절약의 핵심이다.
+
+**Evaluation / Rollout**
+
+전통적인 MCTS는 leaf까지 random rollout을 해보고 승률을 추정한다. 문서 retrieval에서는 random rollout 대신 LLM value 평가를 쓴다.
+
+```text
+이 node가 질문 답변에 필요한 evidence를 포함할 가능성은?
+0.0 ~ 1.0 점수로 평가
+```
+
+또는 실제 구현에 더 가까운 형태로, LLM이 관련 child id와 confidence/reasoning을 반환하고 이 결과를 value처럼 쓴다.
+
+```json
+{
+  "selected_node_ids": ["n.2.4"],
+  "confidence": 0.82,
+  "reasoning": "Revenue recognition is usually disclosed in accounting policy notes."
+}
+```
+
+**Backpropagation**
+
+선택한 child가 유용하다고 평가되면 그 경로의 부모 노드들에도 점수를 올린다.
+
+```text
+Revenue Recognition node score = 0.9
+
+업데이트:
+root 방문 +1, 가치 +0.9
+Item 8 방문 +1, 가치 +0.9
+Notes 방문 +1, 가치 +0.9
+Revenue Recognition 방문 +1, 가치 +0.9
+```
+
+이 통계가 다음 iteration의 UCT 점수에 반영되어, 제한된 예산 안에서 유망한 path에 더 많은 탐색을 배분한다.
+
+**Budget check**
+
+각 selection/evaluation 호출 전에 예상 비용을 계산한다.
+
+```text
+남은 budget: $0.012
+이번 child selection 예상 비용: $0.004
+호출 가능
+```
+
+호출 가능하면 `spent += estimated_cost`로 누적한다. 다음 호출이 budget을 넘으면 탐색을 중단한다.
+
+```text
+남은 budget: $0.002
+다음 호출 예상 비용: $0.004
+중단
+```
+
+이때 지금까지 찾은 best terminal evidence nodes를 반환한다. 아직 terminal evidence가 부족하면 deterministic child fallback으로 종료 가능한 작은 후보를 만든다.
+
+문서 retrieval에서 한정 예산 MCTS는 대략 다음처럼 움직인다.
+
+```text
+1. root children 평가
+   spent $0.004
+   Item 8 선택
+
+2. Item 8 children 평가
+   spent $0.008
+   Notes 선택
+
+3. Notes children 평가
+   spent $0.012
+   Revenue Recognition, Significant Accounting Policies 선택
+
+4. Revenue Recognition이 3 pages / 8k tokens면 terminal evidence로 채택
+
+5. Significant Accounting Policies가 12 pages / 30k tokens면 더 내려감
+
+6. 예산이 남으면 추가 child 평가
+   예산이 부족하면 deterministic fallback 또는 현재 best evidence 반환
+```
+
+핵심은 큰 parent를 골랐다고 그 `page_range` 전체를 answer prompt에 넣지 않는 것이다. 큰 parent는 routing node로만 쓰고, evidence는 가능한 작은 descendant node에서 가져온다.
+
+### 현재 구현과 full MCTS의 간극
+
+현재 구현은 완전한 rollout/backpropagation MCTS가 아니라 다음 성질을 가진 MCTS-style top-down search다.
 
 - 한 번에 전체 tree를 보지 않고 현재 node의 children만 평가한다.
 - budget 안에서 여러 branch를 선택해 병렬 evidence 후보처럼 유지한다.
 - branch가 크면 계속 내려가고, 작으면 terminal evidence node로 채택한다.
 - budget이 소진되면 value call을 멈추고 deterministic fallback으로 종료 가능한 evidence set을 만든다.
+- budget은 `indexing_cost_usd / N` 기반의 문서 크기 baseline이며, query 난이도 multiplier는 아직 없다.
+- 아직 node별 `visit_count`, `value_sum`, UCB selection, rollout/backpropagation이 없다.
+
+Full MCTS로 확장하려면 다음 요소가 추가되어야 한다.
+
+- node별 `visit_count`
+- node별 `value_sum` / `mean_value`
+- UCB/UCT 기반 다음 node 선택
+- 여러 iteration loop
+- LLM value function 호출
+- path 단위 backpropagation
+- task difficulty multiplier와 탐색 중 uncertainty 기반 budget 재배분
+- budget 안에서의 best evidence set 선택
 
 이 단계의 목적은 prompt token을 줄이고 “큰 parent 선택 = 큰 원문 로드” 연결을 끊는 것이다. 필요하면 Phase 5에서 value score, visit count, UCB selection, rollout/backpropagation을 추가해 full MCTS로 확장한다.
 

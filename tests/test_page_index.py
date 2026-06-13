@@ -4,6 +4,7 @@ import asyncio
 from io import BytesIO
 import re
 from typing import Any
+import zipfile
 
 import pytest
 from pypdf import PdfWriter
@@ -28,6 +29,8 @@ from valuator.documents import (
     transform_toc,
 )
 from valuator.tools.page_index_tool import PageIndexRetrieveTool
+
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
 class FakeLlmClient:
@@ -477,6 +480,52 @@ def test_pdf_loader_preserves_physical_pages() -> None:
     assert pages[0].source_locator == {
         "kind": "pdf_page",
         "source": "memory://pdf-doc",
+        "ordinal_origin": "physical_page",
+        "page": 1,
+    }
+    assert pages_have_mappable_page_ordinals(pages)
+
+
+def test_pptx_loader_extracts_slide_text_in_slide_order() -> None:
+    raw_pptx = BytesIO()
+    with zipfile.ZipFile(raw_pptx, "w") as archive:
+        archive.writestr(
+            "ppt/slides/slide2.xml",
+            """
+            <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+                   xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+              <p:cSld><p:spTree>
+                <p:sp><p:txBody><a:p><a:r><a:t>Second slide</a:t></a:r></a:p></p:txBody></p:sp>
+              </p:spTree></p:cSld>
+            </p:sld>
+            """,
+        )
+        archive.writestr(
+            "ppt/slides/slide1.xml",
+            """
+            <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+                   xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+              <p:cSld><p:spTree>
+                <p:sp><p:txBody><a:p><a:r><a:t>First</a:t></a:r><a:r><a:t>slide</a:t></a:r></a:p></p:txBody></p:sp>
+              </p:spTree></p:cSld>
+            </p:sld>
+            """,
+        )
+
+    pages = DocumentLoader.pptx().pages_from_raw(
+        RawDocument(
+            doc_id="slides",
+            source="memory://slides",
+            raw_bytes_or_text=raw_pptx.getvalue(),
+            mime=PPTX_MIME,
+        )
+    )
+
+    assert [page.ordinal for page in pages] == [1, 2]
+    assert [page.text for page in pages] == ["First slide", "Second slide"]
+    assert pages[0].source_locator == {
+        "kind": "pptx_slide",
+        "source": "memory://slides",
         "ordinal_origin": "physical_page",
         "page": 1,
     }

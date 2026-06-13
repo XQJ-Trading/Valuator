@@ -56,7 +56,7 @@ function IconConfig() {
   );
 }
 
-function IconPdf() {
+function IconDocument() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
@@ -72,7 +72,7 @@ function IconPdf() {
         strokeLinejoin="round"
       />
       <path
-        d="M9 13h1.5a1.5 1.5 0 0 1 0 3H9v2M13 13v5h1.5a1.5 1.5 0 0 0 1.5-1.5v-2A1.5 1.5 0 0 0 14.5 13H13Zm5 0h2.5M18 16h1.5"
+        d="M8 13h8M8 16h8M8 19h5"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"
@@ -105,7 +105,7 @@ function IconDeveloper() {
 const items: { id: ActivityView; label: string; Icon: () => JSX.Element }[] = [
   { id: "session", label: "session-data", Icon: IconSession },
   { id: "guide", label: "guide-data", Icon: IconGuide },
-  { id: "pdf", label: "pdf", Icon: IconPdf },
+  { id: "pdf", label: "documents", Icon: IconDocument },
   { id: "config", label: "config", Icon: IconConfig },
   { id: "developer", label: "developer", Icon: IconDeveloper },
 ];

@@ -7,6 +7,7 @@ import FileTree from "./components/FileTree";
 import ContentView from "./components/ContentView";
 import ConfigView from "./components/ConfigView";
 import DeveloperView from "./components/DeveloperView";
+import PdfView from "./components/PdfView";
 import AgentChatPanel from "./components/AgentChatPanel";
 import TaskTreeOutline from "./components/TaskTreeOutline";
 import MobileToolbar from "./components/MobileToolbar";
@@ -83,11 +84,15 @@ export default function AppMobile() {
           />
 
           <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-            <ContentView
-              dataSource={activityView === "config" || activityView === "developer" ? "session" : activityView}
-              filePath={activePath}
-              mobileLayout
-            />
+            {activityView === "pdf" ? (
+              <PdfView />
+            ) : (
+              <ContentView
+                dataSource={activityView === "config" || activityView === "developer" ? "session" : activityView}
+                filePath={activePath}
+                mobileLayout
+              />
+            )}
           </div>
 
           {activeModal === "sidebar" && (
@@ -99,6 +104,8 @@ export default function AppMobile() {
                     <ConfigView />
                   ) : activityView === "developer" ? (
                     <DeveloperView />
+                  ) : activityView === "pdf" ? (
+                    <PdfView />
                   ) : activityView === "guide" ? (
                     <FileTree
                       key={activityView}

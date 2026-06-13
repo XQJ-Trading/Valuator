@@ -17,6 +17,7 @@ def create_tool_registry(
     from .tools.base import ToolRegistry
     from .tools.code_execute_tool import ExecuteCodeTool
     from .tools.opendart_financial_tool import OpenDartFinancialTool
+    from .tools.page_index_tool import PageIndexRetrieveTool
     from .tools.sec_tool import SECTool
     from .tools.web_search_providers import create_web_search_provider
     from .tools.web_search_tool import WebSearchTool
@@ -32,6 +33,7 @@ def create_tool_registry(
         code_tool,
         OpenDartFinancialTool(),
         YFinanceBalanceSheetTool(),
+        PageIndexRetrieveTool(model=model),
         SECTool(model=model),
     ):
         registry.register(tool)

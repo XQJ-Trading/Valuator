@@ -25,6 +25,8 @@ def test_sqlite_evidence_store_round_trip_and_upsert(tmp_path) -> None:
         created_at="2026-04-16T10:00:00+09:00",
         updated_at="2026-04-16T10:00:00+09:00",
         stable_args={"query": "LS전선 경쟁사"},
+        tree_node_id="n.1",
+        page_range=[10, 12],
     )
 
     store.record(row)
@@ -37,6 +39,8 @@ def test_sqlite_evidence_store_round_trip_and_upsert(tmp_path) -> None:
     assert looked_up is not None
     assert looked_up.status == "failed"
     assert looked_up.value_summary == "Search failed"
+    assert looked_up.tree_node_id == "n.1"
+    assert looked_up.page_range == [10, 12]
 
     updated = store.record(
         EvidenceRow(
@@ -51,6 +55,8 @@ def test_sqlite_evidence_store_round_trip_and_upsert(tmp_path) -> None:
             created_at="",
             updated_at="2026-04-16T10:05:00+09:00",
             stable_args={"query": "LS전선 경쟁사"},
+            tree_node_id="n.2",
+            page_range=[13, 15],
         )
     )
 
@@ -60,6 +66,8 @@ def test_sqlite_evidence_store_round_trip_and_upsert(tmp_path) -> None:
     assert rows[0].status == "satisfied"
     assert rows[0].value_summary == "경쟁사 3곳 확인"
     assert rows[0].task_id == "root.1"
+    assert rows[0].tree_node_id == "n.2"
+    assert rows[0].page_range == [13, 15]
     assert rows[0].created_at == row.created_at
     assert updated.created_at == row.created_at
 

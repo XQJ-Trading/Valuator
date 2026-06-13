@@ -145,6 +145,24 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             "year": {"type": "integer"},
         },
     ),
+    "page_index_retrieve": ToolSpec(
+        name="page_index_retrieve",
+        required=("doc_id", "query"),
+        optional=("doc_hash", "max_page_chars"),
+        capability=(
+            "Retrieve relevant pages from a pre-indexed PageIndex document tree. "
+            "Use when a document has already been indexed and doc_id is known."
+        ),
+        param_descriptions={
+            "doc_id": "Indexed document id, e.g. aapl-2024",
+            "doc_hash": "Optional exact indexed document hash",
+            "query": "Focused retrieval query for the indexed document",
+            "max_page_chars": "Maximum loaded text characters per page",
+        },
+        param_properties={
+            "max_page_chars": {"type": "integer"},
+        },
+    ),
     "yfinance_balance_sheet": ToolSpec(
         name="yfinance_balance_sheet",
         required=("ticker", "start_year", "end_year"),

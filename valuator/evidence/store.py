@@ -46,6 +46,8 @@ class EvidenceRow:
     created_at: str
     updated_at: str
     stable_args: dict[str, Any] = field(default_factory=dict)
+    tree_node_id: str = ""
+    page_range: list[int] = field(default_factory=list)
 
 
 class SqliteEvidenceStore:
@@ -71,11 +73,23 @@ class SqliteEvidenceStore:
                     value_ref TEXT NOT NULL,
                     task_id TEXT NOT NULL,
                     unit_objective TEXT NOT NULL,
+                    tree_node_id TEXT NOT NULL DEFAULT '',
+                    page_range_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (session_id, tool_name, stable_args_hash)
                 )
                 """
+            )
+            self._ensure_optional_column(
+                table="evidence",
+                column="tree_node_id",
+                definition="TEXT NOT NULL DEFAULT ''",
+            )
+            self._ensure_optional_column(
+                table="evidence",
+                column="page_range_json",
+                definition="TEXT NOT NULL DEFAULT '[]'",
             )
             self._conn.execute(
                 """
@@ -84,6 +98,22 @@ class SqliteEvidenceStore:
                 """
             )
             self._conn.commit()
+
+    def _ensure_optional_column(
+        self,
+        *,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        existing = {
+            str(row["name"])
+            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in existing:
+            self._conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )
 
     def record(self, row: EvidenceRow) -> EvidenceRow:
         with self._lock:
@@ -107,6 +137,8 @@ class SqliteEvidenceStore:
                 else (row.created_at or now),
                 updated_at=row.updated_at or now,
                 stable_args=stable_args(row.tool_name, row.stable_args),
+                tree_node_id=row.tree_node_id,
+                page_range=list(row.page_range),
             )
             self._conn.execute(
                 """
@@ -120,9 +152,11 @@ class SqliteEvidenceStore:
                     value_ref,
                     task_id,
                     unit_objective,
+                    tree_node_id,
+                    page_range_json,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id, tool_name, stable_args_hash) DO UPDATE SET
                     stable_args_json=excluded.stable_args_json,
                     status=excluded.status,
@@ -130,6 +164,8 @@ class SqliteEvidenceStore:
                     value_ref=excluded.value_ref,
                     task_id=excluded.task_id,
                     unit_objective=excluded.unit_objective,
+                    tree_node_id=excluded.tree_node_id,
+                    page_range_json=excluded.page_range_json,
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -147,6 +183,8 @@ class SqliteEvidenceStore:
                     stored.value_ref,
                     stored.task_id,
                     stored.unit_objective,
+                    stored.tree_node_id,
+                    json.dumps(stored.page_range, ensure_ascii=False),
                     stored.created_at,
                     stored.updated_at,
                 ),
@@ -174,6 +212,8 @@ class SqliteEvidenceStore:
                     value_ref,
                     task_id,
                     unit_objective,
+                    tree_node_id,
+                    page_range_json,
                     created_at,
                     updated_at
                 FROM evidence
@@ -203,6 +243,8 @@ class SqliteEvidenceStore:
                     value_ref,
                     task_id,
                     unit_objective,
+                    tree_node_id,
+                    page_range_json,
                     created_at,
                     updated_at
                 FROM evidence
@@ -227,4 +269,6 @@ class SqliteEvidenceStore:
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             stable_args=json.loads(str(row["stable_args_json"])),
+            tree_node_id=str(row["tree_node_id"]),
+            page_range=json.loads(str(row["page_range_json"])),
         )

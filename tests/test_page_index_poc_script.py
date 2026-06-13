@@ -21,6 +21,7 @@ from scripts.run_page_index_poc import (
     DEFAULT_PAGE_INDEX_MODEL,
     LoaderConfig,
     PageIndexTraceWriter,
+    PPTX_MIME,
     build_pages,
     default_loader,
     gather_limited,
@@ -134,9 +135,12 @@ def test_page_index_poc_builds_pages_from_generic_markers() -> None:
 def test_page_index_poc_helpers_are_generic() -> None:
     assert default_loader(Path("report.pdf")).metadata()["page_unit"] == "pdf_page"
     assert default_loader(Path("report.pdf")).metadata()["toc_page_numbers_mappable"]
+    assert default_loader(Path("deck.pptx")).metadata()["page_unit"] == "pptx_slide"
+    assert default_loader(Path("deck.pptx")).metadata()["toc_page_numbers_mappable"]
     assert default_loader(Path("report.txt")).metadata()["page_unit"] == "token_window"
     assert not default_loader(Path("report.txt")).metadata()["toc_page_numbers_mappable"]
     assert input_mime(Path("report.pdf")) == "application/pdf"
+    assert input_mime(Path("deck.pptx")) == PPTX_MIME
     assert input_mime(Path("report.md")) == "text/markdown"
     assert input_mime(Path("report.txt")) == "text/plain"
     assert safe_output_prefix("annual report/fy 2024") == "annual-report-fy-2024"

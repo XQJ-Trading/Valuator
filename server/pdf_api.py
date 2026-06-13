@@ -42,7 +42,25 @@ UPLOAD_ROOT = DATA_ROOT / "uploads"
 DB_PATH = ROOT / "data" / "page_index.db"
 
 PDF_MIME = "application/pdf"
-MAX_PDF_BYTES = 50 * 1024 * 1024
+PPTX_MIME = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+)
+DOCUMENT_MIME_BY_SUFFIX = {
+    ".pdf": PDF_MIME,
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".pptx": PPTX_MIME,
+}
+UPLOAD_CONTENT_TYPES_BY_SUFFIX = {
+    ".pdf": {PDF_MIME, "application/octet-stream"},
+    ".txt": {"text/plain", "application/octet-stream"},
+    ".md": {"text/markdown", "text/plain", "application/octet-stream"},
+    ".markdown": {"text/markdown", "text/plain", "application/octet-stream"},
+    ".pptx": {PPTX_MIME, "application/zip", "application/octet-stream"},
+}
+MAX_DOCUMENT_BYTES = 100 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 PDF_INDEX_MODEL = DEFAULT_PAGE_INDEX_MODEL
 PDF_RETRIEVER_MODEL = DEFAULT_PAGE_INDEX_MODEL
 PDF_ANSWER_MODEL = DEFAULT_PAGE_INDEX_MODEL
@@ -116,14 +134,29 @@ def _unique_doc_id(stem: str) -> str:
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     candidate = stem
     suffix = 2
-    while (UPLOAD_ROOT / f"{candidate}.pdf").exists():
+    while _find_upload_path(candidate) is not None:
         candidate = f"{stem}-{suffix}"
         suffix += 1
     return candidate
 
 
-def _upload_path(doc_id: str) -> Path:
-    return UPLOAD_ROOT / f"{doc_id}.pdf"
+def _upload_path(doc_id: str, suffix: str) -> Path:
+    return UPLOAD_ROOT / f"{doc_id}{suffix}"
+
+
+def _find_upload_path(doc_id: str) -> Path | None:
+    for suffix in DOCUMENT_MIME_BY_SUFFIX:
+        path = _upload_path(doc_id, suffix)
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def _upload_path_or_404(doc_id: str) -> Path:
+    upload_path = _find_upload_path(doc_id)
+    if upload_path is None:
+        raise HTTPException(status_code=404, detail=f"document not found: {doc_id}")
+    return upload_path
 
 
 def _doc_dir(doc_id: str) -> Path:
@@ -134,41 +167,86 @@ def _store() -> IndexStore:
     return IndexStore(DB_PATH)
 
 
-def _validate_pdf_upload(file: UploadFile) -> None:
+def _supported_extensions_text() -> str:
+    return ", ".join(sorted(DOCUMENT_MIME_BY_SUFFIX))
+
+
+def _content_type_base(content_type: str | None) -> str:
+    return (content_type or "").split(";", maxsplit=1)[0].strip().lower()
+
+
+def _mime_for_suffix(suffix: str) -> str:
+    mime = DOCUMENT_MIME_BY_SUFFIX.get(suffix.lower())
+    if mime is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unsupported file type: {suffix}. "
+                f"accepted: {_supported_extensions_text()}"
+            ),
+        )
+    return mime
+
+
+def _loader_for_suffix(suffix: str) -> DocumentLoader:
+    suffix = suffix.lower()
+    if suffix == ".pdf":
+        return DocumentLoader.pdf()
+    if suffix == ".pptx":
+        return DocumentLoader.pptx()
+    return DocumentLoader.token_text()
+
+
+def _validate_document_upload(file: UploadFile) -> str:
     filename = (file.filename or "").strip()
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="only .pdf files are accepted")
-    if file.content_type and file.content_type != PDF_MIME:
+    suffix = Path(filename).suffix.lower()
+    _mime_for_suffix(suffix)
+
+    content_type = _content_type_base(file.content_type)
+    accepted_content_types = UPLOAD_CONTENT_TYPES_BY_SUFFIX[suffix]
+    if content_type and content_type not in accepted_content_types:
         raise HTTPException(
             status_code=400,
-            detail=f"unexpected content-type: {file.content_type}",
+            detail=f"unexpected content-type for {suffix}: {file.content_type}",
         )
+    return suffix
 
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile) -> UploadResponse:
-    _validate_pdf_upload(file)
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="empty file")
-    if len(raw) > MAX_PDF_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"file exceeds {MAX_PDF_BYTES} bytes",
-        )
-    stem = _safe_doc_id_stem(Path(file.filename or "document.pdf").stem)
+    suffix = _validate_document_upload(file)
+    stem = _safe_doc_id_stem(Path(file.filename or f"document{suffix}").stem)
     doc_id = _unique_doc_id(stem)
-    target = _upload_path(doc_id)
+    target = _upload_path(doc_id, suffix)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(raw)
+
+    size_bytes = 0
+    try:
+        with target.open("wb") as file_obj:
+            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+                size_bytes += len(chunk)
+                if size_bytes > MAX_DOCUMENT_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"file exceeds {MAX_DOCUMENT_BYTES} bytes",
+                    )
+                file_obj.write(chunk)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+
+    if size_bytes == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="empty file")
+
     store = _store()
     indexed_doc = store.get_by_doc_id(doc_id)
     return UploadResponse(
         doc_id=doc_id,
-        filename=file.filename or f"{doc_id}.pdf",
-        size_bytes=len(raw),
+        filename=file.filename or f"{doc_id}{suffix}",
+        size_bytes=size_bytes,
         indexed=indexed_doc is not None,
     )
 
@@ -178,7 +256,11 @@ async def list_pdfs() -> PdfListResponse:
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     store = _store()
     items: list[PdfItem] = []
-    for path in sorted(UPLOAD_ROOT.glob("*.pdf")):
+    for path in sorted(
+        entry
+        for entry in UPLOAD_ROOT.iterdir()
+        if entry.is_file() and entry.suffix.lower() in DOCUMENT_MIME_BY_SUFFIX
+    ):
         doc_id = path.stem
         indexed_doc = store.get_by_doc_id(doc_id)
         items.append(
@@ -195,19 +277,22 @@ async def list_pdfs() -> PdfListResponse:
 
 
 async def _build_index(doc_id: str) -> IndexedDocument:
-    upload_path = _upload_path(doc_id)
-    if not upload_path.exists():
-        raise HTTPException(status_code=404, detail=f"pdf not found: {doc_id}")
+    upload_path = _upload_path_or_404(doc_id)
+    suffix = upload_path.suffix.lower()
+    mime = _mime_for_suffix(suffix)
 
     raw_bytes = upload_path.read_bytes()
     raw_document = RawDocument(
         doc_id=doc_id,
         source=str(upload_path),
         raw_bytes_or_text=raw_bytes,
-        mime=PDF_MIME,
+        mime=mime,
     )
-    loader = DocumentLoader.pdf()
-    pages = loader.pages_from_raw(raw_document)
+    loader = _loader_for_suffix(suffix)
+    try:
+        pages = loader.pages_from_raw(raw_document)
+    except (NotImplementedError, UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     doc_hash = document_hash(raw_document)
 
     doc_dir = _doc_dir(doc_id)
@@ -293,9 +378,7 @@ async def index_pdf(doc_id: str) -> IndexResponse:
 
 @router.delete("/{doc_id}", response_model=DeleteResponse)
 async def delete_pdf(doc_id: str) -> DeleteResponse:
-    upload_path = _upload_path(doc_id)
-    if not upload_path.exists():
-        raise HTTPException(status_code=404, detail=f"pdf not found: {doc_id}")
+    upload_path = _upload_path_or_404(doc_id)
     upload_path.unlink()
     doc_dir = _doc_dir(doc_id)
     if doc_dir.exists():

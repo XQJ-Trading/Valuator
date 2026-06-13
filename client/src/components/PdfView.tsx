@@ -11,6 +11,11 @@ import {
 import MarkdownView from "./MarkdownView";
 import styles from "./PdfView.module.css";
 
+const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+const ACCEPTED_DOCUMENT_EXTENSIONS = [".pdf", ".txt", ".md", ".markdown", ".pptx"];
+const ACCEPTED_DOCUMENT_INPUT =
+  "application/pdf,text/plain,text/markdown,.pdf,.txt,.md,.markdown,.pptx";
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -47,17 +52,27 @@ export default function PdfView() {
 
   const handleUploadFiles = useCallback(
     async (files: FileList | File[]) => {
-      const pdfFiles = Array.from(files).filter((f) =>
-        f.name.toLowerCase().endsWith(".pdf"),
+      const documentFiles = Array.from(files).filter((file) => {
+        const name = file.name.toLowerCase();
+        return ACCEPTED_DOCUMENT_EXTENSIONS.some((ext) => name.endsWith(ext));
+      });
+      if (documentFiles.length === 0) {
+        setError(
+          `accepted file types: ${ACCEPTED_DOCUMENT_EXTENSIONS.join(", ")}`,
+        );
+        return;
+      }
+      const oversized = documentFiles.find(
+        (file) => file.size > MAX_DOCUMENT_BYTES,
       );
-      if (pdfFiles.length === 0) {
-        setError("only .pdf files are accepted");
+      if (oversized) {
+        setError(`${oversized.name} exceeds ${formatBytes(MAX_DOCUMENT_BYTES)}`);
         return;
       }
       setError(null);
       setUploading(true);
       try {
-        for (const file of pdfFiles) {
+        for (const file of documentFiles) {
           await uploadPdf(file);
         }
         await refresh();
@@ -153,7 +168,7 @@ export default function PdfView() {
 
   return (
     <div className={styles.container}>
-      <h2 className={styles.title}>PDF Knowledge Base</h2>
+      <h2 className={styles.title}>Document Knowledge Base</h2>
 
       <div
         className={`${styles.dropzone}${dragging ? ` ${styles.dropzoneActive}` : ""}`}
@@ -166,20 +181,20 @@ export default function PdfView() {
         onClick={() => fileInputRef.current?.click()}
         role="button"
         tabIndex={0}
-        aria-label="Upload PDF"
+        aria-label="Upload document"
       >
         {uploading
           ? "uploading.."
           : dragging
-            ? "Drop the PDF here"
-            : "Drag & drop a .pdf file here, or click to choose"}
+            ? "Drop the document here"
+            : "Drag & drop a document here, or click to choose"}
         <div className={styles.dropzoneSubtle}>
-          PDF only. Max 50 MB per file.
+          PDF, TXT, MD, Markdown, or PPTX. Max 100 MB per file.
         </div>
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf,.pdf"
+          accept={ACCEPTED_DOCUMENT_INPUT}
           multiple
           className={styles.hiddenInput}
           onChange={(e) => {
@@ -192,9 +207,9 @@ export default function PdfView() {
       </div>
 
       <div className={styles.list}>
-        <div className={styles.listHeader}>Uploaded PDFs</div>
+        <div className={styles.listHeader}>Uploaded documents</div>
         {items.length === 0 ? (
-          <div className={styles.listEmpty}>No PDFs uploaded yet.</div>
+          <div className={styles.listEmpty}>No documents uploaded yet.</div>
         ) : (
           items.map((item) => {
             const isIndexingThis = indexingDocIds.has(item.doc_id);
@@ -276,7 +291,7 @@ export default function PdfView() {
                 ? selectedItem.indexed
                   ? "Ask a question about this document.."
                   : "Index this document first."
-                : "Select an indexed PDF above to ask a question."
+                : "Select an indexed document above to ask a question."
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}

@@ -42,6 +42,7 @@ DEFAULT_TOKEN_TEXT_PAGE_TOKENS = 2_000
 DEFAULT_PAGE_INDEX_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_RETRIEVAL_INDEXING_COST_DIVISOR = 10.0
 DEFAULT_RETRIEVAL_COST_BUDGET_USD = 0.10
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
 class MarkerConfig(BaseModel):
@@ -64,7 +65,7 @@ class MarkerConfig(BaseModel):
 class LoaderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["token_text", "marked_text", "pdf"] = "token_text"
+    kind: Literal["token_text", "marked_text", "pdf", "pptx"] = "token_text"
     text_page_tokens: int = Field(default=DEFAULT_TOKEN_TEXT_PAGE_TOKENS, gt=0)
     marker: MarkerConfig | None = None
 
@@ -83,6 +84,8 @@ class LoaderConfig(BaseModel):
             return DocumentLoader.marked_text(marker=self.marker.to_pattern())
         if self.kind == "pdf":
             return DocumentLoader.pdf()
+        if self.kind == "pptx":
+            return DocumentLoader.pptx()
         return DocumentLoader.token_text(text_page_tokens=self.text_page_tokens)
 
 
@@ -225,7 +228,10 @@ def retrieval_budget_from_indexing_cost(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the Phase 1 PageIndex PoC against local PDF or text documents."
+        description=(
+            "Run the Phase 1 PageIndex PoC against local PDF, PPTX, or text "
+            "documents."
+        )
     )
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument(
@@ -233,8 +239,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         action="append",
         help=(
-            "Local PDF, text, or markdown file to index with the default loader "
-            "for its extension. Repeat for a document batch."
+            "Local PDF, PPTX, text, or markdown file to index with the default "
+            "loader for its extension. Repeat for a document batch."
         ),
     )
     inputs.add_argument(
@@ -322,6 +328,8 @@ def build_pages(*, document: RawDocument, loader: DocumentLoader) -> list[Page]:
 def input_mime(path: Path) -> str:
     if path.suffix.lower() == ".pdf":
         return "application/pdf"
+    if path.suffix.lower() == ".pptx":
+        return PPTX_MIME
     if path.suffix.lower() in {".md", ".markdown"}:
         return "text/markdown"
     return "text/plain"
@@ -330,6 +338,8 @@ def input_mime(path: Path) -> str:
 def default_loader(path: Path) -> DocumentLoader:
     if path.suffix.lower() == ".pdf":
         return DocumentLoader.pdf()
+    if path.suffix.lower() == ".pptx":
+        return DocumentLoader.pptx()
     return DocumentLoader.token_text(
         text_page_tokens=DEFAULT_TOKEN_TEXT_PAGE_TOKENS
     )
@@ -421,7 +431,7 @@ async def index_input_document(
     input_path = input_document.input_path
     raw_input = (
         input_path.read_bytes()
-        if input_document.mime == "application/pdf"
+        if input_document.mime in {"application/pdf", PPTX_MIME}
         else input_path.read_text(encoding="utf-8")
     )
     raw_document = RawDocument(

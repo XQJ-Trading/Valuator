@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-from io import BytesIO
 import re
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass
+from io import BytesIO
 from re import Pattern
 from typing import Any, Literal
 
@@ -12,6 +14,9 @@ from .types import Page, RawDocument
 DEFAULT_TEXT_PAGE_TOKENS = 4_000
 TEXT_MIME_TYPES = {"text/plain", "text/markdown", "text/x-markdown"}
 PDF_MIME_TYPE = "application/pdf"
+PPTX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+)
 MAPPABLE_PAGE_ORDINAL_ORIGINS = frozenset({"page_marker", "physical_page"})
 
 
@@ -25,7 +30,7 @@ class PageMarkerPattern:
 
 @dataclass(frozen=True)
 class DocumentLoader:
-    name: Literal["token_text", "marked_text", "pdf"]
+    name: Literal["token_text", "marked_text", "pdf", "pptx"]
     page_unit: str
     unit_origin: Literal["token_window", "page_marker", "physical_page"]
     text_page_tokens: int = DEFAULT_TEXT_PAGE_TOKENS
@@ -69,12 +74,22 @@ class DocumentLoader:
             unit_origin="physical_page",
         )
 
+    @classmethod
+    def pptx(cls) -> DocumentLoader:
+        return cls(
+            name="pptx",
+            page_unit="pptx_slide",
+            unit_origin="physical_page",
+        )
+
     def pages_from_raw(self, document: RawDocument) -> list[Page]:
         ingest = DocumentIngest(text_page_tokens=self.text_page_tokens)
         if self.name == "token_text":
             return ingest.pages_from_raw(document)
         if self.name == "pdf":
             return ingest.pages_from_pdf(document)
+        if self.name == "pptx":
+            return ingest.pages_from_pptx(document)
         if document.mime not in TEXT_MIME_TYPES:
             raise NotImplementedError("marked text loader supports text inputs only")
         if self.marker is None:
@@ -142,6 +157,8 @@ class DocumentIngest:
         self.text_page_tokens = text_page_tokens
 
     def pages_from_raw(self, document: RawDocument) -> list[Page]:
+        if document.mime == PPTX_MIME_TYPE:
+            return self.pages_from_pptx(document)
         if document.mime not in TEXT_MIME_TYPES:
             raise NotImplementedError("Phase 1 supports text and markdown inputs only")
         text = self._document_text(document)
@@ -210,6 +227,46 @@ class DocumentIngest:
         ]
         if not pages:
             raise ValueError("pdf document has no pages")
+        return pages
+
+    def pages_from_pptx(self, document: RawDocument) -> list[Page]:
+        if document.mime != PPTX_MIME_TYPE:
+            raise ValueError("pptx loader requires pptx mime")
+        raw = document.raw_bytes_or_text
+        if isinstance(raw, str):
+            raise ValueError("pptx loader requires bytes")
+
+        try:
+            with zipfile.ZipFile(BytesIO(raw)) as archive:
+                slide_names = sorted(
+                    (
+                        name
+                        for name in archive.namelist()
+                        if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
+                    ),
+                    key=self._pptx_slide_number,
+                )
+                if not slide_names:
+                    raise ValueError("pptx document has no slides")
+                pages = [
+                    Page(
+                        doc_id=document.doc_id,
+                        ordinal=index,
+                        text=text,
+                        token_count=self._token_count(text),
+                        source_locator={
+                            "kind": "pptx_slide",
+                            "source": document.source,
+                            "ordinal_origin": "physical_page",
+                            "page": index,
+                        },
+                    )
+                    for index, slide_name in enumerate(slide_names, start=1)
+                    for text in [self._pptx_slide_text(archive.read(slide_name))]
+                ]
+        except (ET.ParseError, zipfile.BadZipFile) as exc:
+            raise ValueError("pptx loader requires a valid .pptx file") from exc
+
         return pages
 
     def pages_from_marked_text(
@@ -357,7 +414,35 @@ class DocumentIngest:
         raw = document.raw_bytes_or_text
         if isinstance(raw, str):
             return raw
-        return raw.decode("utf-8")
+        return raw.decode("utf-8-sig")
+
+    @staticmethod
+    def _pptx_slide_number(path: str) -> int:
+        match = re.fullmatch(r"ppt/slides/slide(\d+)\.xml", path)
+        if match is None:
+            return 0
+        return int(match.group(1))
+
+    @classmethod
+    def _pptx_slide_text(cls, xml_bytes: bytes) -> str:
+        root = ET.fromstring(xml_bytes)
+        paragraphs: list[str] = []
+        for paragraph in root.iter():
+            if cls._xml_local_name(paragraph.tag) != "p":
+                continue
+            parts = [
+                (node.text or "").strip()
+                for node in paragraph.iter()
+                if cls._xml_local_name(node.tag) == "t"
+            ]
+            line = " ".join(part for part in parts if part)
+            if line:
+                paragraphs.append(line)
+        return "\n".join(paragraphs).strip()
+
+    @staticmethod
+    def _xml_local_name(tag: str) -> str:
+        return tag.rsplit("}", maxsplit=1)[-1]
 
     @staticmethod
     def _token_count(text: str) -> int:
